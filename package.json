@@ -1,0 +1,117 @@
+{
+  "name": "skill-builder",
+  "displayName": "Claude Skill Builder",
+  "description": "Manage Anthropic and Claude Agent Skills from a VS Code workspace.",
+  "version": "0.0.1",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:skillBuilder.skillsView",
+    "workspaceContains:skills/*/SKILL.md"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "skillBuilder.refresh",
+        "title": "Skill Builder: Refresh Skills",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "skillBuilder.openSkill",
+        "title": "Skill Builder: Open Skill",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "skillBuilder.createSkill",
+        "title": "Skill Builder: Create Skill",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "skillBuilder.packageSkill",
+        "title": "Skill Builder: Package Skill",
+        "icon": "$(package)"
+      },
+      {
+        "command": "skillBuilder.validateSkill",
+        "title": "Skill Builder: Validate Skill",
+        "icon": "$(check)"
+      }
+    ],
+    "configuration": {
+      "title": "Skill Builder",
+      "properties": {
+        "skillBuilder.skillsDirectory": {
+          "type": "string",
+          "default": "skills",
+          "description": "Workspace-relative directory containing Anthropic skill folders."
+        },
+        "skillBuilder.distDirectory": {
+          "type": "string",
+          "default": "dist",
+          "description": "Workspace-relative directory where packaged .skill archives are written."
+        }
+      }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "skillBuilder.refresh",
+          "when": "view == skillBuilder.skillsView",
+          "group": "navigation"
+        },
+        {
+          "command": "skillBuilder.createSkill",
+          "when": "view == skillBuilder.skillsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "skillBuilder.openSkill",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "inline"
+        },
+        {
+          "command": "skillBuilder.packageSkill",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@1"
+        },
+        {
+          "command": "skillBuilder.validateSkill",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@2"
+        }
+      ]
+    },
+    "views": {
+      "explorer": [
+        {
+          "id": "skillBuilder.skillsView",
+          "name": "Claude Skills",
+          "contextualTitle": "Claude Skills"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx --yes @vscode/vsce package"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.12"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/node": "^20.19.0",
+    "@types/vscode": "1.90.0",
+    "typescript": "^5.8.3"
+  }
+}

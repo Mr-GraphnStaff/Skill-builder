@@ -1,0 +1,9 @@
+.git/**
+.vscode/**
+.vscode-test/**
+src/**
+skills/**
+dist/**
+AGENTS.md
+tsconfig.json
+*.vsix
