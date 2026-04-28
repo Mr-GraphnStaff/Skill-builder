@@ -1,0 +1,30 @@
+{
+  "skill": "test",
+  "cases": [
+    {
+      "id": "basic-trigger",
+      "type": "task",
+      "prompt": "Use the test skill for a representative user request.",
+      "expected": [
+        "The response follows the skill workflow.",
+        "The response states any important assumptions."
+      ]
+    },
+    {
+      "id": "edge-case",
+      "type": "task",
+      "prompt": "Handle an incomplete request that might need the test skill.",
+      "expected": [
+        "The response asks only necessary clarifying questions or chooses a conservative default."
+      ]
+    }
+  ],
+  "triggerEvals": {
+    "shouldTrigger": [
+      "Help me with test."
+    ],
+    "shouldNotTrigger": [
+      "Answer a general question unrelated to this skill."
+    ]
+  }
+}

@@ -82,7 +82,7 @@ class SkillTreeProvider implements vscode.TreeDataProvider<SkillItem> {
   }
 
   async getChildren(): Promise<SkillItem[]> {
-    const root = getWorkspaceRoot();
+    const root = await getProjectRoot();
     if (!root) {
       return [];
     }
@@ -130,7 +130,7 @@ async function pickSkill(provider: SkillTreeProvider): Promise<SkillSummary | un
 }
 
 async function createSkill(): Promise<SkillSummary | undefined> {
-  const root = getWorkspaceRoot();
+  const root = await getProjectRoot();
   if (!root) {
     vscode.window.showErrorMessage('Open a workspace folder before creating a skill.');
     return undefined;
@@ -172,7 +172,7 @@ async function createSkill(): Promise<SkillSummary | undefined> {
 }
 
 async function packageSkill(skill: SkillSummary): Promise<string | undefined> {
-  const root = getWorkspaceRoot();
+  const root = await getProjectRoot();
   if (!root) {
     vscode.window.showErrorMessage('Open a workspace folder before packaging a skill.');
     return undefined;
@@ -262,6 +262,71 @@ function unquoteYamlScalar(value: string): string {
 
 function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+async function getProjectRoot(): Promise<string | undefined> {
+  const workspaceRoot = getWorkspaceRoot();
+  if (!workspaceRoot) {
+    return undefined;
+  }
+
+  const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
+  if (configured) {
+    return path.resolve(workspaceRoot, configured);
+  }
+
+  if (await looksLikeSkillBuilderRoot(workspaceRoot)) {
+    return workspaceRoot;
+  }
+
+  const childRoot = await findChildSkillBuilderRoot(workspaceRoot);
+  return childRoot ?? workspaceRoot;
+}
+
+async function findChildSkillBuilderRoot(workspaceRoot: string): Promise<string | undefined> {
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(workspaceRoot, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+
+  const candidates: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) {
+      continue;
+    }
+
+    const candidate = path.join(workspaceRoot, entry.name);
+    if (await looksLikeSkillBuilderRoot(candidate)) {
+      candidates.push(candidate);
+    }
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  return candidates.find((candidate) => path.basename(candidate).toLowerCase() === 'skill-builder');
+}
+
+async function looksLikeSkillBuilderRoot(candidate: string): Promise<boolean> {
+  const packageName = await readPackageName(candidate);
+  if (packageName === 'skill-builder') {
+    return true;
+  }
+
+  return await pathExists(path.join(candidate, 'AGENTS.md')) && await pathExists(path.join(candidate, 'skills'));
+}
+
+async function readPackageName(candidate: string): Promise<string | undefined> {
+  try {
+    const packageJson = await fs.readFile(path.join(candidate, 'package.json'), 'utf8');
+    const parsed = JSON.parse(packageJson) as { name?: unknown };
+    return typeof parsed.name === 'string' ? parsed.name : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function getSkillsDirectory(root: string): string {

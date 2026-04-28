@@ -12,6 +12,8 @@ Codex is used to author and maintain the extension, but the skill artifacts rema
 - Packages a skill folder into `dist/<skill-name>.skill`.
 - Starts `skills-ref validate <skill-path>` in an integrated terminal.
 
+The extension uses the Skill Builder project root for both `skills/` and `dist/`. If VS Code is opened one folder above this repo, it auto-detects the `Skill-builder` child folder. You can override this with `skillBuilder.projectRoot`.
+
 ## Local Development
 
 Install dependencies:
