@@ -41,7 +41,17 @@ export function activate(context: vscode.ExtensionContext) {
       }
       const outputPath = await packageSkill(skill);
       if (outputPath) {
-        vscode.window.showInformationMessage(`Packaged ${skill.name} to ${path.basename(outputPath)}.`);
+        const action = await vscode.window.showInformationMessage(
+          `Packaged ${skill.name} to ${outputPath}.`,
+          'Reveal',
+          'Copy Path'
+        );
+
+        if (action === 'Reveal') {
+          await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(outputPath));
+        } else if (action === 'Copy Path') {
+          await vscode.env.clipboard.writeText(outputPath);
+        }
       }
     }),
     vscode.commands.registerCommand('skillBuilder.validateSkill', async (item?: SkillItem) => {
