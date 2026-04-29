@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "Claude Skill Builder",
   "description": "Manage Anthropic and Claude Agent Skills from a VS Code workspace.",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "local",
   "engines": {
     "vscode": "^1.90.0"

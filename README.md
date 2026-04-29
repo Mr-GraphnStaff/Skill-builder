@@ -9,7 +9,7 @@ Codex is used to author and maintain the extension, but the skill artifacts rema
 - Lists skills from `skills/<skill-name>/SKILL.md` in the Explorer sidebar.
 - Opens a skill manifest from the tree view.
 - Creates a new Anthropic-compatible skill folder with `SKILL.md`, supporting folders, and starter evals.
-- Packages a skill folder into `dist/<skill-name>.zip` for Claude upload and `dist/<skill-name>.skill` for local/archive workflows.
+- Packages a skill folder into `dist/<skill-name>.zip` for Claude upload.
 - Starts `skills-ref validate <skill-path>` in an integrated terminal.
 
 The extension uses the Skill Builder project root for both `skills/` and `dist/`. If VS Code is opened one folder above this repo, it auto-detects the `Skill-builder` child folder. You can override this with `skillBuilder.projectRoot`.
@@ -49,7 +49,7 @@ The standard VS Code extension flow is:
 npm run package
 ```
 
-The `.vsix` is the installable VS Code extension package. It is separate from `.skill` files, which are Claude skill archives.
+The `.vsix` is the installable VS Code extension package. It is separate from Claude skill upload ZIPs and from dot-skill `.skill` persona files.
 
 ## Skill Packaging Later
 
@@ -57,10 +57,9 @@ The extension has a `Package Skill` command that writes:
 
 ```text
 dist/<skill-name>.zip
-dist/<skill-name>.skill
 ```
 
-Use the `.zip` file for Claude.ai upload. Treat `.skill` as a local/archive alias unless a target surface explicitly accepts it. Claude.ai, Claude Code, and the Claude API have different distribution paths, so deployment should stay target-specific.
+Use the `.zip` file for Claude.ai upload. Do not rename Claude `SKILL.md` packages to `.skill`: dot-skill uses `.skill` for a separate persona-distillation ecosystem. Claude.ai, Claude Code, the Claude API, and dot-skill have different distribution paths, so deployment should stay target-specific.
 
 ## References
 

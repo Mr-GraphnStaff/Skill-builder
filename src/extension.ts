@@ -39,18 +39,18 @@ export function activate(context: vscode.ExtensionContext) {
       if (!skill) {
         return;
       }
-      const output = await packageSkill(skill);
-      if (output) {
+      const zipPath = await packageSkill(skill);
+      if (zipPath) {
         const action = await vscode.window.showInformationMessage(
-          `Packaged ${skill.name} to ${output.zipPath} for Claude upload.`,
+          `Packaged ${skill.name} to ${zipPath} for Claude upload.`,
           'Reveal ZIP',
           'Copy ZIP Path'
         );
 
         if (action === 'Reveal ZIP') {
-          await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(output.zipPath));
+          await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(zipPath));
         } else if (action === 'Copy ZIP Path') {
-          await vscode.env.clipboard.writeText(output.zipPath);
+          await vscode.env.clipboard.writeText(zipPath);
         }
       }
     }),
@@ -171,7 +171,7 @@ async function createSkill(): Promise<SkillSummary | undefined> {
   return readSkill(skillPath);
 }
 
-async function packageSkill(skill: SkillSummary): Promise<{ zipPath: string; skillPath: string } | undefined> {
+async function packageSkill(skill: SkillSummary): Promise<string | undefined> {
   const root = await getProjectRoot();
   if (!root) {
     vscode.window.showErrorMessage('Open a workspace folder before packaging a skill.');
@@ -180,16 +180,14 @@ async function packageSkill(skill: SkillSummary): Promise<{ zipPath: string; ski
 
   const distDirectory = getDistDirectory(root);
   const zipPath = path.join(distDirectory, `${skill.directoryName}.zip`);
-  const skillPath = path.join(distDirectory, `${skill.directoryName}.skill`);
 
   await fs.mkdir(distDirectory, { recursive: true });
 
   const zip = new AdmZip();
   zip.addLocalFolder(skill.skillPath, skill.directoryName);
   zip.writeZip(zipPath);
-  zip.writeZip(skillPath);
 
-  return { zipPath, skillPath };
+  return zipPath;
 }
 
 function validateSkill(skill: SkillSummary) {
