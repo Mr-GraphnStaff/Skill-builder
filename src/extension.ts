@@ -39,18 +39,18 @@ export function activate(context: vscode.ExtensionContext) {
       if (!skill) {
         return;
       }
-      const outputPath = await packageSkill(skill);
-      if (outputPath) {
+      const output = await packageSkill(skill);
+      if (output) {
         const action = await vscode.window.showInformationMessage(
-          `Packaged ${skill.name} to ${outputPath}.`,
-          'Reveal',
-          'Copy Path'
+          `Packaged ${skill.name} to ${output.zipPath} for Claude upload.`,
+          'Reveal ZIP',
+          'Copy ZIP Path'
         );
 
-        if (action === 'Reveal') {
-          await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(outputPath));
-        } else if (action === 'Copy Path') {
-          await vscode.env.clipboard.writeText(outputPath);
+        if (action === 'Reveal ZIP') {
+          await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(output.zipPath));
+        } else if (action === 'Copy ZIP Path') {
+          await vscode.env.clipboard.writeText(output.zipPath);
         }
       }
     }),
@@ -171,7 +171,7 @@ async function createSkill(): Promise<SkillSummary | undefined> {
   return readSkill(skillPath);
 }
 
-async function packageSkill(skill: SkillSummary): Promise<string | undefined> {
+async function packageSkill(skill: SkillSummary): Promise<{ zipPath: string; skillPath: string } | undefined> {
   const root = await getProjectRoot();
   if (!root) {
     vscode.window.showErrorMessage('Open a workspace folder before packaging a skill.');
@@ -179,15 +179,17 @@ async function packageSkill(skill: SkillSummary): Promise<string | undefined> {
   }
 
   const distDirectory = getDistDirectory(root);
-  const outputPath = path.join(distDirectory, `${skill.directoryName}.skill`);
+  const zipPath = path.join(distDirectory, `${skill.directoryName}.zip`);
+  const skillPath = path.join(distDirectory, `${skill.directoryName}.skill`);
 
   await fs.mkdir(distDirectory, { recursive: true });
 
   const zip = new AdmZip();
   zip.addLocalFolder(skill.skillPath, skill.directoryName);
-  zip.writeZip(outputPath);
+  zip.writeZip(zipPath);
+  zip.writeZip(skillPath);
 
-  return outputPath;
+  return { zipPath, skillPath };
 }
 
 function validateSkill(skill: SkillSummary) {
