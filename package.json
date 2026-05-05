@@ -1,17 +1,42 @@
 {
   "name": "skill-builder",
   "displayName": "Claude Skill Builder",
-  "description": "Manage Anthropic and Claude Agent Skills from a VS Code workspace.",
-  "version": "0.0.5",
-  "publisher": "local",
+  "description": "Create, package, validate, and sync Anthropic Claude Agent Skills from VS Code.",
+  "version": "0.2.3",
+  "publisher": "DavidFarris",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mr-GraphnStaff/Skill-builder.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
     "Other"
   ],
+  "keywords": [
+    "claude",
+    "anthropic",
+    "agent-skills",
+    "skills",
+    "claude-code",
+    "skill-builder"
+  ],
   "activationEvents": [
     "onView:skillBuilder.skillsView",
+    "onCommand:skillBuilder.refresh",
+    "onCommand:skillBuilder.openSkill",
+    "onCommand:skillBuilder.createSkill",
+    "onCommand:skillBuilder.openInteractiveBuilder",
+    "onCommand:skillBuilder.openSkillEditor",
+    "onCommand:skillBuilder.copyChatPrompt",
+    "onCommand:skillBuilder.packageSkill",
+    "onCommand:skillBuilder.addSupportingFiles",
+    "onCommand:skillBuilder.syncToClaudeCode",
+    "onCommand:skillBuilder.publishSkillToGit",
+    "onCommand:skillBuilder.validateSkill",
+    "onCommand:skillBuilder.healthCheck",
     "workspaceContains:skills/*/SKILL.md"
   ],
   "main": "./out/extension.js",
@@ -33,14 +58,49 @@
         "icon": "$(new-folder)"
       },
       {
+        "command": "skillBuilder.openInteractiveBuilder",
+        "title": "Skill Builder: Interactive Builder",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "skillBuilder.openSkillEditor",
+        "title": "Skill Builder: Open Skill Editor",
+        "icon": "$(layout-panel)"
+      },
+      {
+        "command": "skillBuilder.copyChatPrompt",
+        "title": "Skill Builder: Copy Free-Form Chat Prompt",
+        "icon": "$(comment-discussion)"
+      },
+      {
         "command": "skillBuilder.packageSkill",
         "title": "Skill Builder: Package Skill",
         "icon": "$(package)"
       },
       {
+        "command": "skillBuilder.addSupportingFiles",
+        "title": "Skill Builder: Add Supporting Files",
+        "icon": "$(file-add)"
+      },
+      {
+        "command": "skillBuilder.syncToClaudeCode",
+        "title": "Skill Builder: Sync to Claude Code",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "skillBuilder.publishSkillToGit",
+        "title": "Skill Builder: Publish Skill to Git",
+        "icon": "$(repo-push)"
+      },
+      {
         "command": "skillBuilder.validateSkill",
         "title": "Skill Builder: Validate Skill",
         "icon": "$(check)"
+      },
+      {
+        "command": "skillBuilder.healthCheck",
+        "title": "Skill Builder: Health Check",
+        "icon": "$(pulse)"
       }
     ],
     "configuration": {
@@ -59,7 +119,12 @@
         "skillBuilder.distDirectory": {
           "type": "string",
           "default": "dist",
-          "description": "Workspace-relative directory where packaged .skill archives are written."
+          "description": "Workspace-relative directory where packaged Claude skill .zip archives are written."
+        },
+        "skillBuilder.claudeCodeSkillsDirectory": {
+          "type": "string",
+          "default": "",
+          "description": "Directory used by 'Sync to Claude Code'. Leave empty to use ~/.claude/skills."
         }
       }
     },
@@ -67,6 +132,16 @@
       "view/title": [
         {
           "command": "skillBuilder.refresh",
+          "when": "view == skillBuilder.skillsView",
+          "group": "navigation"
+        },
+        {
+          "command": "skillBuilder.openInteractiveBuilder",
+          "when": "view == skillBuilder.skillsView",
+          "group": "navigation"
+        },
+        {
+          "command": "skillBuilder.copyChatPrompt",
           "when": "view == skillBuilder.skillsView",
           "group": "navigation"
         },
@@ -83,14 +158,44 @@
           "group": "inline"
         },
         {
-          "command": "skillBuilder.packageSkill",
+          "command": "skillBuilder.openSkillEditor",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@1"
         },
         {
-          "command": "skillBuilder.validateSkill",
+          "command": "skillBuilder.packageSkill",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@2"
+        },
+        {
+          "command": "skillBuilder.addSupportingFiles",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@3"
+        },
+        {
+          "command": "skillBuilder.syncToClaudeCode",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@4"
+        },
+        {
+          "command": "skillBuilder.publishSkillToGit",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@5"
+        },
+        {
+          "command": "skillBuilder.copyChatPrompt",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@6"
+        },
+        {
+          "command": "skillBuilder.validateSkill",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@7"
+        },
+        {
+          "command": "skillBuilder.healthCheck",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@8"
         }
       ]
     },
@@ -108,7 +213,8 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "npx --yes @vscode/vsce package"
+    "package": "npx --yes @vscode/vsce package",
+    "publish-skill": "node scripts/publish-skill.mjs"
   },
   "dependencies": {
     "adm-zip": "^0.5.12"

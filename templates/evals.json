@@ -1,0 +1,27 @@
+{
+  "skill_name": "<skill-name>",
+  "evals": [
+    {
+      "id": "happy-path",
+      "prompt": "A realistic user request that should use the skill.",
+      "expected_output": "Describe the important qualities the response or generated file should have.",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": "incomplete-input",
+      "prompt": "A realistic request missing one important input.",
+      "expected_output": "Claude should ask only necessary clarifying questions or choose documented defaults.",
+      "files": [],
+      "assertions": []
+    }
+  ],
+  "trigger_evals": {
+    "should_trigger": [
+      "A prompt that should make Claude use this skill."
+    ],
+    "should_not_trigger": [
+      "A nearby prompt that should not use this skill."
+    ]
+  }
+}
