@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Added config-aware Git import/update for individual skill folders.
+- Added `Skill Builder: Import/Update Skill from Git` and the `npm run import-skill -- <skill-name>` CLI path.
+- Documented the pull/edit/publish workflow and clarified that remote merges still happen through normal GitHub review or PR handling.
+
 ## 0.2.3
 
 - Added manual, config-driven git publishing for individual skill folders.

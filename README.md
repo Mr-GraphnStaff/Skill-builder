@@ -168,6 +168,36 @@ skillBuilder.claudeCodeSkillsDirectory
 
 After syncing, Claude Code can discover the skill from the filesystem.
 
+## Import Or Update A Skill From Git
+
+Right-click the `Claude Skills` view, or right-click an existing skill, and choose:
+
+```text
+Skill Builder: Import/Update Skill from Git
+```
+
+The command opens a terminal and runs the cross-platform Node importer. By default, it imports one folder from:
+
+```text
+skills/<skill-name>/
+```
+
+If you provide a repository URL, the importer clones that repository to a temporary directory and copies only the selected skill into the local `skills/` directory. If you leave the repository blank, it uses `skill-builder.config.json` `git.remote`, or `origin`, and imports from `git.baseBranch`, or `main`.
+
+You can also run it directly:
+
+```bash
+npm run import-skill -- my-skill -- --repo https://github.com/owner/repo.git --branch main
+```
+
+For non-standard repositories, pass a source path:
+
+```bash
+npm run import-skill -- my-skill -- --repo https://github.com/owner/repo.git --source path/to/skill-folder
+```
+
+When updating an existing local skill, rerun with `--overwrite`. The importer backs up the existing folder under `workbench/.skill-import-backups/` before replacing it.
+
 ## Publish A Skill To Git
 
 Git publishing is a manual, config-driven release step. Copy the example config first:
@@ -227,6 +257,7 @@ The health check opens a Markdown report covering frontmatter, name/folder match
 - `Skill Builder: Add Supporting Files` copies existing docs, scripts, or assets into a skill.
 - `Skill Builder: Package Skill` creates a Claude.ai upload ZIP.
 - `Skill Builder: Sync to Claude Code` copies a skill to the Claude Code skills folder.
+- `Skill Builder: Import/Update Skill from Git` pulls one skill folder from a Git repository into the local `skills/` directory.
 - `Skill Builder: Publish Skill to Git` commits and pushes a configured skill path through the manual publish script.
 - `Skill Builder: Validate Skill` runs `skills-ref validate`.
 - `Skill Builder: Health Check` opens a local structure and quality report.
@@ -246,6 +277,8 @@ Git publish defaults live in `skill-builder.config.json`, which is intentionally
 Claude Skill Builder does not upload skills into Claude.ai or the Claude API for you. It prepares the folder or ZIP artifact locally.
 
 It also does not run Claude inside VS Code. The interactive builder creates a strong local draft and an optional authoring prompt, but deeper refinement still happens by editing the generated files or using your preferred AI assistant.
+
+The Git workflow does not automatically merge changes into the remote default branch. Use `Publish Skill to Git` to push a branch, optionally create a PR with `gh`, and merge through your normal GitHub review process.
 
 ## Security Notes
 

@@ -206,6 +206,9 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     }),
+    vscode.commands.registerCommand('skillBuilder.importSkillFromGit', async (item?: SkillItem) => {
+      await importSkillFromGit(context, provider, item?.skill);
+    }),
     vscode.commands.registerCommand('skillBuilder.publishSkillToGit', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
@@ -1392,6 +1395,79 @@ async function syncToClaudeCode(skill: SkillSummary): Promise<string | undefined
   return targetPath;
 }
 
+async function importSkillFromGit(
+  context: vscode.ExtensionContext,
+  provider: SkillTreeProvider,
+  skill?: SkillSummary
+): Promise<void> {
+  const root = await getProjectRoot();
+  if (!root) {
+    vscode.window.showErrorMessage('Open a workspace folder before importing a skill from Git.');
+    return;
+  }
+
+  const skillName = skill?.directoryName ?? await vscode.window.showInputBox({
+    title: 'Import/Update Skill from Git',
+    prompt: 'Skill folder name to import or update',
+    placeHolder: 'my-skill',
+    validateInput: validateSkillName
+  });
+
+  if (!skillName) {
+    return;
+  }
+
+  const repository = await vscode.window.showInputBox({
+    title: 'Import/Update Skill from Git',
+    prompt: 'Optional Git repository URL or local path. Leave blank to use skill-builder.config.json git.remote, or origin.',
+    placeHolder: 'https://github.com/owner/repo.git'
+  });
+
+  if (repository === undefined) {
+    return;
+  }
+
+  const branch = await vscode.window.showInputBox({
+    title: 'Import/Update Skill from Git',
+    prompt: 'Optional branch, tag, or ref. Leave blank to use git.baseBranch, or main.',
+    placeHolder: 'main'
+  });
+
+  if (branch === undefined) {
+    return;
+  }
+
+  const scriptPath = path.join(context.extensionUri.fsPath, 'scripts', 'import-skill.mjs');
+  if (!await pathExists(scriptPath)) {
+    vscode.window.showErrorMessage('scripts/import-skill.mjs is missing from this extension installation.');
+    return;
+  }
+
+  const commandParts = [
+    'node',
+    quoteTerminalArg(scriptPath),
+    quoteTerminalArg(skillName),
+    '--root',
+    quoteTerminalArg(root)
+  ];
+
+  if (repository.trim()) {
+    commandParts.push('--repo', quoteTerminalArg(repository.trim()));
+  }
+
+  if (branch.trim()) {
+    commandParts.push('--branch', quoteTerminalArg(branch.trim()));
+  }
+
+  const terminal = vscode.window.createTerminal({
+    name: `Import ${skillName}`,
+    cwd: root
+  });
+  terminal.show();
+  terminal.sendText(commandParts.join(' '));
+  provider.refresh();
+}
+
 async function publishSkillToGit(context: vscode.ExtensionContext, skill: SkillSummary): Promise<void> {
   const root = await getProjectRoot();
   if (!root) {
@@ -1540,6 +1616,9 @@ async function openSkillEditor(
           }
           break;
         }
+        case 'importSkillFromGit':
+          await importSkillFromGit(context, provider, freshSkill);
+          break;
         case 'publishSkillToGit':
           await publishSkillToGit(context, freshSkill);
           break;
@@ -1836,6 +1915,7 @@ async function buildSkillEditorHtml(
       <div class="actions">
         <button type="button" data-action="packageSkill">Package ZIP</button>
         <button class="secondary" type="button" data-action="syncToClaudeCode">Sync to Claude Code</button>
+        <button class="secondary" type="button" data-action="importSkillFromGit">Import/Update from Git</button>
         <button class="secondary" type="button" data-action="publishSkillToGit">Publish to Git</button>
         <button class="secondary" type="button" data-action="validateSkill">Run skills-ref Validate</button>
         <button class="secondary" type="button" data-action="copyChatPrompt">Copy Revision Prompt</button>

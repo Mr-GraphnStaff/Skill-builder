@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "Claude Skill Builder",
   "description": "Create, package, validate, and sync Anthropic Claude Agent Skills from VS Code.",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "publisher": "DavidFarris",
   "license": "MIT",
   "repository": {
@@ -34,6 +34,7 @@
     "onCommand:skillBuilder.packageSkill",
     "onCommand:skillBuilder.addSupportingFiles",
     "onCommand:skillBuilder.syncToClaudeCode",
+    "onCommand:skillBuilder.importSkillFromGit",
     "onCommand:skillBuilder.publishSkillToGit",
     "onCommand:skillBuilder.validateSkill",
     "onCommand:skillBuilder.healthCheck",
@@ -86,6 +87,11 @@
         "command": "skillBuilder.syncToClaudeCode",
         "title": "Skill Builder: Sync to Claude Code",
         "icon": "$(sync)"
+      },
+      {
+        "command": "skillBuilder.importSkillFromGit",
+        "title": "Skill Builder: Import/Update Skill from Git",
+        "icon": "$(repo-pull)"
       },
       {
         "command": "skillBuilder.publishSkillToGit",
@@ -149,6 +155,11 @@
           "command": "skillBuilder.createSkill",
           "when": "view == skillBuilder.skillsView",
           "group": "navigation"
+        },
+        {
+          "command": "skillBuilder.importSkillFromGit",
+          "when": "view == skillBuilder.skillsView",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -178,24 +189,29 @@
           "group": "skill@4"
         },
         {
-          "command": "skillBuilder.publishSkillToGit",
+          "command": "skillBuilder.importSkillFromGit",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@5"
         },
         {
-          "command": "skillBuilder.copyChatPrompt",
+          "command": "skillBuilder.publishSkillToGit",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@6"
         },
         {
-          "command": "skillBuilder.validateSkill",
+          "command": "skillBuilder.copyChatPrompt",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@7"
         },
         {
-          "command": "skillBuilder.healthCheck",
+          "command": "skillBuilder.validateSkill",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@8"
+        },
+        {
+          "command": "skillBuilder.healthCheck",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@9"
         }
       ]
     },
@@ -214,6 +230,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "package": "npx --yes @vscode/vsce package",
+    "import-skill": "node scripts/import-skill.mjs",
     "publish-skill": "node scripts/publish-skill.mjs"
   },
   "dependencies": {
