@@ -190,7 +190,7 @@ Before calling the work done:
 - verify `name` matches the directory
 - verify frontmatter parses
 - verify all referenced files exist
-- run `skills-ref validate ./skills/<skill-name>` when available
+- run the bundled `skills-ref` validator when available
 - compile or test scripts when present
 - run the extension package command for Claude.ai ZIPs when requested
 - run the extension sync command for Claude Code local testing when requested

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Changed Git publish validation to be opt-in by default so publishing does not depend on a globally installed validator.
+- Bundled pinned `skills-ref@0.1.5` validation so users do not need a global `skills-ref` install.
+- Added a structured `git.validationCommand` config option for overriding the validation command without shell string parsing, with a pinned `npx` fallback for incomplete source installs.
+
 ## 0.3.0
 
 - Added config-aware Git import/update for individual skill folders.

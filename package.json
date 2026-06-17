@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "Claude Skill Builder",
   "description": "Create, package, validate, and sync Anthropic Claude Agent Skills from VS Code.",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "publisher": "DavidFarris",
   "license": "MIT",
   "repository": {
@@ -234,7 +234,8 @@
     "publish-skill": "node scripts/publish-skill.mjs"
   },
   "dependencies": {
-    "adm-zip": "^0.5.12"
+    "adm-zip": "^0.5.12",
+    "skills-ref": "0.1.5"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",

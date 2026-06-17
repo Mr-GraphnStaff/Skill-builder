@@ -5,9 +5,13 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { fileURLToPath } from 'node:url';
 
 const DEFAULT_CONFIG = 'skill-builder.config.json';
 const EXAMPLE_CONFIG = 'skill-builder.config.example.json';
+const SKILLS_REF_VERSION = '0.1.5';
+const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
+const BUNDLED_SKILLS_REF_CLI = path.resolve(SCRIPT_DIRECTORY, '..', 'node_modules', 'skills-ref', 'dist', 'cli.js');
 
 const defaults = {
   skillsDirectory: 'skills',
@@ -19,7 +23,7 @@ const defaults = {
     baseBranch: 'main',
     branchPrefix: 'skills/',
     publishMode: 'branch',
-    requireValidation: true,
+    requireValidation: false,
     fetchBeforePush: true,
     includeWorkbench: false,
     includeDist: false,
@@ -63,7 +67,8 @@ async function main() {
     includeWorkbench: args.includeWorkbench ?? config.git.includeWorkbench,
     includeDist: args.includeDist ?? config.git.includeDist,
     createPullRequest: args.createPullRequest ?? config.git.createPullRequest,
-    requireValidation: args.skipValidation ? false : config.git.requireValidation
+    requireValidation: resolveValidationFlag(args, config.git.requireValidation),
+    validationCommand: normalizeValidationCommand(config.git.validationCommand)
   };
 
   if (!gitConfig.enabled) {
@@ -93,7 +98,7 @@ async function main() {
   const selectedGitPaths = selectedPaths.map(toGitPath);
 
   if (gitConfig.requireValidation) {
-    runValidation(skillPath);
+    runValidation(skillPath, gitConfig.validationCommand);
   }
 
   if (gitConfig.fetchBeforePush) {
@@ -201,6 +206,9 @@ function parseArgs(argv) {
       case '--skip-validation':
         parsed.skipValidation = true;
         break;
+      case '--validate':
+        parsed.validate = true;
+        break;
       case '--include-workbench':
         parsed.includeWorkbench = true;
         break;
@@ -244,7 +252,8 @@ Options:
   --branch <name>                Override the target branch.
   -m, --message <message>        Commit message.
   -y, --yes                      Skip the interactive publish confirmation.
-  --skip-validation              Do not run skills-ref validate.
+  --validate                     Run the configured validator before publishing.
+  --skip-validation              Do not run validation, even when configured.
   --include-workbench            Include workbench/<skill-name>.
   --include-dist                 Include dist/<skill-name>.zip.
   --create-pr                    Create a pull request with gh after pushing.
@@ -271,6 +280,42 @@ function mergeConfig(base, override) {
       ...(override.git ?? {})
     }
   };
+}
+
+function resolveValidationFlag(parsedArgs, configuredValue) {
+  if (parsedArgs.validate && parsedArgs.skipValidation) {
+    throw new Error('Use either --validate or --skip-validation, not both.');
+  }
+
+  if (parsedArgs.validate) {
+    return true;
+  }
+
+  if (parsedArgs.skipValidation) {
+    return false;
+  }
+
+  return Boolean(configuredValue);
+}
+
+function normalizeValidationCommand(value) {
+  if (value === undefined) {
+    return defaultValidationCommand();
+  }
+
+  if (!Array.isArray(value) || value.length === 0 || value.some((part) => typeof part !== 'string' || !part.trim())) {
+    throw new Error('git.validationCommand must be a non-empty string array, for example ["npx", "--yes", "skills-ref@0.1.5", "validate"].');
+  }
+
+  return value;
+}
+
+function defaultValidationCommand() {
+  if (existsSync(BUNDLED_SKILLS_REF_CLI)) {
+    return ['node', BUNDLED_SKILLS_REF_CLI, 'validate'];
+  }
+
+  return ['npx', '--yes', `skills-ref@${SKILLS_REF_VERSION}`, 'validate'];
 }
 
 function validateSkillName(value) {
@@ -319,19 +364,55 @@ function switchToBranch(root, branch) {
   runGit(root, ['switch', '-c', branch], { stdio: 'inherit', mutates: true });
 }
 
-function runValidation(skillPath) {
-  const result = spawnSync('skills-ref', ['validate', skillPath], {
+function runValidation(skillPath, validationCommand) {
+  const [command, ...baseArgs] = validationCommand;
+  const validationArgs = [...baseArgs, skillPath];
+  console.log(`Running validation: ${formatCommandForDisplay([command, ...validationArgs])}`);
+
+  const result = runExternalCommand(command, validationArgs, {
     encoding: 'utf8',
     stdio: 'inherit'
   });
 
   if (result.error) {
-    throw new Error(`skills-ref validate failed to start: ${result.error.message}`);
+    throw new Error(`Validation failed to start: ${result.error.message}`);
   }
 
   if (result.status !== 0) {
-    throw new Error(`skills-ref validate failed with exit code ${result.status}.`);
+    throw new Error(`Validation failed with exit code ${result.status}.`);
   }
+}
+
+function runExternalCommand(command, commandArgs, options) {
+  const result = spawnSync(command, commandArgs, options);
+  if (!isMissingCommand(result)) {
+    return result;
+  }
+
+  const windowsCommand = resolveWindowsCommand(command);
+  if (!windowsCommand || windowsCommand === command) {
+    return result;
+  }
+
+  return spawnSync(windowsCommand, commandArgs, options);
+}
+
+function isMissingCommand(result) {
+  return result.error && result.error.code === 'ENOENT';
+}
+
+function resolveWindowsCommand(command) {
+  if (process.platform !== 'win32' || path.extname(command) || command.includes('/') || command.includes('\\')) {
+    return undefined;
+  }
+
+  return `${command}.cmd`;
+}
+
+function formatCommandForDisplay(parts) {
+  return parts
+    .map((part) => (/[\s"]/u.test(part) ? `"${part.replace(/"/g, '\\"')}"` : part))
+    .join(' ');
 }
 
 function runGit(root, args, options = {}) {

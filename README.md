@@ -206,7 +206,7 @@ Git publishing is a manual, config-driven release step. Copy the example config 
 cp skill-builder.config.example.json skill-builder.config.json
 ```
 
-Then set `git.enabled` to `true` and review the remote, branch prefix, validation, and include rules.
+Then set `git.enabled` to `true` and review the remote, branch prefix, optional validation command, and include rules.
 
 Right-click a skill and choose:
 
@@ -214,7 +214,11 @@ Right-click a skill and choose:
 Skill Builder: Publish Skill to Git
 ```
 
-The command opens a terminal and runs the cross-platform Node publisher. The publisher stages only `skills/<skill-name>/` by default, can optionally include `workbench/<skill-name>/` and `dist/<skill-name>.zip`, runs `skills-ref validate` when configured, shows the selected files, and requires a typed confirmation before commit and push.
+The command opens a terminal and runs the cross-platform Node publisher. The publisher stages only `skills/<skill-name>/` by default, can optionally include `workbench/<skill-name>/` and `dist/<skill-name>.zip`, shows the selected files, and requires a typed confirmation before commit and push.
+
+Validation is opt-in for Git publishing. Set `git.requireValidation` to `true` or run with `--validate` to execute the configured validator before commit. By default, Skill Builder uses its bundled, pinned `skills-ref` validator.
+
+You can override the validator with a structured `git.validationCommand` array in `skill-builder.config.json`, for example `["npx", "--yes", "skills-ref@0.1.5", "validate"]`.
 
 You can also run it directly:
 
@@ -233,10 +237,10 @@ Skill Builder: Validate Skill
 This opens an integrated terminal and runs:
 
 ```bash
-skills-ref validate "<skill-path>"
+node "<extension-folder>/node_modules/skills-ref/dist/cli.js" validate "<skill-path>"
 ```
 
-Install `skills-ref` separately if you want validation to run locally.
+The extension builds that command for you. A global `skills-ref` install is not required.
 
 ## Health Check A Skill
 
@@ -259,7 +263,7 @@ The health check opens a Markdown report covering frontmatter, name/folder match
 - `Skill Builder: Sync to Claude Code` copies a skill to the Claude Code skills folder.
 - `Skill Builder: Import/Update Skill from Git` pulls one skill folder from a Git repository into the local `skills/` directory.
 - `Skill Builder: Publish Skill to Git` commits and pushes a configured skill path through the manual publish script.
-- `Skill Builder: Validate Skill` runs `skills-ref validate`.
+- `Skill Builder: Validate Skill` runs the bundled `skills-ref` validator.
 - `Skill Builder: Health Check` opens a local structure and quality report.
 - `Skill Builder: Copy Free-Form Chat Prompt` copies a prompt for deeper skill authoring work with an AI assistant.
 

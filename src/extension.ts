@@ -222,7 +222,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (!skill) {
         return;
       }
-      validateSkill(skill);
+      await validateSkill(context, skill);
     }),
     vscode.commands.registerCommand('skillBuilder.healthCheck', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
@@ -1513,10 +1513,14 @@ async function publishSkillToGit(context: vscode.ExtensionContext, skill: SkillS
   terminal.sendText(`node ${quoteTerminalArg(scriptPath)} ${quoteTerminalArg(skill.directoryName)} --root ${quoteTerminalArg(root)}`);
 }
 
-function validateSkill(skill: SkillSummary) {
+async function validateSkill(context: vscode.ExtensionContext, skill: SkillSummary) {
   const terminal = vscode.window.createTerminal({ name: `Validate ${skill.name}` });
+  const cliPath = path.join(context.extensionUri.fsPath, 'node_modules', 'skills-ref', 'dist', 'cli.js');
+  const command = await pathExists(cliPath)
+    ? `node ${quoteTerminalArg(cliPath)} validate ${quoteTerminalArg(skill.skillPath)}`
+    : `npx --yes skills-ref@0.1.5 validate ${quoteTerminalArg(skill.skillPath)}`;
   terminal.show();
-  terminal.sendText(`skills-ref validate "${skill.skillPath}"`);
+  terminal.sendText(command);
 }
 
 async function showSkillHealthCheck(skill: SkillSummary) {
@@ -1623,7 +1627,7 @@ async function openSkillEditor(
           await publishSkillToGit(context, freshSkill);
           break;
         case 'validateSkill':
-          validateSkill(freshSkill);
+          await validateSkill(context, freshSkill);
           break;
         case 'healthCheck':
           await showSkillHealthCheck(freshSkill);
@@ -1917,7 +1921,7 @@ async function buildSkillEditorHtml(
         <button class="secondary" type="button" data-action="syncToClaudeCode">Sync to Claude Code</button>
         <button class="secondary" type="button" data-action="importSkillFromGit">Import/Update from Git</button>
         <button class="secondary" type="button" data-action="publishSkillToGit">Publish to Git</button>
-        <button class="secondary" type="button" data-action="validateSkill">Run skills-ref Validate</button>
+        <button class="secondary" type="button" data-action="validateSkill">Run Skill Validate</button>
         <button class="secondary" type="button" data-action="copyChatPrompt">Copy Revision Prompt</button>
       </div>
     </section>
@@ -3128,7 +3132,7 @@ Never hardcode secrets. Prefer MCP/tool dependencies with explicit permissions a
 - Scripts are non-interactive and documented.
 - Evals cover task quality and trigger behavior.
 - Target-surface assumptions are explicit.
-- \`skills-ref validate ./skills/${name}\` runs or the limitation is recorded.
+- the bundled \`skills-ref\` validator runs or the limitation is recorded.
 `;
 }
 

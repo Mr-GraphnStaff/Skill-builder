@@ -8,7 +8,7 @@
     "baseBranch": "main",
     "branchPrefix": "skills/",
     "publishMode": "branch",
-    "requireValidation": true,
+    "requireValidation": false,
     "fetchBeforePush": true,
     "includeWorkbench": false,
     "includeDist": false,
