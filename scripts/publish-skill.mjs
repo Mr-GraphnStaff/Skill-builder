@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -46,13 +46,11 @@ main().catch((error) => {
 async function main() {
   const root = path.resolve(args.root ?? process.cwd());
   const configPath = path.resolve(root, args.config ?? DEFAULT_CONFIG);
-  const skillName = args.skill ?? args._[0];
+  const skillSource = args.source ?? args.skill ?? args._[0];
 
-  if (!skillName) {
-    throw new Error('Missing skill name. Run with --help for usage.');
+  if (!skillSource) {
+    throw new Error('Missing skill source. Run with --help for usage.');
   }
-
-  validateSkillName(skillName);
 
   if (!existsSync(configPath)) {
     throw new Error(
@@ -82,23 +80,23 @@ async function main() {
   ensureGitWorktree(root);
   ensureRemote(root, gitConfig.remote);
 
-  const skillPath = path.resolve(root, config.skillsDirectory, skillName);
-  const manifestPath = path.join(skillPath, 'SKILL.md');
-  if (!existsSync(manifestPath)) {
-    throw new Error(`Skill not found: ${path.relative(root, manifestPath)}`);
-  }
+  const publishTarget = resolvePublishTarget(root, config, skillSource);
 
-  const selectedPaths = [path.relative(root, skillPath)];
+  const selectedPaths = [path.relative(root, publishTarget.selectedPath)];
   if (gitConfig.includeWorkbench) {
-    pushOptionalPath(selectedPaths, root, path.resolve(root, config.workbenchDirectory, skillName), 'workbench path');
+    pushOptionalPath(selectedPaths, root, path.resolve(root, config.workbenchDirectory, publishTarget.skillName), 'workbench path');
   }
   if (gitConfig.includeDist) {
-    pushOptionalPath(selectedPaths, root, path.resolve(root, config.distDirectory, `${skillName}.zip`), 'dist ZIP');
+    pushOptionalPath(selectedPaths, root, path.resolve(root, config.distDirectory, `${publishTarget.skillName}.zip`), 'dist ZIP');
   }
   const selectedGitPaths = selectedPaths.map(toGitPath);
 
   if (gitConfig.requireValidation) {
-    runValidation(skillPath, gitConfig.validationCommand);
+    if (!publishTarget.validationPath) {
+      throw new Error('Validation requires an extracted skill folder. Publish the extracted folder, or rerun with --skip-validation for a .skill package file.');
+    }
+
+    runValidation(publishTarget.validationPath, gitConfig.validationCommand);
   }
 
   if (gitConfig.fetchBeforePush) {
@@ -106,7 +104,7 @@ async function main() {
   }
 
   const currentBranch = runGit(root, ['branch', '--show-current']).trim();
-  const targetBranch = resolveTargetBranch(skillName, currentBranch, args.branch, gitConfig);
+  const targetBranch = resolveTargetBranch(publishTarget.skillName, currentBranch, args.branch, gitConfig);
   if (targetBranch && targetBranch !== currentBranch) {
     switchToBranch(root, targetBranch);
   }
@@ -162,12 +160,12 @@ async function main() {
     }
   }
 
-  const message = args.message ?? `Publish ${skillName} skill`;
+  const message = args.message ?? `Publish ${publishTarget.displayName} skill`;
   runGit(root, ['commit', '-m', message], { stdio: 'inherit', mutates: true });
   runGit(root, ['push', '-u', gitConfig.remote, targetBranch || currentBranch], { stdio: 'inherit', mutates: true });
 
   if (gitConfig.createPullRequest) {
-    createPullRequest(root, skillName, gitConfig.baseBranch, targetBranch || currentBranch);
+    createPullRequest(root, publishTarget.displayName, gitConfig.baseBranch, targetBranch || currentBranch);
   }
 }
 
@@ -188,6 +186,9 @@ function parseArgs(argv) {
         break;
       case '--skill':
         parsed.skill = requireValue(argv, ++index, value);
+        break;
+      case '--source':
+        parsed.source = requireValue(argv, ++index, value);
         break;
       case '--remote':
         parsed.remote = requireValue(argv, ++index, value);
@@ -240,14 +241,15 @@ function requireValue(argv, index, option) {
 }
 
 function printHelp() {
-  console.log(`Publish one Claude skill folder to git.
+  console.log(`Publish one Claude skill source to git.
 
 Usage:
-  node scripts/publish-skill.mjs <skill-name> [options]
+  node scripts/publish-skill.mjs <skill-name|path-to-SKILL.md|path-to-folder|path-to-file.skill> [options]
 
 Options:
   --root <path>                  Skill Builder project root. Defaults to cwd.
   --config <path>                Config file path. Defaults to skill-builder.config.json.
+  --source <path-or-name>        Skill name, SKILL.md path, skill folder, or Anthropic .skill package file.
   --remote <name>                Override git.remote from config.
   --branch <name>                Override the target branch.
   -m, --message <message>        Commit message.
@@ -260,6 +262,8 @@ Options:
   --allow-secret-warnings        Continue when the simple secret scan finds matches.
   -h, --help                     Show this help.
 
+For folders and SKILL.md files, the script stages the containing extracted skill folder.
+For .skill package files, it stages the package file itself.
 The script only stages the selected skill paths. It leaves unrelated workspace changes unstaged.`);
 }
 
@@ -318,10 +322,189 @@ function defaultValidationCommand() {
   return ['npx', '--yes', `skills-ref@${SKILLS_REF_VERSION}`, 'validate'];
 }
 
+function resolvePublishTarget(root, config, source) {
+  const trimmedSource = source.trim();
+  if (!trimmedSource) {
+    throw new Error('Skill source is required.');
+  }
+
+  if (looksLikePathSource(root, trimmedSource)) {
+    return resolvePublishPathTarget(root, trimmedSource);
+  }
+
+  validateSkillName(trimmedSource);
+  const skillPath = path.resolve(root, config.skillsDirectory, trimmedSource);
+  const manifestPath = findSkillManifestPath(skillPath);
+  if (!manifestPath) {
+    throw new Error(`Skill not found: ${path.relative(root, path.join(skillPath, 'SKILL.md'))}. Publish accepts a configured skill name, SKILL.md, a skill folder, or a .skill package file.`);
+  }
+
+  return buildSkillFolderTarget(root, skillPath, manifestPath, trimmedSource);
+}
+
+function looksLikePathSource(root, value) {
+  return path.isAbsolute(value)
+    || value.includes('/')
+    || value.includes('\\')
+    || value.startsWith('.')
+    || /\.(?:md|skill)$/i.test(value)
+    || existsSync(path.resolve(root, value));
+}
+
+function resolvePublishPathTarget(root, source) {
+  const absoluteSource = path.isAbsolute(source) ? path.resolve(source) : path.resolve(root, source);
+  if (!existsSync(absoluteSource)) {
+    throw new Error(`Skill source not found: ${absoluteSource}`);
+  }
+
+  const stat = statSync(absoluteSource);
+  if (stat.isFile()) {
+    if (isSkillPackagePath(absoluteSource)) {
+      ensureInside(root, absoluteSource, 'selected .skill package file');
+      const displayName = path.basename(absoluteSource, path.extname(absoluteSource));
+      return {
+        displayName,
+        skillName: normalizePublishName(displayName),
+        selectedPath: absoluteSource,
+        validationPath: undefined
+      };
+    }
+
+    if (isSkillManifestName(path.basename(absoluteSource))) {
+      const skillPath = path.dirname(absoluteSource);
+      return buildSkillFolderTarget(root, skillPath, absoluteSource);
+    }
+
+    throw new Error('Selected file is not publishable. Choose SKILL.md or an Anthropic .skill package file.');
+  }
+
+  if (!stat.isDirectory()) {
+    throw new Error('Selected path is not publishable. Choose SKILL.md, a .skill package file, or an extracted skill folder.');
+  }
+
+  const resolvedFolder = resolveSkillFolderFromDirectory(absoluteSource);
+  return buildSkillFolderTarget(root, resolvedFolder.skillPath, resolvedFolder.manifestPath);
+}
+
+function resolveSkillFolderFromDirectory(directory) {
+  const manifestPath = findSkillManifestPath(directory);
+  if (manifestPath) {
+    return { skillPath: directory, manifestPath };
+  }
+
+  const childSkills = readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => {
+      const skillPath = path.join(directory, entry.name);
+      const childManifestPath = findSkillManifestPath(skillPath);
+      return childManifestPath ? { skillPath, manifestPath: childManifestPath } : undefined;
+    })
+    .filter(Boolean);
+
+  if (childSkills.length === 1) {
+    return childSkills[0];
+  }
+
+  if (childSkills.length > 1) {
+    throw new Error('Selected folder contains multiple extracted skill folders. Choose the specific folder that contains SKILL.md.');
+  }
+
+  throw new Error('No SKILL.md found. Choose SKILL.md directly, a folder containing SKILL.md, or a folder with one extracted skill folder inside.');
+}
+
+function buildSkillFolderTarget(root, skillPath, manifestPath, explicitSkillName) {
+  ensureInside(root, skillPath, 'selected skill folder');
+
+  const directoryName = path.basename(skillPath);
+  const manifestName = readSkillName(manifestPath);
+  const skillName = explicitSkillName ?? normalizePublishName(directoryName || manifestName);
+
+  return {
+    displayName: manifestName ?? directoryName,
+    skillName,
+    selectedPath: skillPath,
+    validationPath: skillPath
+  };
+}
+
+function findSkillManifestPath(skillPath) {
+  const canonicalPath = path.join(skillPath, 'SKILL.md');
+  if (existsSync(canonicalPath)) {
+    return canonicalPath;
+  }
+
+  const lowercasePath = path.join(skillPath, 'skill.md');
+  if (existsSync(lowercasePath)) {
+    return lowercasePath;
+  }
+
+  if (!existsSync(skillPath) || !statSync(skillPath).isDirectory()) {
+    return undefined;
+  }
+
+  const manifest = readdirSync(skillPath, { withFileTypes: true })
+    .find((entry) => entry.isFile() && isSkillManifestName(entry.name));
+  return manifest ? path.join(skillPath, manifest.name) : undefined;
+}
+
+function readSkillName(manifestPath) {
+  const stat = statSync(manifestPath);
+  if (stat.size > 1024 * 1024) {
+    return undefined;
+  }
+
+  const manifest = readFileSync(manifestPath, 'utf8');
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(manifest);
+  if (!match) {
+    return undefined;
+  }
+
+  for (const line of match[1].split(/\r?\n/)) {
+    const name = /^name:\s*["']?([^"'\r\n]+)["']?\s*$/.exec(line);
+    if (name) {
+      return name[1].trim();
+    }
+  }
+
+  return undefined;
+}
+
 function validateSkillName(value) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) {
     throw new Error('Skill name must be lowercase kebab-case.');
   }
+}
+
+function normalizePublishName(value) {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+    .replace(/-+$/g, '');
+
+  if (!normalized) {
+    throw new Error(`Could not derive a publish name from "${value}". Rename the file or folder to lowercase kebab-case.`);
+  }
+
+  return normalized;
+}
+
+function isSkillPackagePath(filePath) {
+  return path.extname(filePath).toLowerCase() === '.skill';
+}
+
+function isSkillManifestName(fileName) {
+  return fileName.toLowerCase() === 'skill.md';
+}
+
+function ensureInside(parent, child, label) {
+  const relative = path.relative(parent, child);
+  if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) {
+    return;
+  }
+
+  throw new Error(`${label} must be inside ${parent} so Git can publish it. Move or copy it into this workspace first.`);
 }
 
 function pushOptionalPath(paths, root, absolutePath, label) {

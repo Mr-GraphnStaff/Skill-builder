@@ -89,8 +89,22 @@ type SkillEditorData = {
 
 type SkillQuickPickItem = vscode.QuickPickItem & {
   skill?: SkillSummary;
-  browse?: boolean;
+  browse?: SkillBrowseTarget;
 };
+
+type SkillBrowseTarget = 'manifest' | 'folder';
+
+type PublishSkillSelection = {
+  displayName: string;
+  publishPath: string;
+};
+
+type PublishSkillQuickPickItem = vscode.QuickPickItem & {
+  selection?: PublishSkillSelection;
+  browse?: PublishSkillBrowseTarget;
+};
+
+type PublishSkillBrowseTarget = 'file' | 'folder';
 
 const RESERVED_SKILL_NAMES = new Set(['anthropic', 'claude']);
 
@@ -210,12 +224,14 @@ export function activate(context: vscode.ExtensionContext) {
       await importSkillFromGit(context, provider, item?.skill);
     }),
     vscode.commands.registerCommand('skillBuilder.publishSkillToGit', async (item?: SkillItem) => {
-      const skill = item?.skill ?? await pickSkill(provider);
-      if (!skill) {
+      const selection = item?.skill
+        ? toPublishSkillSelection(item.skill)
+        : await pickPublishSkill(provider);
+      if (!selection) {
         return;
       }
 
-      await publishSkillToGit(context, skill);
+      await publishSkillToGit(context, selection);
     }),
     vscode.commands.registerCommand('skillBuilder.validateSkill', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
@@ -282,20 +298,26 @@ class SkillItem extends vscode.TreeItem {
 
 async function pickSkill(provider: SkillTreeProvider): Promise<SkillSummary | undefined> {
   const items = await provider.getChildren();
-  const browsePick: SkillQuickPickItem = {
-    label: '$(folder-opened) Browse for SKILL.md or skill folder...',
+  const browseManifestPick: SkillQuickPickItem = {
+    label: '$(file-code) Browse for SKILL.md...',
+    description: 'Open any Claude skill on this machine',
+    detail: 'Choose the SKILL.md file inside the skill folder.',
+    browse: 'manifest'
+  };
+  const browseFolderPick: SkillQuickPickItem = {
+    label: '$(folder-opened) Browse for skill folder...',
     description: 'Open any Claude skill on this machine',
     detail: 'Use this when the skill is outside the configured workspace skills directory.',
-    browse: true
+    browse: 'folder'
   };
 
   if (items.length === 0) {
     const action = await vscode.window.showQuickPick<SkillQuickPickItem>(
-      [browsePick],
+      [browseManifestPick, browseFolderPick],
       { placeHolder: 'No configured workspace skills found. Browse for an existing skill.' }
     );
 
-    return action?.browse ? browseForSkill() : undefined;
+    return action?.browse ? browseForSkill(action.browse) : undefined;
   }
 
   const skillPicks: SkillQuickPickItem[] = items.map((item) => ({
@@ -308,7 +330,8 @@ async function pickSkill(provider: SkillTreeProvider): Promise<SkillSummary | un
   const picked = await vscode.window.showQuickPick<SkillQuickPickItem>(
     [
       ...skillPicks,
-      browsePick
+      browseManifestPick,
+      browseFolderPick
     ],
     { placeHolder: 'Select a skill or browse for one' }
   );
@@ -317,35 +340,139 @@ async function pickSkill(provider: SkillTreeProvider): Promise<SkillSummary | un
     return undefined;
   }
 
-  return picked.browse ? browseForSkill() : picked.skill;
+  return picked.browse ? browseForSkill(picked.browse) : picked.skill;
 }
 
-async function browseForSkill(): Promise<SkillSummary | undefined> {
-  const picked = await vscode.window.showOpenDialog({
-    title: 'Open Claude Skill',
-    canSelectFiles: true,
-    canSelectFolders: true,
-    canSelectMany: false,
-    openLabel: 'Open Skill'
-  });
+async function browseForSkill(target: SkillBrowseTarget): Promise<SkillSummary | undefined> {
+  const picked = target === 'manifest'
+    ? await vscode.window.showOpenDialog({
+        title: 'Open Claude Skill Manifest',
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        openLabel: 'Open SKILL.md',
+        filters: {
+          'Markdown files': ['md'],
+          'All files': ['*']
+        }
+      })
+    : await vscode.window.showOpenDialog({
+        title: 'Open Claude Skill Folder',
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Open Skill Folder'
+      });
+
+  if (!picked || picked.length === 0) {
+    return undefined;
+  }
+
+  const skill = await readSkillFromSelectedPath(picked[0].fsPath);
+  if (!skill) {
+    vscode.window.showErrorMessage('Selected path is not a Claude skill. Choose SKILL.md directly, a folder containing SKILL.md, or a folder with one extracted skill folder inside.');
+    return undefined;
+  }
+
+  return skill;
+}
+
+async function pickPublishSkill(provider: SkillTreeProvider): Promise<PublishSkillSelection | undefined> {
+  const items = await provider.getChildren();
+  const browseFilePick: PublishSkillQuickPickItem = {
+    label: '$(file-code) Select SKILL.md or .skill file...',
+    description: 'Publish a local skill file',
+    detail: 'Use this for a SKILL.md manifest or an Anthropic .skill package file.',
+    browse: 'file'
+  };
+  const browseFolderPick: PublishSkillQuickPickItem = {
+    label: '$(folder-opened) Select extracted skill folder...',
+    description: 'Publish a local skill folder',
+    detail: 'Choose a folder that contains SKILL.md, or a folder with one extracted skill folder inside.',
+    browse: 'folder'
+  };
+
+  const skillPicks: PublishSkillQuickPickItem[] = items.map((item) => ({
+    label: item.skill.name,
+    description: item.skill.directoryName,
+    detail: item.skill.description,
+    selection: toPublishSkillSelection(item.skill)
+  }));
+
+  const picked = await vscode.window.showQuickPick<PublishSkillQuickPickItem>(
+    [
+      ...skillPicks,
+      browseFilePick,
+      browseFolderPick
+    ],
+    { placeHolder: 'Select a workspace skill, SKILL.md, .skill file, or extracted folder to publish' }
+  );
+
+  if (!picked) {
+    return undefined;
+  }
+
+  if (picked.browse) {
+    return browseForPublishSkill(picked.browse);
+  }
+
+  return picked.selection;
+}
+
+async function browseForPublishSkill(target: PublishSkillBrowseTarget): Promise<PublishSkillSelection | undefined> {
+  const picked = target === 'file'
+    ? await vscode.window.showOpenDialog({
+        title: 'Select SKILL.md or .skill File to Publish',
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: false,
+        openLabel: 'Select Skill File',
+        filters: {
+          'Claude skill files': ['md', 'skill'],
+          'All files': ['*']
+        }
+      })
+    : await vscode.window.showOpenDialog({
+        title: 'Select Extracted Skill Folder to Publish',
+        canSelectFiles: false,
+        canSelectFolders: true,
+        canSelectMany: false,
+        openLabel: 'Select Skill Folder'
+      });
 
   if (!picked || picked.length === 0) {
     return undefined;
   }
 
   const selectedPath = picked[0].fsPath;
-  const selectedName = path.basename(selectedPath);
-  const skillPath = selectedName.toLowerCase() === 'skill.md'
-    ? path.dirname(selectedPath)
-    : selectedPath;
+  if (isSkillPackagePath(selectedPath)) {
+    return {
+      displayName: path.basename(selectedPath, path.extname(selectedPath)),
+      publishPath: selectedPath
+    };
+  }
 
-  const skill = await readSkill(skillPath);
+  const skill = await readSkillFromSelectedPath(selectedPath);
   if (!skill) {
-    vscode.window.showErrorMessage('Selected path is not a Claude skill folder. Choose a folder containing SKILL.md or choose SKILL.md directly.');
+    vscode.window.showErrorMessage('Selected path is not publishable. Choose SKILL.md, a .skill file, or a folder containing SKILL.md.');
     return undefined;
   }
 
-  return skill;
+  return {
+    displayName: skill.name,
+    publishPath: selectedPath
+  };
+}
+
+function toPublishSkillSelection(skill: SkillSummary): PublishSkillSelection {
+  return {
+    displayName: skill.name,
+    publishPath: skill.skillPath
+  };
+}
+
+function isSkillPackagePath(filePath: string): boolean {
+  return path.extname(filePath).toLowerCase() === '.skill';
 }
 
 async function openInteractiveBuilder(context: vscode.ExtensionContext, provider: SkillTreeProvider) {
@@ -1468,10 +1595,15 @@ async function importSkillFromGit(
   provider.refresh();
 }
 
-async function publishSkillToGit(context: vscode.ExtensionContext, skill: SkillSummary): Promise<void> {
+async function publishSkillToGit(context: vscode.ExtensionContext, selection: PublishSkillSelection): Promise<void> {
   const root = await getProjectRoot();
   if (!root) {
     vscode.window.showErrorMessage('Open a workspace folder before publishing a skill.');
+    return;
+  }
+
+  const preparedSelection = await preparePublishSelection(root, selection);
+  if (!preparedSelection) {
     return;
   }
 
@@ -1506,11 +1638,96 @@ async function publishSkillToGit(context: vscode.ExtensionContext, skill: SkillS
   }
 
   const terminal = vscode.window.createTerminal({
-    name: `Publish ${skill.name}`,
+    name: `Publish ${preparedSelection.displayName}`,
     cwd: root
   });
   terminal.show();
-  terminal.sendText(`node ${quoteTerminalArg(scriptPath)} ${quoteTerminalArg(skill.directoryName)} --root ${quoteTerminalArg(root)}`);
+  terminal.sendText(`node ${quoteTerminalArg(scriptPath)} --source ${quoteTerminalArg(preparedSelection.publishPath)} --root ${quoteTerminalArg(root)}`);
+}
+
+async function preparePublishSelection(root: string, selection: PublishSkillSelection): Promise<PublishSkillSelection | undefined> {
+  const sourcePath = path.resolve(selection.publishPath);
+  if (isPathInside(root, sourcePath)) {
+    return {
+      displayName: selection.displayName,
+      publishPath: sourcePath
+    };
+  }
+
+  if (!await pathExists(sourcePath)) {
+    vscode.window.showErrorMessage(`Selected skill source was not found: ${sourcePath}`);
+    return undefined;
+  }
+
+  if (isSkillPackagePath(sourcePath)) {
+    return copyExternalSkillPackageIntoWorkspace(root, sourcePath);
+  }
+
+  return copyExternalSkillFolderIntoWorkspace(root, sourcePath);
+}
+
+async function copyExternalSkillPackageIntoWorkspace(root: string, sourcePath: string): Promise<PublishSkillSelection | undefined> {
+  const distDirectory = getDistDirectory(root);
+  const targetPath = path.join(distDirectory, path.basename(sourcePath));
+
+  const finalTargetPath = await confirmExternalCopyTarget(targetPath, 'package file');
+  if (!finalTargetPath) {
+    return undefined;
+  }
+
+  await fs.mkdir(path.dirname(finalTargetPath), { recursive: true });
+  await fs.copyFile(sourcePath, finalTargetPath);
+  vscode.window.showInformationMessage(`Copied ${path.basename(sourcePath)} into ${path.relative(root, distDirectory)} for publishing.`);
+
+  return {
+    displayName: path.basename(finalTargetPath, path.extname(finalTargetPath)),
+    publishPath: finalTargetPath
+  };
+}
+
+async function copyExternalSkillFolderIntoWorkspace(root: string, sourcePath: string): Promise<PublishSkillSelection | undefined> {
+  const skill = await readSkillFromSelectedPath(sourcePath);
+  if (!skill) {
+    vscode.window.showErrorMessage('Selected path is not publishable. Choose SKILL.md, a .skill file, or an extracted folder containing SKILL.md.');
+    return undefined;
+  }
+
+  const skillName = normalizeSkillName(skill.name) || normalizeSkillName(skill.directoryName);
+  if (!skillName) {
+    vscode.window.showErrorMessage(`Could not derive a workspace folder name for ${skill.skillPath}. Rename the skill folder to lowercase kebab-case.`);
+    return undefined;
+  }
+
+  const targetPath = path.join(getSkillsDirectory(root), skillName);
+  const finalTargetPath = await confirmExternalCopyTarget(targetPath, 'skill folder');
+  if (!finalTargetPath) {
+    return undefined;
+  }
+
+  await fs.mkdir(path.dirname(finalTargetPath), { recursive: true });
+  await fs.rm(finalTargetPath, { recursive: true, force: true });
+  await fs.cp(skill.skillPath, finalTargetPath, { recursive: true });
+  vscode.window.showInformationMessage(`Copied ${skill.name} into ${path.relative(root, finalTargetPath)} for publishing.`);
+
+  return {
+    displayName: skill.name,
+    publishPath: finalTargetPath
+  };
+}
+
+async function confirmExternalCopyTarget(targetPath: string, label: string): Promise<string | undefined> {
+  if (!await pathExists(targetPath)) {
+    return targetPath;
+  }
+
+  const action = await vscode.window.showWarningMessage(
+    `Publishing this external ${label} needs a workspace copy. Replace ${targetPath}?`,
+    { modal: true },
+    'Replace Workspace Copy',
+    'Cancel'
+  );
+
+  return action === 'Replace Workspace Copy' ? targetPath : undefined;
 }
 
 async function validateSkill(context: vscode.ExtensionContext, skill: SkillSummary) {
@@ -1624,7 +1841,7 @@ async function openSkillEditor(
           await importSkillFromGit(context, provider, freshSkill);
           break;
         case 'publishSkillToGit':
-          await publishSkillToGit(context, freshSkill);
+          await publishSkillToGit(context, toPublishSkillSelection(freshSkill));
           break;
         case 'validateSkill':
           await validateSkill(context, freshSkill);
@@ -2596,8 +2813,8 @@ async function readSkills(root: string): Promise<SkillSummary[]> {
 }
 
 async function readSkill(skillPath: string): Promise<SkillSummary | undefined> {
-  const manifestPath = path.join(skillPath, 'SKILL.md');
-  if (!await pathExists(manifestPath)) {
+  const manifestPath = await findSkillManifestPath(skillPath);
+  if (!manifestPath) {
     return undefined;
   }
 
@@ -2612,6 +2829,74 @@ async function readSkill(skillPath: string): Promise<SkillSummary | undefined> {
     name: frontmatter.name ?? directoryName,
     description: frontmatter.description
   };
+}
+
+async function readSkillFromSelectedPath(selectedPath: string): Promise<SkillSummary | undefined> {
+  let stat: import('node:fs').Stats;
+  try {
+    stat = await fs.stat(selectedPath);
+  } catch {
+    return undefined;
+  }
+
+  if (stat.isFile()) {
+    return isSkillManifestName(path.basename(selectedPath))
+      ? readSkill(path.dirname(selectedPath))
+      : undefined;
+  }
+
+  if (!stat.isDirectory()) {
+    return undefined;
+  }
+
+  const directSkill = await readSkill(selectedPath);
+  if (directSkill) {
+    return directSkill;
+  }
+
+  const childSkills = await readImmediateChildSkills(selectedPath);
+  return childSkills.length === 1 ? childSkills[0] : undefined;
+}
+
+async function readImmediateChildSkills(directory: string): Promise<SkillSummary[]> {
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const skills = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => readSkill(path.join(directory, entry.name)))
+  );
+
+  return skills.filter((skill): skill is SkillSummary => skill !== undefined);
+}
+
+async function findSkillManifestPath(skillPath: string): Promise<string | undefined> {
+  const canonicalPath = path.join(skillPath, 'SKILL.md');
+  if (await pathExists(canonicalPath)) {
+    return canonicalPath;
+  }
+
+  const lowercasePath = path.join(skillPath, 'skill.md');
+  if (await pathExists(lowercasePath)) {
+    return lowercasePath;
+  }
+
+  try {
+    const entries = await fs.readdir(skillPath, { withFileTypes: true });
+    const manifest = entries.find((entry) => entry.isFile() && isSkillManifestName(entry.name));
+    return manifest ? path.join(skillPath, manifest.name) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isSkillManifestName(fileName: string): boolean {
+  return fileName.toLowerCase() === 'skill.md';
 }
 
 function parseFrontmatter(markdown: string): Record<string, string> {
@@ -2740,6 +3025,11 @@ function expandHome(value: string): string {
   }
 
   return value;
+}
+
+function isPathInside(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function quoteTerminalArg(value: string): string {

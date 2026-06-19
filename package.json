@@ -1,27 +1,41 @@
 {
   "name": "skill-builder",
-  "displayName": "Claude Skill Builder",
-  "description": "Create, package, validate, and sync Anthropic Claude Agent Skills from VS Code.",
-  "version": "0.3.1",
+  "displayName": "Claude Skills Toolkit",
+  "description": "Build, validate, package, and manage Claude skills directly from VS Code.",
+  "version": "0.3.3",
   "publisher": "DavidFarris",
   "license": "MIT",
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/Mr-GraphnStaff/Skill-builder.git"
+  },
+  "homepage": "https://github.com/Mr-GraphnStaff/Skill-builder#readme",
+  "bugs": {
+    "url": "https://github.com/Mr-GraphnStaff/Skill-builder/issues"
   },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Machine Learning",
+    "Education"
   ],
   "keywords": [
     "claude",
     "anthropic",
-    "agent-skills",
     "skills",
-    "claude-code",
-    "skill-builder"
+    "claude skills",
+    "agent skills",
+    "ai agents",
+    "ai workflow",
+    "prompt engineering",
+    "skill builder",
+    "skill packaging",
+    "skill validation",
+    "vscode ai",
+    "agent development"
   ],
   "activationEvents": [
     "onView:skillBuilder.skillsView",

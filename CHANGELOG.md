@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.3
+
+- Renamed the Marketplace display name to Claude Skills Toolkit.
+- Added Marketplace icon and README screenshot assets.
+- Reworked package metadata, keywords, categories, homepage, and issue links for the public Marketplace listing.
+- Rewrote the README as a product-focused install and usage guide.
+- Updated the public GitHub repository description, homepage, and topics.
+
+## 0.3.2
+
+- Fixed Git publishing skill selection so the command can publish a selected `SKILL.md`, an Anthropic `.skill` package file, or an extracted skill folder instead of reconstructing only `skills/<name>/SKILL.md`.
+- Split publish browsing into file and folder pickers so Windows shows a clear `SKILL.md`/`.skill` file picker or an extracted-folder picker.
+- Added workspace-copy handling for external publish selections, copying `.skill` package files into `dist/` and extracted skill folders into `skills/` before staging.
+
 ## 0.3.1
 
 - Changed Git publish validation to be opt-in by default so publishing does not depend on a globally installed validator.
