@@ -4,6 +4,8 @@
 src/**
 skills/**
 dist/**
+workbench/**
 AGENTS.md
+skill-builder.config.json
 tsconfig.json
 *.vsix

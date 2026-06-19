@@ -1,0 +1,17 @@
+{
+  "skillsDirectory": "skills",
+  "workbenchDirectory": "workbench",
+  "distDirectory": "dist",
+  "git": {
+    "enabled": false,
+    "remote": "origin",
+    "baseBranch": "main",
+    "branchPrefix": "skills/",
+    "publishMode": "branch",
+    "requireValidation": false,
+    "fetchBeforePush": true,
+    "includeWorkbench": false,
+    "includeDist": false,
+    "createPullRequest": false
+  }
+}
