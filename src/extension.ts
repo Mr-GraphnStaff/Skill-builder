@@ -1,8 +1,12 @@
+import { execFile } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { promisify } from 'node:util';
 import AdmZip from 'adm-zip';
 import * as vscode from 'vscode';
+
+const execFileAsync = promisify(execFile);
 
 type SkillSummary = {
   directoryName: string;
@@ -105,6 +109,16 @@ type PublishSkillQuickPickItem = vscode.QuickPickItem & {
 };
 
 type PublishSkillBrowseTarget = 'file' | 'folder';
+
+type PublishRepositoryQuickPickItem = vscode.QuickPickItem & {
+  repository?: string;
+  custom?: boolean;
+};
+
+type GitRemoteSummary = {
+  name: string;
+  url: string;
+};
 
 const RESERVED_SKILL_NAMES = new Set(['anthropic', 'claude']);
 
@@ -1637,12 +1651,102 @@ async function publishSkillToGit(context: vscode.ExtensionContext, selection: Pu
     return;
   }
 
+  const repository = await pickPublishRepository(root);
+  if (!repository) {
+    return;
+  }
+
+  const commandParts = [
+    'node',
+    quoteTerminalArg(scriptPath),
+    '--source',
+    quoteTerminalArg(preparedSelection.publishPath),
+    '--root',
+    quoteTerminalArg(root)
+  ];
+
+  if (repository.repository) {
+    commandParts.push('--remote', quoteTerminalArg(repository.repository));
+  }
+
+  const action = await vscode.window.showWarningMessage(
+    `Publish ${preparedSelection.displayName} to ${repository.repository ?? 'the configured Git remote'}? This will commit and push the selected skill source.`,
+    { modal: true },
+    'Publish'
+  );
+
+  if (action !== 'Publish') {
+    return;
+  }
+
+  commandParts.push('--yes');
+
   const terminal = vscode.window.createTerminal({
     name: `Publish ${preparedSelection.displayName}`,
     cwd: root
   });
   terminal.show();
-  terminal.sendText(`node ${quoteTerminalArg(scriptPath)} --source ${quoteTerminalArg(preparedSelection.publishPath)} --root ${quoteTerminalArg(root)}`);
+  terminal.sendText(commandParts.join(' '));
+}
+
+async function pickPublishRepository(root: string): Promise<{ repository?: string } | undefined> {
+  const configuredRemote = await readConfiguredGitRemote(root);
+  const remotes = await listGitRemotes(root);
+  const remoteItems: PublishRepositoryQuickPickItem[] = remotes.map((remote) => ({
+    label: `$(repo) ${remote.name}`,
+    description: remote.url,
+    detail: 'Publish using this connected Git remote.',
+    repository: remote.name
+  }));
+
+  const items: PublishRepositoryQuickPickItem[] = [
+    {
+      label: configuredRemote
+        ? `$(gear) Use configured default (${configuredRemote})`
+        : '$(gear) Use configured default',
+      description: 'skill-builder.config.json git.remote',
+      detail: 'Use the repository configured for this workspace.'
+    },
+    ...remoteItems,
+    {
+      label: '$(link-external) Enter another repository...',
+      description: 'GitHub URL, local repository path, or remote name',
+      detail: 'Use this for a one-off publish target.',
+      custom: true
+    }
+  ];
+
+  const picked = await vscode.window.showQuickPick<PublishRepositoryQuickPickItem>(items, {
+    title: 'Publish Skill to Git',
+    placeHolder: remotes.length > 0
+      ? 'Select a Git repository for this publish'
+      : 'No Git remotes found. Use configured default or enter a repository.'
+  });
+
+  if (!picked) {
+    return undefined;
+  }
+
+  if (!picked.custom) {
+    return { repository: picked.repository };
+  }
+
+  const repository = await vscode.window.showInputBox({
+    title: 'Publish Skill to Git',
+    prompt: 'Git repository URL, local path, or remote name.',
+    placeHolder: 'https://github.com/owner/repo.git'
+  });
+
+  if (repository === undefined) {
+    return undefined;
+  }
+
+  const trimmed = repository.trim();
+  if (!trimmed) {
+    return { repository: undefined };
+  }
+
+  return { repository: trimmed };
 }
 
 async function preparePublishSelection(root: string, selection: PublishSkillSelection): Promise<PublishSkillSelection | undefined> {
@@ -2993,6 +3097,48 @@ async function readPackageName(candidate: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+async function readConfiguredGitRemote(root: string): Promise<string | undefined> {
+  try {
+    const config = await fs.readFile(path.join(root, 'skill-builder.config.json'), 'utf8');
+    const parsed = JSON.parse(config) as { git?: { remote?: unknown } };
+    return typeof parsed.git?.remote === 'string' && parsed.git.remote.trim()
+      ? parsed.git.remote.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function listGitRemotes(root: string): Promise<GitRemoteSummary[]> {
+  try {
+    const { stdout } = await execFileAsync('git', ['remote', '-v'], {
+      cwd: root,
+      encoding: 'utf8'
+    });
+    return parseGitRemotes(String(stdout));
+  } catch {
+    return [];
+  }
+}
+
+function parseGitRemotes(output: string): GitRemoteSummary[] {
+  const remotes = new Map<string, GitRemoteSummary>();
+
+  for (const line of output.split(/\r?\n/)) {
+    const match = /^(\S+)\s+(.+?)\s+\((fetch|push)\)$/.exec(line.trim());
+    if (!match) {
+      continue;
+    }
+
+    const [, name, url, kind] = match;
+    if (kind === 'fetch' || !remotes.has(name)) {
+      remotes.set(name, { name, url });
+    }
+  }
+
+  return [...remotes.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
 
 function getSkillsDirectory(root: string): string {

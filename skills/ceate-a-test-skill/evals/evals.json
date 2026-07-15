@@ -1,0 +1,34 @@
+{
+  "skill_name": "ceate-a-test-skill",
+  "evals": [
+    {
+      "id": "happy-path",
+      "prompt": "Use the ceate-a-test-skill skill for a representative user request.",
+      "expected_output": "The response follows the skill workflow and states important assumptions.",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": "incomplete-input",
+      "prompt": "Handle an incomplete request that might need the ceate-a-test-skill skill.",
+      "expected_output": "The response asks only necessary clarifying questions or chooses a documented conservative default.",
+      "files": [],
+      "assertions": []
+    },
+    {
+      "id": "edge-case",
+      "prompt": "Handle an edge case for the ceate-a-test-skill skill without over-triggering unrelated workflows.",
+      "expected_output": "The response handles edge cases according to the skill and avoids unsupported assumptions.",
+      "files": [],
+      "assertions": []
+    }
+  ],
+  "trigger_evals": {
+    "should_trigger": [
+      "Help me with ceate-a-test-skill."
+    ],
+    "should_not_trigger": [
+      "Answer a general question unrelated to this skill."
+    ]
+  }
+}

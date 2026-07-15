@@ -164,6 +164,7 @@ cp skill-builder.config.example.json skill-builder.config.json
 ```
 
 Then set `git.enabled` to `true` and review the remote, branch prefix, validation, and include rules.
+When you run `Skill Builder: Publish Skill to Git`, you can pick from detected Git remotes or enter a Git remote name, repository URL, or local repository path for that publish.
 
 The publisher can handle:
 

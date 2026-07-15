@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.5
+
+- Moved Git publish confirmation into the VS Code command flow and passed `--yes` to the terminal publisher to avoid terminal automation interrupting the interactive prompt.
+
+## 0.3.4
+
+- Added a publish-time repository picker so `Skill Builder: Publish Skill to Git` can target a detected Git remote, GitHub URL, or local repository path instead of only the configured default.
+- Allowed direct repository URLs and paths in the publish script's remote override.
+
 ## 0.3.3
 
 - Renamed the Marketplace display name to Claude Skills Toolkit.
