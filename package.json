@@ -248,7 +248,7 @@
     "publish-skill": "node scripts/publish-skill.mjs"
   },
   "dependencies": {
-    "adm-zip": "^0.5.12",
+    "adm-zip": "^0.6.0",
     "skills-ref": "0.1.5"
   },
   "devDependencies": {
