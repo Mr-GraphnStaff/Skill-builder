@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Removed redundant explicit command and view activation events now inferred by VS Code 1.74 and newer.
+- Retained workspace skill discovery through `workspaceContains:skills/*/SKILL.md`.
+
 ## 0.4.0
 
 - Upgraded ZIP and YAML dependencies to remediate known denial-of-service vulnerabilities.
