@@ -78,7 +78,9 @@ async function main() {
   }
 
   ensureGitWorktree(root);
-  ensureRemote(root, gitConfig.remote);
+  if (isConfiguredRemoteName(root, gitConfig.remote)) {
+    ensureRemote(root, gitConfig.remote);
+  }
 
   const publishTarget = resolvePublishTarget(root, config, skillSource);
 
@@ -113,7 +115,7 @@ async function main() {
 
   const staged = runGit(root, ['diff', '--cached', '--name-status', '--', ...selectedGitPaths]).trim();
   if (!staged) {
-    console.log(`No staged changes for ${skillName}. Nothing to publish.`);
+    console.log(`No staged changes for ${publishTarget.displayName}. Nothing to publish.`);
     return;
   }
 
@@ -250,7 +252,7 @@ Options:
   --root <path>                  Skill Builder project root. Defaults to cwd.
   --config <path>                Config file path. Defaults to skill-builder.config.json.
   --source <path-or-name>        Skill name, SKILL.md path, skill folder, or Anthropic .skill package file.
-  --remote <name>                Override git.remote from config.
+  --remote <name-or-url>         Override git.remote with a remote name, repository URL, or local path.
   --branch <name>                Override the target branch.
   -m, --message <message>        Commit message.
   -y, --yes                      Skip the interactive publish confirmation.
@@ -522,6 +524,10 @@ function ensureGitWorktree(root) {
 
 function ensureRemote(root, remote) {
   runGit(root, ['remote', 'get-url', remote]);
+}
+
+function isConfiguredRemoteName(root, remote) {
+  return splitLines(runGit(root, ['remote'])).includes(remote);
 }
 
 function resolveTargetBranch(skillName, currentBranch, branchOverride, gitConfig) {

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+- Upgraded ZIP and YAML dependencies to remediate known denial-of-service vulnerabilities.
+- Added a deterministic Trust Scan for credentials, network access, process execution, destructive operations, broad tool grants, and oversized files.
+- Added quality-aware validation for trigger descriptions, name/folder mismatches, unsupported frontmatter, unfinished scaffolds, missing evals, and unreferenced supporting files.
+- Added Evaluation Preflight with persisted JSON results under `workbench/<skill>/runs/` and an in-editor results report.
+- Added packaging warnings for blocking trust or structural findings.
+- Extracted reusable trust, quality, and evaluation logic from the VS Code extension into `src/skill-analysis.ts`.
+- Added automated tests for analysis, trust findings, eval parsing, trigger separation, and honest evaluation labeling.
+
+## 0.3.5
+
+- Moved Git publish confirmation into the VS Code command flow and passed `--yes` to the terminal publisher to avoid terminal automation interrupting the interactive prompt.
+
+## 0.3.4
+
+- Added a publish-time repository picker so `Skill Builder: Publish Skill to Git` can target a detected Git remote, GitHub URL, or local repository path instead of only the configured default.
+- Allowed direct repository URLs and paths in the publish script's remote override.
+
 ## 0.3.3
 
 - Renamed the Marketplace display name to Claude Skills Toolkit.

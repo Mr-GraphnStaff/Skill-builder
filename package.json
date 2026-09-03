@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "Claude Skills Toolkit",
   "description": "Build, validate, package, and manage Claude skills directly from VS Code.",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -52,6 +52,8 @@
     "onCommand:skillBuilder.publishSkillToGit",
     "onCommand:skillBuilder.validateSkill",
     "onCommand:skillBuilder.healthCheck",
+    "onCommand:skillBuilder.trustScan",
+    "onCommand:skillBuilder.runEvals",
     "workspaceContains:skills/*/SKILL.md"
   ],
   "main": "./out/extension.js",
@@ -121,6 +123,16 @@
         "command": "skillBuilder.healthCheck",
         "title": "Skill Builder: Health Check",
         "icon": "$(pulse)"
+      },
+      {
+        "command": "skillBuilder.trustScan",
+        "title": "Skill Builder: Trust Scan",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "skillBuilder.runEvals",
+        "title": "Skill Builder: Run Evaluation Preflight",
+        "icon": "$(beaker)"
       }
     ],
     "configuration": {
@@ -226,6 +238,16 @@
           "command": "skillBuilder.healthCheck",
           "when": "view == skillBuilder.skillsView && viewItem == skill",
           "group": "skill@9"
+        },
+        {
+          "command": "skillBuilder.trustScan",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@10"
+        },
+        {
+          "command": "skillBuilder.runEvals",
+          "when": "view == skillBuilder.skillsView && viewItem == skill",
+          "group": "skill@11"
         }
       ]
     },
@@ -242,17 +264,19 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "test": "npm run compile && node --test test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npx --yes @vscode/vsce package",
     "import-skill": "node scripts/import-skill.mjs",
     "publish-skill": "node scripts/publish-skill.mjs"
   },
   "dependencies": {
-    "adm-zip": "^0.5.12",
+    "adm-zip": "^0.6.0",
+    "js-yaml": "^4.3.2",
     "skills-ref": "0.1.5"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.7",
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.19.0",
     "@types/vscode": "1.90.0",
     "typescript": "^5.8.3"

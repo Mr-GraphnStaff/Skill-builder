@@ -22,6 +22,8 @@ Claude Skills Toolkit gives Claude skill builders a small VS Code-native control
 - Opens and edits skill metadata, workflow modules, files, evals, and package actions from a VS Code webview.
 - Packages skills into upload-ready ZIP files for Claude.ai.
 - Runs bundled validation from the VS Code terminal.
+- Scans skills for trust, security, and quality risks before distribution.
+- Runs a deterministic evaluation preflight and saves reviewable results under `workbench/<skill>/runs/`.
 - Syncs local skills into Claude Code's personal skill folder.
 - Imports and publishes skill folders through configurable Git workflows.
 - Helps turn rough skill ideas into structured drafts without forcing a rigid form.
@@ -82,6 +84,8 @@ dist/
 - `Skill Builder: Publish Skill to Git` commits and pushes a configured skill path through the manual publish script.
 - `Skill Builder: Validate Skill` runs the bundled `skills-ref` validator.
 - `Skill Builder: Health Check` opens a local structure and quality report.
+- `Skill Builder: Trust Scan` flags potential secrets, network/process access, destructive operations, broad tool grants, and unusually large files.
+- `Skill Builder: Run Evaluation Preflight` checks whether task and trigger evals are ready for behavioral execution and saves a JSON result.
 - `Skill Builder: Copy Free-Form Chat Prompt` copies a prompt for deeper skill authoring work with an AI assistant.
 
 ## Create Skills From Rough Ideas
@@ -137,6 +141,12 @@ node "<extension-folder>/node_modules/skills-ref/dist/cli.js" validate "<skill-p
 
 A global `skills-ref` install is not required.
 
+## Trust And Evaluation
+
+The Trust Scan is a deterministic review aid, not a malware verdict or sandbox. Review flagged scripts and permissions before installing or distributing a third-party skill.
+
+Evaluation Preflight checks prompt completeness, expected outcomes, assertions, and approximate trigger separation. It deliberately does not claim to execute Claude or prove behavioral improvement. Use the saved run artifact as the input to a later with-skill/without-skill model benchmark.
+
 ## Sync To Claude Code
 
 Right-click a skill and choose:
@@ -164,6 +174,7 @@ cp skill-builder.config.example.json skill-builder.config.json
 ```
 
 Then set `git.enabled` to `true` and review the remote, branch prefix, validation, and include rules.
+When you run `Skill Builder: Publish Skill to Git`, you can pick from detected Git remotes or enter a Git remote name, repository URL, or local repository path for that publish.
 
 The publisher can handle:
 

@@ -1,8 +1,13 @@
+import { execFile } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { promisify } from 'node:util';
 import AdmZip from 'adm-zip';
 import * as vscode from 'vscode';
+import { analyzeSkill, parseEvalSuite, runEvalPreflight, type SkillFile } from './skill-analysis.js';
+
+const execFileAsync = promisify(execFile);
 
 type SkillSummary = {
   directoryName: string;
@@ -105,6 +110,9 @@ type PublishSkillQuickPickItem = vscode.QuickPickItem & {
 };
 
 type PublishSkillBrowseTarget = 'file' | 'folder';
+
+type PublishRepositoryQuickPickItem = vscode.QuickPickItem & { repository?: string; custom?: boolean };
+type GitRemoteSummary = { name: string; url: string };
 
 const RESERVED_SKILL_NAMES = new Set(['anthropic', 'claude']);
 
@@ -247,6 +255,18 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       await showSkillHealthCheck(skill);
+    }),
+    vscode.commands.registerCommand('skillBuilder.trustScan', async (item?: SkillItem) => {
+      const skill = item?.skill ?? await pickSkill(provider);
+      if (skill) {
+        await showTrustScan(skill);
+      }
+    }),
+    vscode.commands.registerCommand('skillBuilder.runEvals', async (item?: SkillItem) => {
+      const skill = item?.skill ?? await pickSkill(provider);
+      if (skill) {
+        await runSkillEvals(skill);
+      }
     })
   );
 }
@@ -1367,6 +1387,24 @@ async function packageSkill(skill: SkillSummary): Promise<string | undefined> {
     return undefined;
   }
 
+  const analysis = await analyzeSkillOnDisk(skill);
+  const blockingFindings = analysis.findings.filter((finding) => finding.severity === 'error');
+  if (blockingFindings.length > 0) {
+    const action = await vscode.window.showWarningMessage(
+      `${skill.name} has ${blockingFindings.length} trust or structural error${blockingFindings.length === 1 ? '' : 's'}. Review them before packaging?`,
+      { modal: true },
+      'Review Health Check',
+      'Package Anyway'
+    );
+    if (action === 'Review Health Check') {
+      await showSkillHealthCheck(skill);
+      return undefined;
+    }
+    if (action !== 'Package Anyway') {
+      return undefined;
+    }
+  }
+
   const distDirectory = getDistDirectory(root);
   const zipPath = path.join(distDirectory, `${skill.directoryName}.zip`);
 
@@ -1637,12 +1675,40 @@ async function publishSkillToGit(context: vscode.ExtensionContext, selection: Pu
     return;
   }
 
+  const repository = await pickPublishRepository(root);
+  if (!repository) return;
+
+  const commandParts = ['node', quoteTerminalArg(scriptPath), '--source', quoteTerminalArg(preparedSelection.publishPath), '--root', quoteTerminalArg(root)];
+  if (repository.repository) commandParts.push('--remote', quoteTerminalArg(repository.repository));
+  const action = await vscode.window.showWarningMessage(
+    `Publish ${preparedSelection.displayName} to ${repository.repository ?? 'the configured Git remote'}? This will commit and push the selected skill source.`,
+    { modal: true }, 'Publish'
+  );
+  if (action !== 'Publish') return;
+  commandParts.push('--yes');
+
   const terminal = vscode.window.createTerminal({
     name: `Publish ${preparedSelection.displayName}`,
     cwd: root
   });
   terminal.show();
-  terminal.sendText(`node ${quoteTerminalArg(scriptPath)} --source ${quoteTerminalArg(preparedSelection.publishPath)} --root ${quoteTerminalArg(root)}`);
+  terminal.sendText(commandParts.join(' '));
+}
+
+async function pickPublishRepository(root: string): Promise<{ repository?: string } | undefined> {
+  const configuredRemote = await readConfiguredGitRemote(root);
+  const remotes = await listGitRemotes(root);
+  const items: PublishRepositoryQuickPickItem[] = [
+    { label: configuredRemote ? `$(gear) Use configured default (${configuredRemote})` : '$(gear) Use configured default', description: 'skill-builder.config.json git.remote' },
+    ...remotes.map((remote) => ({ label: `$(repo) ${remote.name}`, description: remote.url, repository: remote.name })),
+    { label: '$(link-external) Enter another repository...', description: 'GitHub URL, local repository path, or remote name', custom: true }
+  ];
+  const picked = await vscode.window.showQuickPick(items, { title: 'Publish Skill to Git', placeHolder: 'Select a Git repository for this publish' });
+  if (!picked) return undefined;
+  if (!picked.custom) return { repository: picked.repository };
+  const repository = await vscode.window.showInputBox({ title: 'Publish Skill to Git', prompt: 'Git repository URL, local path, or remote name.', placeHolder: 'https://github.com/owner/repo.git' });
+  if (repository === undefined) return undefined;
+  return { repository: repository.trim() || undefined };
 }
 
 async function preparePublishSelection(root: string, selection: PublishSkillSelection): Promise<PublishSkillSelection | undefined> {
@@ -1749,6 +1815,37 @@ async function showSkillHealthCheck(skill: SkillSummary) {
   await vscode.window.showTextDocument(document);
 }
 
+async function showTrustScan(skill: SkillSummary) {
+  const analysis = await analyzeSkillOnDisk(skill);
+  const security = analysis.findings.filter((finding) => finding.category === 'security');
+  const report = `# Trust Scan: ${skill.name}\n\nScore: ${analysis.score}/100\n\n${security.length === 0
+    ? 'No trust warnings were found by the deterministic scanner.'
+    : security.map((finding) => `- [${finding.severity.toUpperCase()}] ${finding.message}${finding.file ? ` — \`${finding.file}\`` : ''}`).join('\n')}\n\n> This scanner flags review targets; it is not a malware verdict or a sandbox.\n`;
+  const document = await vscode.workspace.openTextDocument({ content: report, language: 'markdown' });
+  await vscode.window.showTextDocument(document);
+}
+
+async function runSkillEvals(skill: SkillSummary) {
+  const evalsPath = path.join(skill.skillPath, 'evals', 'evals.json');
+  if (!await pathExists(evalsPath)) {
+    vscode.window.showErrorMessage(`${skill.name} does not have evals/evals.json.`);
+    return;
+  }
+
+  const suite = parseEvalSuite(await fs.readFile(evalsPath, 'utf8'));
+  const run = runEvalPreflight(skill.name, skill.description ?? '', suite);
+  const root = await getProjectRoot();
+  const timestamp = run.createdAt.replace(/[:.]/g, '-');
+  const runDirectory = path.join(root ?? path.dirname(skill.skillPath), 'workbench', skill.directoryName, 'runs', timestamp);
+  await fs.mkdir(runDirectory, { recursive: true });
+  const resultPath = path.join(runDirectory, 'evaluation.json');
+  await fs.writeFile(resultPath, `${JSON.stringify(run, null, 2)}\n`, 'utf8');
+
+  const report = `# Evaluation Preflight: ${skill.name}\n\n${run.summary.ready}/${run.summary.total} task evals are ready to run; ${run.summary.needsWork} need work.\n\n## Task Cases\n\n${run.cases.map((test) => `- **${test.id}** — ${test.status}\n${test.checks.map((check) => `  - ${check.passed ? 'PASS' : 'WARN'}: ${check.detail}`).join('\n')}`).join('\n')}\n\n## Trigger Separation\n\n${run.triggerChecks.length ? run.triggerChecks.map((check) => `- ${check.passed ? 'PASS' : 'WARN'} ${check.expectation}: ${check.prompt}\n  ${check.detail}`).join('\n') : '- No trigger checks supplied.'}\n\n> ${run.note}\n\nSaved result: \`${resultPath}\`\n`;
+  const document = await vscode.workspace.openTextDocument({ content: report, language: 'markdown' });
+  await vscode.window.showTextDocument(document);
+}
+
 async function openSkillEditor(
   context: vscode.ExtensionContext,
   provider: SkillTreeProvider,
@@ -1848,6 +1945,12 @@ async function openSkillEditor(
           break;
         case 'healthCheck':
           await showSkillHealthCheck(freshSkill);
+          break;
+        case 'trustScan':
+          await showTrustScan(freshSkill);
+          break;
+        case 'runEvals':
+          await runSkillEvals(freshSkill);
           break;
         case 'copyChatPrompt':
           await vscode.env.clipboard.writeText(buildChatPrompt(freshSkill));
@@ -2089,6 +2192,7 @@ async function buildSkillEditorHtml(
         <button type="button" data-action="saveMetadata">Save Metadata</button>
         <button class="secondary" type="button" data-action="openSkill">Open SKILL.md</button>
         <button class="secondary" type="button" data-action="healthCheck">Health Check</button>
+        <button class="secondary" type="button" data-action="trustScan">Trust Scan</button>
       </div>
     </section>
 
@@ -2127,6 +2231,7 @@ async function buildSkillEditorHtml(
       <p class="subtle">${escapeHtml(data.evalsSummary)}</p>
       <div class="actions">
         <button class="secondary" type="button" data-action="openEvals">Open evals.json</button>
+        <button type="button" data-action="runEvals">Run Evaluation Preflight</button>
       </div>
       <pre>${escapeHtml(data.evalsRaw ?? 'No evals/evals.json found.')}</pre>
     </section>
@@ -2220,6 +2325,7 @@ async function readSkillEditorData(skill: SkillSummary): Promise<SkillEditorData
 
 async function buildSkillHealthReport(skill: SkillSummary): Promise<string> {
   const findings = await collectSkillHealthFindings(skill);
+  const analysis = await analyzeSkillOnDisk(skill);
   const passCount = findings.filter((finding) => finding.severity === 'pass').length;
   const warnCount = findings.filter((finding) => finding.severity === 'warn').length;
   const failCount = findings.filter((finding) => finding.severity === 'fail').length;
@@ -2230,13 +2336,47 @@ Path: \`${skill.skillPath}\`
 
 Summary: ${passCount} pass, ${warnCount} warning${warnCount === 1 ? '' : 's'}, ${failCount} failure${failCount === 1 ? '' : 's'}
 
+Trust and quality score: ${analysis.score}/100
+
 ## Findings
 
 ${findings.map((finding) => {
   const prefix = finding.severity.toUpperCase();
   return `- [${prefix}] ${finding.message}${finding.detail ? `\n  ${finding.detail}` : ''}`;
 }).join('\n')}
+
+## Quality And Trust Findings
+
+${analysis.findings.length === 0 ? '- No additional findings.' : analysis.findings.map((finding) => `- [${finding.severity.toUpperCase()}] **${finding.category}**: ${finding.message}${finding.file ? ` — \`${finding.file}\`` : ''}`).join('\n')}
 `;
+}
+
+async function analyzeSkillOnDisk(skill: SkillSummary) {
+  const manifest = await fs.readFile(skill.manifestPath, 'utf8');
+  const files = await collectAnalysisFiles(skill.skillPath);
+  return analyzeSkill(manifest, files, skill.directoryName);
+}
+
+async function collectAnalysisFiles(root: string, current = root): Promise<SkillFile[]> {
+  const collected: SkillFile[] = [];
+  const entries = await fs.readdir(current, { withFileTypes: true });
+  for (const entry of entries) {
+    const absolute = path.join(current, entry.name);
+    const relativePath = path.relative(root, absolute).replace(/\\/g, '/');
+    if (entry.isDirectory()) {
+      collected.push(...await collectAnalysisFiles(root, absolute));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const stat = await fs.stat(absolute);
+    const extension = path.extname(entry.name).toLowerCase();
+    const textExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.toml', '.ini', '.env', '.js', '.mjs', '.cjs', '.ts', '.py', '.sh', '.ps1', '.csv', '.tsv']);
+    const content = stat.size <= 1024 * 1024 && textExtensions.has(extension)
+      ? await fs.readFile(absolute, 'utf8')
+      : undefined;
+    collected.push({ relativePath, size: stat.size, content });
+  }
+  return collected;
 }
 
 async function collectSkillHealthFindings(skill: SkillSummary): Promise<SkillHealthFinding[]> {
@@ -2993,6 +3133,25 @@ async function readPackageName(candidate: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+async function readConfiguredGitRemote(root: string): Promise<string | undefined> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(root, 'skill-builder.config.json'), 'utf8')) as { git?: { remote?: unknown } };
+    return typeof parsed.git?.remote === 'string' && parsed.git.remote.trim() ? parsed.git.remote.trim() : undefined;
+  } catch { return undefined; }
+}
+
+async function listGitRemotes(root: string): Promise<GitRemoteSummary[]> {
+  try {
+    const { stdout } = await execFileAsync('git', ['remote', '-v'], { cwd: root, encoding: 'utf8' });
+    const remotes = new Map<string, GitRemoteSummary>();
+    for (const line of String(stdout).split(/\r?\n/)) {
+      const match = /^(\S+)\s+(.+?)\s+\((fetch|push)\)$/.exec(line.trim());
+      if (match && (match[3] === 'fetch' || !remotes.has(match[1]))) remotes.set(match[1], { name: match[1], url: match[2] });
+    }
+    return [...remotes.values()].sort((left, right) => left.name.localeCompare(right.name));
+  } catch { return []; }
 }
 
 function getSkillsDirectory(root: string): string {
