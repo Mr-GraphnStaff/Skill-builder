@@ -53,9 +53,13 @@ export class GuidedWorkbenchController {
       if (message.editorContent === this.state.editor.content) return;
       throw new Error('This file is preserved as binary data and cannot be edited as text.');
     }
+    // A textarea exposes CRLF/CR as LF, including when the user has not typed.
+    // Compare against the displayed snapshot, never against a newer disk copy.
+    const browserText = (value: string) => value.replace(/\r\n?/g, '\n');
+    const unchanged = browserText(message.editorContent) === browserText(this.state.editor.content);
     const saved = readGuidedFile(skill, message.editorPath);
     if (saved !== this.state.editor.content) {
-      if (message.editorContent === this.state.editor.content) {
+      if (unchanged) {
         this.state.editor.content = saved;
         this.state.files = listGuidedFiles(skill);
         this.state.check = undefined;
@@ -64,10 +68,13 @@ export class GuidedWorkbenchController {
       const recovery = saveGuidedRecovery(this.workspace(), skill, message.editorPath, message.editorContent);
       throw new Error(`This file changed in another editor. The saved file was kept, and your workbench edits were preserved at ${recovery}. Choose Reload saved file to continue from the current saved version.`);
     }
-    if (message.editorContent !== this.state.editor.content) {
-      writeGuidedFile(skill, message.editorPath, message.editorContent);
+    if (!unchanged) {
+      const original = this.state.editor.content;
+      const uniformCrlf = original.includes('\r\n') && !/[\r\n]/.test(original.replace(/\r\n/g, ''));
+      const content = uniformCrlf ? browserText(message.editorContent).replace(/\n/g, '\r\n') : message.editorContent;
+      writeGuidedFile(skill, message.editorPath, content);
       this.state.check = undefined;
-      this.state.editor.content = message.editorContent;
+      this.state.editor.content = content;
       this.state.files = listGuidedFiles(skill);
     }
   }

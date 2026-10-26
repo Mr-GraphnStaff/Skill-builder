@@ -57,6 +57,12 @@ test('skill contents and paths remain inert text, including textarea and script 
   assert.match(html, /&lt;unsafe&gt;/);
 });
 
+test('repository discovery leaves Start connection controls expanded so the returned choices are visible', () => {
+  const html = renderGuidedWorkbench(state({ repositories: [{ label: 'My Skills', repository: 'https://github.com/example/Skills.git' }] }), nonce);
+  assert.match(html, /<details class="optional" open><summary>Change the connected repository<\/summary>/);
+  assert.match(html, /<select id="repository-choice"/);
+});
+
 test('CSP permits only nonced local code and the client uses no HTML injection or network API', () => {
   const html = renderGuidedWorkbench(state(), nonce);
   assert.match(html, /default-src 'none'/);

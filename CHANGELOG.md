@@ -7,6 +7,8 @@
 - Use the approved DAF-TECH logo from a fixed source revision in the extension README, keeping its appearance independent of later repository changes.
 - Keep portable Agent Skills as the default, with application-specific compatibility guidance and preserved supporting files. Structural checks do not execute AI models or establish behavior in every application.
 - Update the archive library to adm-zip 0.6.1 with security fixes for crafted ZIP files, retaining SkillJetty's path, file and size checks.
+- Preserve untouched text files byte for byte across editor navigation, including CRLF endings and leading blank lines; retain consistent CRLF endings when saving actual edits.
+- Keep repository discovery results visible in the expanded connection section.
 
 ## 0.7.1
 

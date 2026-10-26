@@ -25,6 +25,11 @@ function brandHeader(brand?: GuidedBrand, heading = false): string {
 function secondary(action: string, label: string, attributes = ''): string {
   return `<button type="button" class="secondary" data-action="${escape(action)}" ${attributes}>${escape(label)}</button>`;
 }
+function editorText(value: string): string {
+  // HTML parsing consumes one initial LF after <textarea>; supply that LF so
+  // the file's own leading blank lines survive in visible and hidden buffers.
+  return '\n' + escape(value);
+}
 function field(id: string, label: string, value: string, attributes = '', hint = ''): string {
   return `<div class="field"><label for="${id}">${escape(label)}</label>${hint ? `<p class="hint" id="${id}-hint">${escape(hint)}</p>` : ''}<input id="${id}" name="${id}" value="${escape(value)}" data-persist ${hint ? `aria-describedby="${id}-hint"` : ''} ${attributes}></div>`;
 }
@@ -94,7 +99,7 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
       <div class="start-option">${secondary('openFolder', 'Open a skill folder', 'aria-describedby="folder-choice-help"')}<p class="hint" id="folder-choice-help">Choose a folder containing SKILL.md and any supporting files.</p></div>
       </div></section>
       ${state.connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Publishing destination: <strong>${escape(state.connection.repository)}</strong></span></section>` : '<p class="hint">Ready to upload later? Connect a repository below or at the Publish step.</p>'}
-      ${savedWork(state)}<details class="optional"><summary>${state.connection ? 'Change the connected repository' : 'Connect a repository for publishing'}</summary>${repositoryForm(state)}</details>`,
+      ${savedWork(state)}<details class="optional" ${state.repositories.length ? 'open' : ''}><summary>${state.connection ? 'Change the connected repository' : 'Connect a repository for publishing'}</summary>${repositoryForm(state)}</details>`,
     primary: undefined
   };
 }
@@ -107,7 +112,7 @@ function edit(state: GuidedState): { title: string; hint: string; html: string; 
       <div class="editor-layout"><aside class="file-panel" aria-labelledby="files-heading"><h2 id="files-heading">Skill files</h2>${editor ? `<a href="#editorContent" class="editor-skip">Skip file list and ${editor.readOnly ? 'inspect' : 'edit'} selected file</a>` : ''}<ul class="file-list">${state.files.map(file => `<li><button type="button" class="file-button ${file.path === editor?.path ? 'selected' : ''}" data-action="openFile" data-path="${escape(file.path)}" ${file.path === editor?.path ? 'aria-current="true"' : ''}><span>${escape(file.path)}</span><small>${file.text ? 'Text' : 'Binary — preserved'} · ${file.size} bytes</small></button></li>`).join('')}</ul>
       <details class="optional"><summary>Add a supporting file</summary><form id="add-file-form" action="#" method="post" data-form-action="addFile">${field('addFilePath', 'Destination inside this skill (optional)', '', 'autocomplete="off" autocapitalize="off" spellcheck="false"', 'For example references/rules.md. Leave blank to keep the selected filename under references/.')}<button type="submit" class="secondary">Choose file to add</button></form></details>
       <details class="optional"><summary>Create a text file</summary><form id="new-file-form" action="#" method="post" data-form-action="createFile">${field('newFilePath', 'File path inside this skill (required)', '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'For example references/report-format.md. Existing files are not overwritten.')}<button type="submit" class="secondary">Create file</button></form></details></aside>
-      <section class="editor-panel" aria-labelledby="editor-heading"><h2 id="editor-heading">${escape(editor?.path ?? 'Select a file to edit')}</h2>${editor ? `<label for="editorContent" class="visually-hidden">Content of ${escape(editor.path)}</label><textarea id="editorContent" name="editorContent" class="code-editor" data-editor-path="${escape(editor.path)}" ${editor.readOnly ? 'readonly data-read-only="true"' : ''} spellcheck="false" autocomplete="off" aria-describedby="editor-help">${escape(editor.content)}</textarea><p class="hint" id="editor-help">${editor.readOnly ? 'This file is binary or read-only. Its original bytes are preserved; it will not be saved as text.' : 'You are editing the complete file. Tab moves to the next control. No scripts or AI models are run by this editor.'}</p>` : '<p>Choose a text file from Skill files. Binary supporting files remain included without being edited.</p>'}</section></div>`,
+      <section class="editor-panel" aria-labelledby="editor-heading"><h2 id="editor-heading">${escape(editor?.path ?? 'Select a file to edit')}</h2>${editor ? `<label for="editorContent" class="visually-hidden">Content of ${escape(editor.path)}</label><textarea id="editorContent" name="editorContent" class="code-editor" data-editor-path="${escape(editor.path)}" ${editor.readOnly ? 'readonly data-read-only="true"' : ''} spellcheck="false" autocomplete="off" aria-describedby="editor-help">${editorText(editor.content)}</textarea><p class="hint" id="editor-help">${editor.readOnly ? 'This file is binary or read-only. Its original bytes are preserved; it will not be saved as text.' : 'You are editing the complete file. Tab moves to the next control. No scripts or AI models are run by this editor.'}</p>` : '<p>Choose a text file from Skill files. Binary supporting files remain included without being edited.</p>'}</section></div>`,
     primary: { label: 'Check and continue', action: 'check', disabled: !state.active }
   };
 }
@@ -350,7 +355,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>
       <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="progress-message" ${!state.progress ? 'hidden' : ''}>${escape(state.progress ?? '')}</p><p id="client-error" class="error-message" hidden></p></div>
       ${screen.html}
-      ${state.step !== 'edit' && state.editor ? `<textarea id="bufferContent" hidden data-editor-path="${escape(state.editor.path)}" ${state.editor.readOnly ? 'readonly data-read-only="true"' : ''}>${escape(state.editor.content)}</textarea>` : ''}
+      ${state.step !== 'edit' && state.editor ? `<textarea id="bufferContent" hidden data-editor-path="${escape(state.editor.path)}" ${state.editor.readOnly ? 'readonly data-read-only="true"' : ''}>${editorText(state.editor.content)}</textarea>` : ''}
       ${primary ? `<footer class="action-bar"><button type="button" class="secondary" data-action="back" ${backDisabled ? 'disabled data-unavailable="true"' : ''}>← Back</button><button id="primary-action" class="primary" type="${primary.form ? 'submit' : 'button'}" ${primary.form ? `form="${primary.form}"` : `data-action="${primary.action}"`} ${state.busy || primary.disabled ? 'disabled' : ''} ${primary.disabled ? 'data-unavailable="true"' : ''}>${state.busy ? 'Working…' : escape(primary.label)} <span aria-hidden="true">→</span></button></footer>` : ''}
     </main></div><script nonce="${nonce}">${script}</script></body></html>`;
 }
