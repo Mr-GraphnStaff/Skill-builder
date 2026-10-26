@@ -1,0 +1,23 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { checkSkillCompatibility } = require('../out/skill-compatibility.js');
+test('portable checks preserve application-specific metadata while explaining limited portability', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-portable-')); t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const sourcePath = path.join(root, 'sample'); fs.mkdirSync(path.join(sourcePath, 'agents'), { recursive: true });
+  const content = '---\nname: sample\ndescription: Prepare a sample report. Use when asked for sample reporting.\ncontext: fork\n---\nRead the supplied notes.\n';
+  fs.writeFileSync(path.join(sourcePath, 'SKILL.md'), content);
+  fs.writeFileSync(path.join(sourcePath, 'agents', 'openai.yaml'), 'interface:\n  display_name: Sample\n');
+  const skill = { id: 'sample', name: 'sample', sourcePath };
+  const portable = checkSkillCompatibility(skill, 'portable');
+  assert.ok(portable.warnings.some(item => /context/.test(item.message)));
+  assert.ok(portable.warnings.some(item => item.file === 'agents/openai.yaml'));
+  assert.match(portable.behaviorNote, /No model was run/);
+  assert.equal(fs.readFileSync(path.join(sourcePath, 'SKILL.md'), 'utf8'), content);
+  const claude = checkSkillCompatibility(skill, 'claude');
+  assert.equal(claude.warnings.some(item => /“context”/.test(item.message)), false);
+  const codex = checkSkillCompatibility(skill, 'codex');
+  assert.equal(codex.warnings.some(item => item.file === 'agents/openai.yaml'), false);
+});

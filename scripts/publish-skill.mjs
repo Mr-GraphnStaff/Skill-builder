@@ -78,7 +78,20 @@ async function main() {
   }
 
   ensureGitWorktree(root);
-  ensureRemote(root, gitConfig.remote);
+  // Legacy publishing commits this repository's history. A different destination
+  // must use the workbench's isolated destination checkout instead.
+  if (!isConfiguredRemoteName(root, gitConfig.remote)) {
+    const matchingRemote = splitLines(runGit(root, ['remote'])).find((remote) =>
+      runGit(root, ['remote', 'get-url', remote]).trim() === gitConfig.remote
+    );
+    if (!matchingRemote) {
+      throw new Error('This legacy publisher only supports a configured workspace remote. Use SkillJetty: Open Workbench to publish a version to a different associated repository.');
+    }
+    gitConfig.remote = matchingRemote;
+  }
+  if (isConfiguredRemoteName(root, gitConfig.remote)) {
+    ensureRemote(root, gitConfig.remote);
+  }
 
   const publishTarget = resolvePublishTarget(root, config, skillSource);
 
@@ -113,7 +126,7 @@ async function main() {
 
   const staged = runGit(root, ['diff', '--cached', '--name-status', '--', ...selectedGitPaths]).trim();
   if (!staged) {
-    console.log(`No staged changes for ${skillName}. Nothing to publish.`);
+    console.log(`No staged changes for ${publishTarget.displayName}. Nothing to publish.`);
     return;
   }
 
@@ -161,7 +174,7 @@ async function main() {
   }
 
   const message = args.message ?? `Publish ${publishTarget.displayName} skill`;
-  runGit(root, ['commit', '-m', message], { stdio: 'inherit', mutates: true });
+  runGit(root, ['commit', '-m', message, '--only', '--', ...selectedGitPaths], { stdio: 'inherit', mutates: true });
   runGit(root, ['push', '-u', gitConfig.remote, targetBranch || currentBranch], { stdio: 'inherit', mutates: true });
 
   if (gitConfig.createPullRequest) {
@@ -241,16 +254,16 @@ function requireValue(argv, index, option) {
 }
 
 function printHelp() {
-  console.log(`Publish one Claude skill source to git.
+  console.log(`Publish one Agent Skill source to git.
 
 Usage:
   node scripts/publish-skill.mjs <skill-name|path-to-SKILL.md|path-to-folder|path-to-file.skill> [options]
 
 Options:
-  --root <path>                  Skill Builder project root. Defaults to cwd.
+  --root <path>                  SkillJetty project root. Defaults to cwd.
   --config <path>                Config file path. Defaults to skill-builder.config.json.
   --source <path-or-name>        Skill name, SKILL.md path, skill folder, or Anthropic .skill package file.
-  --remote <name>                Override git.remote from config.
+  --remote <name-or-url>         Override git.remote with a remote name, repository URL, or local path.
   --branch <name>                Override the target branch.
   -m, --message <message>        Commit message.
   -y, --yes                      Skip the interactive publish confirmation.
@@ -524,6 +537,10 @@ function ensureRemote(root, remote) {
   runGit(root, ['remote', 'get-url', remote]);
 }
 
+function isConfiguredRemoteName(root, remote) {
+  return splitLines(runGit(root, ['remote'])).includes(remote);
+}
+
 function resolveTargetBranch(skillName, currentBranch, branchOverride, gitConfig) {
   if (branchOverride) {
     return branchOverride;
@@ -628,7 +645,7 @@ function createPullRequest(root, skillName, baseBranch, headBranch) {
     '--title',
     `Publish ${skillName} skill`,
     '--body',
-    `Publishes updates for the ${skillName} Claude skill.`
+    `Publishes updates for the ${skillName} Agent Skill.`
   ], {
     cwd: root,
     encoding: 'utf8',

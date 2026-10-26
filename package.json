@@ -1,8 +1,8 @@
 {
   "name": "skill-builder",
-  "displayName": "Claude Skills Toolkit",
-  "description": "Build, validate, package, and manage Claude skills directly from VS Code.",
-  "version": "0.3.3",
+  "displayName": "SkillJetty — Agent Skills Studio",
+  "description": "Create, edit, version and publish portable Agent Skills with SkillJetty by DAF-TECH. Build it. Version it. Ship it.",
+  "version": "0.8.0",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -35,111 +35,41 @@
     "skill packaging",
     "skill validation",
     "vscode ai",
-    "agent development"
+    "agent development",
+    "codex",
+    "gemini",
+    "copilot",
+    "skilljetty"
   ],
   "activationEvents": [
-    "onView:skillBuilder.skillsView",
-    "onCommand:skillBuilder.refresh",
-    "onCommand:skillBuilder.openSkill",
-    "onCommand:skillBuilder.createSkill",
-    "onCommand:skillBuilder.openInteractiveBuilder",
-    "onCommand:skillBuilder.openSkillEditor",
-    "onCommand:skillBuilder.copyChatPrompt",
-    "onCommand:skillBuilder.packageSkill",
-    "onCommand:skillBuilder.addSupportingFiles",
-    "onCommand:skillBuilder.syncToClaudeCode",
-    "onCommand:skillBuilder.importSkillFromGit",
-    "onCommand:skillBuilder.publishSkillToGit",
-    "onCommand:skillBuilder.validateSkill",
-    "onCommand:skillBuilder.healthCheck",
     "workspaceContains:skills/*/SKILL.md"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "skillBuilder.refresh",
-        "title": "Skill Builder: Refresh Skills",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "skillBuilder.openSkill",
-        "title": "Skill Builder: Open Skill",
-        "icon": "$(go-to-file)"
-      },
-      {
-        "command": "skillBuilder.createSkill",
-        "title": "Skill Builder: Create Skill",
-        "icon": "$(new-folder)"
-      },
-      {
-        "command": "skillBuilder.openInteractiveBuilder",
-        "title": "Skill Builder: Interactive Builder",
-        "icon": "$(edit)"
-      },
-      {
-        "command": "skillBuilder.openSkillEditor",
-        "title": "Skill Builder: Open Skill Editor",
-        "icon": "$(layout-panel)"
-      },
-      {
-        "command": "skillBuilder.copyChatPrompt",
-        "title": "Skill Builder: Copy Free-Form Chat Prompt",
-        "icon": "$(comment-discussion)"
-      },
-      {
-        "command": "skillBuilder.packageSkill",
-        "title": "Skill Builder: Package Skill",
-        "icon": "$(package)"
-      },
-      {
-        "command": "skillBuilder.addSupportingFiles",
-        "title": "Skill Builder: Add Supporting Files",
-        "icon": "$(file-add)"
-      },
-      {
-        "command": "skillBuilder.syncToClaudeCode",
-        "title": "Skill Builder: Sync to Claude Code",
-        "icon": "$(sync)"
-      },
-      {
-        "command": "skillBuilder.importSkillFromGit",
-        "title": "Skill Builder: Import/Update Skill from Git",
-        "icon": "$(repo-pull)"
-      },
-      {
-        "command": "skillBuilder.publishSkillToGit",
-        "title": "Skill Builder: Publish Skill to Git",
-        "icon": "$(repo-push)"
-      },
-      {
-        "command": "skillBuilder.validateSkill",
-        "title": "Skill Builder: Validate Skill",
-        "icon": "$(check)"
-      },
-      {
-        "command": "skillBuilder.healthCheck",
-        "title": "Skill Builder: Health Check",
-        "icon": "$(pulse)"
+        "command": "skillBuilder.openWorkbench",
+        "title": "SkillJetty: Open Workbench",
+        "icon": "$(tools)"
       }
     ],
     "configuration": {
-      "title": "Skill Builder",
+      "title": "SkillJetty",
       "properties": {
         "skillBuilder.skillsDirectory": {
           "type": "string",
           "default": "skills",
-          "description": "Workspace-relative directory containing Anthropic skill folders."
+          "description": "Workspace-relative directory containing Agent Skills folders."
         },
         "skillBuilder.projectRoot": {
           "type": "string",
           "default": "",
-          "description": "Optional workspace-relative Skill Builder project root. Leave empty to auto-detect."
+          "description": "Optional workspace-relative SkillJetty project root. Leave empty to auto-detect."
         },
         "skillBuilder.distDirectory": {
           "type": "string",
           "default": "dist",
-          "description": "Workspace-relative directory where packaged Claude skill .zip archives are written."
+          "description": "Workspace-relative directory for legacy skill ZIP package exports."
         },
         "skillBuilder.claudeCodeSkillsDirectory": {
           "type": "string",
@@ -149,92 +79,25 @@
       }
     },
     "menus": {
-      "view/title": [
+      "view/title": [],
+      "view/item/context": [],
+      "commandPalette": []
+    },
+    "viewsContainers": {
+      "activitybar": [
         {
-          "command": "skillBuilder.refresh",
-          "when": "view == skillBuilder.skillsView",
-          "group": "navigation"
-        },
-        {
-          "command": "skillBuilder.openInteractiveBuilder",
-          "when": "view == skillBuilder.skillsView",
-          "group": "navigation"
-        },
-        {
-          "command": "skillBuilder.copyChatPrompt",
-          "when": "view == skillBuilder.skillsView",
-          "group": "navigation"
-        },
-        {
-          "command": "skillBuilder.createSkill",
-          "when": "view == skillBuilder.skillsView",
-          "group": "navigation"
-        },
-        {
-          "command": "skillBuilder.importSkillFromGit",
-          "when": "view == skillBuilder.skillsView",
-          "group": "navigation"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "skillBuilder.openSkill",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "inline"
-        },
-        {
-          "command": "skillBuilder.openSkillEditor",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@1"
-        },
-        {
-          "command": "skillBuilder.packageSkill",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@2"
-        },
-        {
-          "command": "skillBuilder.addSupportingFiles",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@3"
-        },
-        {
-          "command": "skillBuilder.syncToClaudeCode",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@4"
-        },
-        {
-          "command": "skillBuilder.importSkillFromGit",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@5"
-        },
-        {
-          "command": "skillBuilder.publishSkillToGit",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@6"
-        },
-        {
-          "command": "skillBuilder.copyChatPrompt",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@7"
-        },
-        {
-          "command": "skillBuilder.validateSkill",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@8"
-        },
-        {
-          "command": "skillBuilder.healthCheck",
-          "when": "view == skillBuilder.skillsView && viewItem == skill",
-          "group": "skill@9"
+          "id": "skillBuilder",
+          "title": "SkillJetty",
+          "icon": "images/workbench.svg"
         }
       ]
     },
     "views": {
-      "explorer": [
+      "skillBuilder": [
         {
-          "id": "skillBuilder.skillsView",
-          "name": "Claude Skills",
-          "contextualTitle": "Claude Skills"
+          "id": "skillBuilder.guidedLauncher",
+          "name": "SkillJetty",
+          "type": "webview"
         }
       ]
     }
@@ -242,19 +105,25 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
+    "test": "npm run compile && node --test test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npx --yes @vscode/vsce package",
     "import-skill": "node scripts/import-skill.mjs",
     "publish-skill": "node scripts/publish-skill.mjs"
   },
   "dependencies": {
-    "adm-zip": "^0.5.12",
+    "adm-zip": "0.6.1",
+    "js-yaml": "^4.3.2",
     "skills-ref": "0.1.5"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.7",
+    "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.19.0",
     "@types/vscode": "1.90.0",
     "typescript": "^5.8.3"
+  },
+  "galleryBanner": {
+    "color": "#0b2727",
+    "theme": "dark"
   }
 }

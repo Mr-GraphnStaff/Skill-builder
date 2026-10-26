@@ -172,13 +172,13 @@ function requireValue(argv, index, option) {
 }
 
 function printHelp() {
-  console.log(`Import or update one Claude skill folder from git.
+  console.log(`Import or update one Agent Skill folder from git.
 
 Usage:
   node scripts/import-skill.mjs <skill-name> [options]
 
 Options:
-  --root <path>                  Skill Builder project root. Defaults to cwd.
+  --root <path>                  SkillJetty project root. Defaults to cwd.
   --config <path>                Config file path. Defaults to skill-builder.config.json.
   --repo <url-or-path>           Git repository URL or local path. Defaults to configured git.remote.
   --remote <name>                Use a local git remote name when --repo is omitted. Defaults to origin.
