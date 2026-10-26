@@ -63,6 +63,25 @@ test('repository discovery leaves Start connection controls expanded so the retu
   assert.match(html, /<select id="repository-choice"/);
 });
 
+test('serialized file data restores both textarea values before the baseline without opening a script boundary', () => {
+  const content = '\n\n</textarea></script><script>globalThis.injected=true</script>\u2028\u2029&<>\r\n' + ['$&', "$'", '$`', '$$'].join(' ');
+  for (const step of ['edit', 'check']) {
+    const html = renderGuidedWorkbench(state({ step, active: { id: 'sample', name: 'sample' }, editor: { path: 'notes.md', content } }), nonce);
+    const scripts = [...html.matchAll(/<script nonce="[^"]+">([\s\S]*?)<\/script>/g)];
+    assert.equal(scripts.length, 1, 'file text must not terminate the legitimate script element');
+    const source = scripts[0][1];
+    assert.doesNotMatch(source, /<\/script>|[\u2028\u2029]/);
+    const editor = step === 'edit' ? { value: 'HTML parser already lost the leading line.' } : null;
+    const hidden = step === 'check' ? { value: 'HTML parser already lost the leading line.' } : null;
+    const document = { getElementById: id => id === 'main-content' ? { dataset: {} } : id === 'editorContent' ? editor : hidden };
+    const prefix = source.slice(0, source.indexOf('const initialFields'));
+    const result = new vm.Script(prefix + ';({ content: (editor || hiddenBuffer).value, baseline: initialEditorContent, injected: typeof globalThis.injected });').runInNewContext({ document, acquireVsCodeApi: () => ({ getState: () => ({}) }) });
+    assert.equal(result.content, content);
+    assert.equal(result.baseline, step === 'edit' ? content : '');
+    assert.equal(result.injected, 'undefined');
+  }
+});
+
 test('CSP permits only nonced local code and the client uses no HTML injection or network API', () => {
   const html = renderGuidedWorkbench(state(), nonce);
   assert.match(html, /default-src 'none'/);
