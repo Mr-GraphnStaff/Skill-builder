@@ -3,7 +3,8 @@ import * as path from 'node:path';
 import { importSkillPackage, registerSkillFolder, listWorkbenchSkills, validateWorkbenchSkill, WorkbenchSkill } from './skill-workbench.js';
 import { listLibraryReleases, restoreLibraryRelease, suggestReleaseVersion } from './workbench-library.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
-import { connectWorkspaceRepository, getWorkspaceConnection, migrateAssociation, createGuidedSkill, listGuidedFiles, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, publishGuidedSkill } from './guided-workspace.js';
+import { connectWorkspaceRepository, getWorkspaceConnection, migrateAssociation, createGuidedSkill, listGuidedFiles, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, publishGuidedSkill, connectedReviewReleases, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
+import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
 import { checkSkillCompatibility } from './skill-compatibility.js';
 import { GuidedState, GuidedMessage, SkillTarget } from './guided-contract.js';
 
@@ -14,6 +15,8 @@ export type GuidedHooks = {
   chooseWorkspace?(): Promise<string | undefined>;
   openLink?(url: string): Promise<void>;
   onState?(state: GuidedState): void;
+  github?: GitHubRunner;
+  connectGitHub?(): Promise<string | undefined>;
 };
 
 export class GuidedWorkbenchController {
@@ -33,9 +36,17 @@ export class GuidedWorkbenchController {
     catch { this.state.connection = undefined; this.state.notice = 'Your repository connection needs reconnecting. Saved drafts are still available.'; }
     this.state.drafts = listWorkbenchSkills(this.root).map(({ id, name }) => ({ id, name }));
     try {
-      this.state.library = listLibraryReleases(this.root).map(({ skillName, version, directory, status }) => ({ skillName, version, directory, status }));
+      this.state.library = listLibraryReleases(this.root).map(({ skillName, version, directory, status, pr }) => ({ skillName, version, directory, status, ...(pr ? { pr } : {}) }));
+      if (this.state.reviewQueue !== undefined) this.refreshReviews();
       this.state.libraryError = undefined;
     } catch { this.state.libraryError = 'A saved version could not be verified. Your drafts are still available.'; this.state.library = []; }
+  }
+  private refreshReviews() {
+    this.state.reviewQueue = connectedReviewReleases(this.workspace()).map(({ directory, skillName, version, repository, pr }) => ({ directory, skillName, version, repository, ...(pr ? { pr } : {}) }));
+    if (this.state.receipt?.directory) {
+      const current = this.state.reviewQueue.find(item => item.directory === this.state.receipt!.directory);
+      if (current?.pr) this.state.receipt.pr = current.pr;
+    }
   }
   private select(skill: WorkbenchSkill) {
     this.state.active = { id: skill.id, name: skill.name };
@@ -104,6 +115,7 @@ export class GuidedWorkbenchController {
   private async execute(message: GuidedMessage): Promise<GuidedState> {
     if (this.state.busy) return this.state;
     const payload = message.payload ?? {};
+    const reviewMode = this.state.form?.mode === 'reviews';
     const string = (key: string, fallback = '') => typeof payload[key] === 'string' ? payload[key] as string : fallback;
     this.state.error = undefined; this.state.notice = undefined;
     try {
@@ -128,6 +140,7 @@ export class GuidedWorkbenchController {
         case 'connectRepository':
           this.state.busy = true; this.progress('Connecting and checking the repository’s default branch…');
           this.state.connection = await connectWorkspaceRepository(this.workspace(), string('repository'));
+          this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
           this.state.notice = 'Repository connected. Future versions will use this destination automatically.'; break;
         case 'createRepository': {
           if (payload.confirmed !== true) throw new Error('Confirm the repository name and visibility before creating it.');
@@ -201,21 +214,79 @@ export class GuidedWorkbenchController {
             const manifest = JSON.parse(fs.readFileSync(path.join(item.directory, 'release.json'), 'utf8'));
             return JSON.stringify(manifest.files) === JSON.stringify(inventory);
           });
-          this.state.publish = { version: matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version)), changelog: matching ? fs.readFileSync(path.join(matching.directory, 'CHANGELOG.md'), 'utf8').trim() : '', repository: this.state.connection?.repository, fileCount: listGuidedFiles(skill).length };
+          this.state.publish = { version: matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version)), changelog: matching ? fs.readFileSync(path.join(matching.directory, 'CHANGELOG.md'), 'utf8').trim() : '', repository: this.state.connection?.repository, fileCount: listGuidedFiles(skill).length, reviewSupported: !!githubRepository(this.state.connection?.repository ?? '') };
           break;
         }
         case 'publish': {
           if (this.state.step !== 'publish') throw new Error('Check this skill and review the publication screen first.');
           const version = string('version', this.state.publish?.version ?? '');
           const changelog = string('changelog');
+          if (string('reviewer') && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request when submitting.');
           this.state.publish = { version, changelog, repository: this.state.connection?.repository, fileCount: this.state.files.length };
           if (!this.state.connection) throw new Error('Connect your repository before publishing.');
           if (!this.check()) break;
           this.state.step = 'publish';
           this.state.busy = true; this.progress('Checking and packaging this version…');
-          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, message => this.progress(message));
+          const supported = !!githubRepository(this.state.connection.repository);
+          const priorUpload = listLibraryReleases(this.workspace(), this.active().name).find(item => item.version === version && item.status === 'uploaded');
+          if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(this.state.connection.repository); }
+          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, message => this.progress(message), { deferCleanup: supported });
           this.state.receipt = receiptFor(result);
+          if (supported) {
+            this.progress('Upload verified. Creating or finding its pull request…');
+            try {
+              const reviewed = await reviewLibraryRelease(this.workspace(), result.release.directory, 'create', string('reviewer'), this.hooks.github);
+              this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError ?? result.cleanupError;
+              this.state.receipt.note = reviewed.pr.error ? reviewed.pr.number && reviewed.pr.identityVerified ? 'PR created; the latest review status is unavailable. Open or check the recorded PR; the upload is retained.' : 'Uploaded — PR not created or verified. The uploaded version and draft remain recoverable; retry from Check PRs.' : reviewed.pr.reviewRequestError ? 'PR created — review request failed or remains uncertain. Check the recorded PR without uploading another version.' : 'Uploaded with a recorded PR. Review, checks and merge are separate actions; SkillJetty does not merge.';
+            } catch {
+              this.state.receipt.pr = { supported: true, status: 'uploaded', error: 'Upload is verified, but PR metadata could not be saved. Use Check PRs before retrying; the draft and release remain recoverable.' };
+              this.state.receipt.note = 'Uploaded — PR receipt not confirmed. No further upload is needed to retry PR creation.';
+            }
+          } else this.state.receipt.pr = { supported: false, status: 'unsupported', warning: 'Uploaded to a review branch. Automatic PR review is available for GitHub.com only; no PR was created for this provider.' };
           this.state.step = 'done'; this.state.editor = undefined; this.state.files = []; this.state.active = undefined; break;
+        }
+        case 'loadReviewers': {
+          this.state.busy = true; this.progress('Finding eligible collaborator reviewers…');
+          const connection = getWorkspaceConnection(this.workspace());
+          this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
+          try {
+            if (!connection || !githubRepository(connection.repository)) throw new Error('unsupported');
+            this.state.reviewers = await new GitHubReviewService(this.workspace(), this.hooks.github).reviewers(connection.repository);
+            this.state.reviewersLoaded = true;
+          } catch (error) { this.state.reviewersError = connection && githubRepository(connection.repository) ? githubError(error) : 'Reviewer selection is available for GitHub.com only. No reviewer was selected.'; }
+          break;
+        }
+        case 'connectGitHub': {
+          this.state.busy = true; this.progress('Choose your GitHub account in VS Code. Cancelling keeps your draft unchanged.');
+          this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
+          const account = await this.hooks.connectGitHub?.();
+          if (!account) throw new Error('GitHub sign-in was cancelled. No upload or review request was made.');
+          this.state.githubAccount = account;
+          this.state.notice = 'GitHub account selected. Recheck this repository and choose a reviewer again before requesting review.'; break;
+        }
+        case 'checkPullRequests': {
+          this.state.step = 'start'; this.state.form = { mode: 'reviews' }; this.state.busy = true; this.state.reviewQueueError = undefined;
+          this.progress('Checking PRs for recorded uploads in the connected repository…');
+          const items = connectedReviewReleases(this.workspace());
+          for (const item of items.slice(0, 50)) {
+            try { await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github); }
+            catch { this.state.reviewQueueError = 'Some saved upload metadata could not be checked. Inspect the affected version and reconnect its recorded repository; known statuses are retained.'; }
+          }
+          if (items.length > 50) this.state.reviewQueueError = 'The first 50 versions were checked. Check additional versions individually to keep requests bounded.';
+          this.refreshReviews(); break;
+        }
+        case 'checkPullRequest': case 'createPullRequest': case 'requestReviewer': {
+          if (message.action === 'requestReviewer' && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request first.');
+          if (message.action === 'createPullRequest' && string('reviewer') && payload.confirmed !== true) throw new Error('Explicitly confirm the selected reviewer before creating a PR with a review request.');
+          this.state.busy = true; this.progress(message.action === 'checkPullRequest' ? 'Checking this recorded PR…' : message.action === 'createPullRequest' ? 'Finding or creating the PR for the existing upload…' : 'Requesting the selected eligible reviewer…');
+          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github);
+          if (this.state.receipt?.directory === string('directory')) { this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError; }
+          this.refreshReviews(); break;
+        }
+        case 'openPullRequest': {
+          const { item, context } = libraryReviewContext(this.workspace(), string('directory'));
+          if (!item.pr?.number) throw new Error('Check or create the recorded PR first.');
+          await this.hooks.openLink?.(pullRequestUrl(context.repository, item.pr.number)); break;
         }
         case 'back':
           this.state.step = this.state.step === 'publish' ? 'check' : this.state.step === 'check' ? 'edit' : 'start'; this.state.form = undefined; break;
@@ -233,6 +304,7 @@ export class GuidedWorkbenchController {
       const detail = error instanceof Error ? error.message : String(error);
       this.state.error = friendlyError(detail);
     } finally {
+      if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
       this.state.busy = false; this.state.progress = undefined;
       try { this.refresh(); } catch { this.state.error ??= 'Saved work could not be listed. Keep the workspace and try reopening the workbench.'; }
     }
@@ -249,7 +321,7 @@ function friendlyError(detail: string): string {
 
 function receiptFor(result: Awaited<ReturnType<typeof publishGuidedSkill>>): NonNullable<GuidedState['receipt']> {
   const { release, publication } = result;
-  const receipt: NonNullable<GuidedState['receipt']> = { name: release.skillName, version: release.version, commit: publication.commit, branch: publication.branch, cleanupError: result.cleanupError, note: 'Uploaded for repository review. The source, package and changelog are on the review branch; merge status is not tracked by this workbench.' };
+  const receipt: NonNullable<GuidedState['receipt']> = { name: release.skillName, version: release.version, directory: release.directory, commit: publication.commit, branch: publication.branch, cleanupError: result.cleanupError, note: 'Uploaded for repository review. The source, package and changelog are on the review branch; merge status is not tracked by this workbench.' };
   try {
     const ssh = /^git@([^:]+):(.+)$/.exec(publication.repository);
     const repo = new URL(ssh ? `https://${ssh[1]}/${ssh[2]}` : publication.repository);

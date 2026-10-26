@@ -2,12 +2,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { verifySkillRelease, restoreSkillRelease, updateSkillRepository, WorkbenchSkill } from './skill-workbench.js';
+import { githubRepository, reviewRecord } from './github-review.js';
+import type { PullRequestRecord } from './guided-contract.js';
 
 type Publication = { repository: string; branch: string; commit: string; baseBranch?: string; publishedAt?: string };
 export type LibraryRelease = {
   skillName: string; version: string; directory: string; packagePath: string;
   status: 'uploaded' | 'archived' | 'prepared';
   repository?: string; baseBranch?: string; branch?: string; commit?: string; publishedAt?: string;
+  pr?: PullRequestRecord;
 };
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
@@ -31,6 +34,37 @@ function localRelease(root: string, directory: string) {
 function receiptPath(root: string, name: string, version: string) {
   const target = path.join(path.resolve(root), '.skill-workbench', 'publications', name, `${version}.json`);
   safe(root, target); return target;
+}
+function reviewPath(root: string, name: string, version: string) {
+  const target = path.join(path.resolve(root), '.skill-workbench', 'pull-requests', name, `${version}.json`);
+  safe(root, target); return target;
+}
+function readReview(root: string, name: string, version: string, upload: Publication): PullRequestRecord | undefined {
+  const file = reviewPath(root, name, version); if (!fs.existsSync(file)) return undefined;
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (saved.format !== 1 || saved.repository !== upload.repository || saved.branch !== upload.branch || saved.commit !== upload.commit) throw new Error('The saved PR metadata does not match this upload.');
+  return reviewRecord(saved.pr, upload.repository);
+}
+
+/** Mutable review metadata is deliberately outside immutable release bytes. */
+export function recordLibraryReview(root: string, directory: string, result: PullRequestRecord): PullRequestRecord {
+  const release = localRelease(root, directory);
+  const receipt = receiptPath(root, release.skillName, release.version);
+  if (!fs.existsSync(receipt)) throw new Error('A verified upload receipt is required before recording a PR.');
+  const upload = publication(JSON.parse(fs.readFileSync(receipt, 'utf8')));
+  let previous: PullRequestRecord | undefined;
+  try { previous = readReview(root, release.skillName, release.version, upload); } catch { /* A fresh server check can repair invalid metadata. */ }
+  let pr = reviewRecord(result, upload.repository);
+  if (previous?.number && pr.number && previous.number !== pr.number) throw new Error('A different PR is already recorded for this version; inspect its repository state.');
+  if (previous && pr.error) pr = { ...previous, ...pr, status: pr.number && pr.identityVerified && !previous.number ? pr.status : previous.status,
+    checkedAt: previous.checkedAt, number: pr.number ?? previous.number, creationUncertain: pr.creationUncertain ?? previous.creationUncertain };
+  const target = reviewPath(root, release.skillName, release.version);
+  fs.mkdirSync(path.dirname(target), { recursive: true }); safe(root, target);
+  const temporary = `${target}.${randomUUID()}.tmp`; safe(root, temporary);
+  fs.writeFileSync(temporary, JSON.stringify({ format: 1, ...upload, pr }, null, 2) + '\n', { flag: 'wx' });
+  try { fs.renameSync(temporary, target); }
+  finally { if (fs.existsSync(temporary)) { safe(root, temporary); fs.unlinkSync(temporary); } }
+  return pr;
 }
 function publication(value: unknown): Publication {
   const p = value as Publication;
@@ -84,8 +118,14 @@ export function listLibraryReleases(root: string, skillFilter?: string): Library
         data = { repository: archived.record?.repository, baseBranch: archived.record?.baseBranch };
         status = 'archived';
       }
-      if (fs.existsSync(receipt)) { data = publication(JSON.parse(fs.readFileSync(receipt, 'utf8'))); status = 'uploaded'; }
-      items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, ...data });
+      let pr: PullRequestRecord | undefined;
+      if (fs.existsSync(receipt)) {
+        const upload = publication(JSON.parse(fs.readFileSync(receipt, 'utf8')));
+        data = { ...data, ...upload }; status = 'uploaded';
+        try { pr = readReview(root, release.skillName, release.version, upload); }
+        catch { pr = { supported: !!githubRepository(upload.repository), status: 'unknown', error: 'Saved PR metadata could not be verified. Use Check PRs to repair it; the upload remains recorded.' }; }
+      }
+      items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, ...data, ...(pr ? { pr } : {}) });
     }
   }
   return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || b.version.localeCompare(a.version, undefined, { numeric: true }));

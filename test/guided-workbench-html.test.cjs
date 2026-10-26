@@ -115,7 +115,10 @@ test('check and publish explain their limits and show actionable file findings',
   assert.match(publish, /Installable .skill package/);
   assert.match(publish, /CHANGELOG.md/);
   assert.match(publish, /Change or reconnect the repository/);
-  assert.match(publish, /form="publish-form"[^>]*>Publish version/);
+  assert.match(publish, /form="publish-form"[^>]*>Upload &amp; create PR/);
+  assert.match(publish, /Step 4: <\/span>Submit/);
+  assert.match(publish, /data-action="loadReviewers"/);
+  assert.match(publish, /Selecting a reviewer sends that person a review request when you submit/);
 });
 
 test('done exposes only HTTPS receipt links and distinguishes uploaded content from merged content', () => {
@@ -126,10 +129,74 @@ test('done exposes only HTTPS receipt links and distinguishes uploaded content f
   } }), nonce);
   assert.match(html, /data-action="openLink"/);
   assert.match(html, /Open editable source/);
-  assert.match(html, /Uploaded — awaiting review or merge verification/);
+  assert.match(html, /Uploaded — PR not checked/);
+  assert.match(html, /Version upload verified/);
   assert.match(html, /&lt;b&gt;Remote commit confirmed\.&lt;\/b&gt;/);
   assert.doesNotMatch(html, /href="javascript:|data-url="javascript:|user:token/);
   assert.match(html, /data-action="startAnother"/);
+});
+
+test('submission reviewer choice is optional, escaped and explicitly discloses notifications', () => {
+  const html = renderGuidedWorkbench(state({ step: 'publish', publish: { version: '1.0.0', changelog: 'Initial version.', fileCount: 3 },
+    reviewersLoaded: true, reviewers: [{ login: 'casey', name: 'Casey <script>unsafe()</script>' }], form: { reviewer: 'casey' }
+  }), nonce);
+  assert.match(html, /<label for="reviewer">Reviewer \(optional\)<\/label>/);
+  const select = /<select id="reviewer"([^>]*)>([\s\S]*?)<\/select>/.exec(html);
+  assert(select); assert.doesNotMatch(select[1], /required/);
+  assert.match(select[2], /value="">Skip — do not request a reviewer/);
+  assert.match(select[2], /value="casey" selected/);
+  assert.match(select[2], /Casey &lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
+  assert.match(html, /Submitting a review request will notify that person/);
+  assert.match(html, /const reviewer = fieldValue\('reviewer'\)/);
+  assert.match(html, /reviewer, confirmed: !!reviewer/);
+});
+
+test('GitHub account control delegates consent to VS Code and does not solicit a token', () => {
+  const connect = renderGuidedWorkbench(state(), nonce);
+  assert.match(connect, /data-action="connectGitHub"[^>]*>Connect GitHub account/);
+  assert.match(connect, /VS Code manages sign-in and asks you to allow repository access/);
+  assert.match(connect, /Cancel keeps your draft unchanged/);
+  assert.doesNotMatch(connect, /type="password"|name="token"|name="pat"/);
+  const switched = renderGuidedWorkbench(state({ githubAccount: 'Account <unsafe>' }), nonce);
+  assert.match(switched, /Account &lt;unsafe&gt;/);
+  assert.match(switched, /data-action="connectGitHub"[^>]*>Switch GitHub account/);
+  assert.match(switched, /key\.endsWith\(':reviewer'\)/);
+  assert.match(switched, /element\.name === 'reviewer' && reviewerContextChanged/);
+});
+
+test('non-GitHub uploads do not advertise automatic PRs or reviewer requests', () => {
+  const html = renderGuidedWorkbench(state({ step: 'publish', connection: { repository: 'C:/local/repository.git', baseBranch: 'main' },
+    publish: { version: '1.0.0', changelog: 'Initial version.', fileCount: 4, reviewSupported: false }, reviewersLoaded: true, reviewers: [{ login: 'casey' }]
+  }), nonce);
+  assert.match(html, /form="publish-form"[^>]*>Upload version/);
+  assert.match(html, /This upload does not create a PR or notify a reviewer/);
+  assert.doesNotMatch(html, /id="reviewer"|data-action="loadReviewers"|>Upload &amp; create PR/);
+});
+
+test('review dashboard distinguishes approval, merge, unknown and uploaded legacy versions', () => {
+  const reviewQueue = ['awaiting_review', 'changes_requested', 'approved', 'merged', 'closed', 'unknown', 'uploaded', 'unsupported'].map((status, index) => ({
+    directory: `releases/sample/${index}`, skillName: 'sample', version: `1.0.${index}`,
+    pr: { status, supported: status !== 'unsupported', ...(status !== 'uploaded' && status !== 'unsupported' ? { number: index + 1 } : {}), checkedAt: '2026-10-26T02:30:00Z' }
+  }));
+  const html = renderGuidedWorkbench(state({ form: { mode: 'reviews' }, reviewQueue }), nonce);
+  for (const label of ['Awaiting review', 'Changes requested', 'Approved — awaiting merge', 'Merged', 'Closed without merging', 'Status not verified', 'Uploaded — PR not created', 'Uploaded — PRs unavailable']) assert(html.includes(label));
+  assert.match(html, /data-action="checkPullRequests"/);
+  assert.match(html, /data-action="createPullRequest" data-directory="releases\/sample\/6"/);
+  assert.doesNotMatch(html, /data-action="createPullRequest" data-directory="releases\/sample\/7"/);
+  assert.doesNotMatch(html, /data-action="(?:merge|mergePullRequest|autoMerge)"/);
+  assert.match(html, /Last verified:/);
+});
+
+test('PR request failure leaves uploaded contents visible and offers a bounded retry without raw URLs', () => {
+  const html = renderGuidedWorkbench(state({ step: 'done', receipt: { name: 'sample', version: '1.0.0', directory: 'releases/sample/1.0.0', note: 'Upload verified.',
+    pr: { supported: true, status: 'awaiting_review', number: 12, url: 'https://untrusted.invalid/pr', reviewer: 'casey', reviewRequestError: '<script>unsafe()</script>', checkedAt: '2026-10-26T02:30:00Z' }
+  } }), nonce);
+  assert.match(html, /The PR exists, but the review request was not confirmed/);
+  assert.match(html, /Version upload verified/);
+  assert.match(html, /data-action="requestReviewer" data-directory="releases\/sample\/1.0.0" data-reviewer="casey" data-confirmed="true"/);
+  assert.match(html, /data-action="openPullRequest" data-directory="releases\/sample\/1.0.0"/);
+  assert.doesNotMatch(html, /data-action="createPullRequest"/);
+  assert.doesNotMatch(html, /untrusted\.invalid|<script>unsafe\(\)/);
 });
 
 test('launcher has one plain Open Workbench action rather than nested command menus', () => {

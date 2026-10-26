@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "SkillJetty — Agent Skills Studio",
   "description": "Create, edit, version and publish portable Agent Skills with SkillJetty by DAF-TECH. Build it. Version it. Ship it.",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",

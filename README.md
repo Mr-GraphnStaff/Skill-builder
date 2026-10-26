@@ -17,8 +17,8 @@ Choose how to start, then follow the highlighted **Next step** action:
 1. **Start:** choose **Create a new skill**, **Open a .skill file**, or **Open a skill folder**. You can also resume saved work. A repository connection is needed only when you are ready to publish.
 2. **Edit:** write the skill's instructions and edit its supporting files in the workbench. Add text files or copy existing assets. Changes save locally.
 3. **Check:** see problems with links to the files that need attention. Fix them, then check again. Checking does not upload anything, and a passed structural check does not establish model behavior.
-4. **Publish:** connect the repository once if needed, confirm the version, enter what changed, review the destination and contents, and choose **Publish version**.
-5. **Done:** open the source, `.skill` and changelog links. Choose **Work on another skill** when finished.
+4. **Submit:** connect the repository once if needed, confirm the version, enter what changed, and choose **Upload & create PR**. For GitHub.com, sign in through VS Code when prompted. You can optionally choose a reviewer; requesting review notifies that person.
+5. **Done:** open the pull request or the source, `.skill` and changelog links. Use **Check status** to refresh review progress. Choose **Work on another skill** when finished.
 
 No terminal commands or Git branch names are needed for normal use. The extension detects the repository's actual default branch. Git credentials and repository access still need to work on your machine.
 
@@ -43,7 +43,11 @@ Skills/
 
 Only existing supporting folders are included. Complex nested files and binary assets are preserved. First versions need changelogs too. Past versions are immutable; publish a new version for changes.
 
-The upload creates a **review branch**, with links to its exact files. Merge through your repository's review process before expecting the version on the repository's default branch. The workbench does not automatically merge or track merge status. It does not upload the skill into an AI application or publish this extension to the Marketplace.
+For GitHub.com, submission uploads a **review branch** and creates a **pull request**, reusing an existing matching PR when retried. Review and merge follow your repository's rules. Approval alone does not put the skill on the default branch; the workbench never merges automatically. It does not upload the skill into an AI application or publish this extension to the Marketplace.
+
+Use **Check PRs** from Start to refresh saved submissions, including uploads made with older SkillJetty versions. If an older upload has no PR, choose **Create PR**. Refreshing status never creates a PR or requests a reviewer. Status shows awaiting review, changes requested, approved, merged, or closed without merge. If GitHub cannot be reached, the workbench shows the error and last verified status rather than guessing.
+
+This review flow supports **GitHub.com**. Other Git destinations retain branch uploads; their review process must be completed in the hosting service. Additional repository services are a future discussion.
 
 ## Portable skills and application checks
 
@@ -52,7 +56,7 @@ The default is the [open Agent Skills format](https://agentskills.io/specificati
 ## Your work stays recoverable
 
 - Failed checks, canceled file pickers and failed uploads retain your draft.
-- A verified upload removes an unchanged completed draft from active work and archives it recoverably.
+- A completed submission removes an unchanged draft from active work and archives it recoverably. A partial submission retains recovery actions; retrying PR creation does not upload the version again.
 - Newer unpublished changes remain active.
 - Resume saved drafts or choose a library version to edit its next version.
 - If another editor changes a file, conflicting workbench edits are saved in local recovery records rather than overwriting the newer file.
@@ -62,7 +66,9 @@ See [the short workflow and recovery guide](docs/workbench-guide.md).
 
 ## Requirements and development
 
-VS Code 1.90+. Publishing requires Git, a configured commit identity, and repository access. GitHub repository discovery and creation use your signed-in GitHub CLI account. No model credentials, paid service, or global validator installation is required.
+VS Code 1.90+. Publishing requires Git, a configured commit identity, and repository access. GitHub.com PR creation, reviewer selection and status checks use **VS Code's GitHub sign-in**. Git push access and API access are separate: SkillJetty checks API access before a fresh GitHub submission. Use **Connect GitHub account** or **Switch GitHub account** if the signed-in account cannot access the destination. Your repository or organization may require additional authorization.
+
+Repository discovery and creation still use your signed-in **GitHub CLI** account; entering an existing repository URL does not require that discovery step. The new PR tools do not require the CLI. No model credentials, paid service, or global validator installation is required. SkillJetty does not store your GitHub token in project files.
 
 ```sh
 npm install

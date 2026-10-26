@@ -1,8 +1,8 @@
-import type { GuidedState, GuidedStep } from './guided-contract.js';
+import type { GuidedState, GuidedStep, PullRequestRecord } from './guided-contract.js';
 
 const steps: { key: GuidedStep; name: string }[] = [
   { key: 'start', name: 'Start' }, { key: 'edit', name: 'Edit' }, { key: 'check', name: 'Check' },
-  { key: 'publish', name: 'Publish' }, { key: 'done', name: 'Done' }
+  { key: 'publish', name: 'Submit' }, { key: 'done', name: 'Done' }
 ];
 type Primary = { label: string; action?: string; form?: string; disabled?: boolean };
 export type GuidedBrand = { productName?: string; logoDataUri?: string; tagline?: string; descriptor?: string };
@@ -36,12 +36,55 @@ function field(id: string, label: string, value: string, attributes = '', hint =
 function textField(id: string, label: string, value: string, attributes = '', hint = ''): string {
   return `<div class="field"><label for="${id}">${escape(label)}</label>${hint ? `<p class="hint" id="${id}-hint">${escape(hint)}</p>` : ''}<textarea id="${id}" name="${id}" data-persist ${hint ? `aria-describedby="${id}-hint"` : ''} ${attributes}>${escape(value)}</textarea></div>`;
 }
+function gitHubAccount(state: GuidedState): string {
+  if (!state.hasWorkspace) return '';
+  return `<section class="account-strip" aria-label="GitHub account"><div><strong>GitHub account</strong><p>${state.githubAccount ? escape(state.githubAccount) : 'Not selected in this workbench'}</p></div>${secondary('connectGitHub', state.githubAccount ? 'Switch GitHub account' : 'Connect GitHub account', 'aria-describedby="github-account-help"')}<p class="hint" id="github-account-help">Optional for local editing. VS Code manages sign-in and asks you to allow repository access. Cancel keeps your draft unchanged. After switching accounts, load eligible reviewers and choose again.</p></section>`;
+}
+function reviewLabel(pr?: PullRequestRecord): string {
+  if (!pr) return 'Uploaded — PR not checked';
+  const labels: Record<PullRequestRecord['status'], string> = {
+    uploaded: 'Uploaded — PR not created', awaiting_review: 'Awaiting review',
+    changes_requested: 'Changes requested', approved: 'Approved — awaiting merge',
+    merged: 'Merged', closed: 'Closed without merging', unknown: 'Status not verified',
+    unsupported: 'Uploaded — PRs unavailable for this repository'
+  };
+  return labels[pr.status] ?? 'Status not verified';
+}
+function reviewerChoices(state: GuidedState, id: string, selected = ''): string {
+  return `<div class="field"><label for="${id}">Reviewer (optional)</label><select id="${id}" name="reviewer" data-persist aria-describedby="${id}-hint"><option value="">Skip — do not request a reviewer</option>${(state.reviewers ?? []).map(reviewer => `<option value="${escape(reviewer.login)}" ${reviewer.login === selected ? 'selected' : ''}>${escape(reviewer.name ? `${reviewer.name} (@${reviewer.login})` : `@${reviewer.login}`)}</option>`).join('')}</select><p class="hint" id="${id}-hint">Choose an eligible repository collaborator. Submitting a review request will notify that person. Leaving this blank sends no review request.</p></div>`;
+}
+function reviewerPicker(state: GuidedState): string {
+  return `<section class="reviewer-picker"><h2>Ask someone to review (optional)</h2>${state.reviewersLoaded ? reviewerChoices(state, 'reviewer', state.form?.reviewer ?? '') : '<p class="hint">You can submit without choosing a reviewer. Load eligible collaborators if you want to request a review.</p>'}
+    ${secondary('loadReviewers', state.reviewersLoaded ? 'Refresh eligible reviewers' : 'Load eligible reviewers')}
+    ${state.reviewersLoaded && !state.reviewers?.length ? '<p class="hint">No eligible collaborators were returned. You can continue without a review request.</p>' : ''}
+    ${state.reviewersError ? `<p class="warning"><span aria-hidden="true">!</span> Reviewers could not be loaded: ${escape(state.reviewersError)}. You can retry or submit without a reviewer.</p>` : ''}</section>`;
+}
+function pullRequestPanel(pr: PullRequestRecord | undefined, directory: string | undefined): string {
+  const attrs = directory ? `data-directory="${escape(directory)}"` : '';
+  return `<section class="card pr-card"><h2>${pr?.number ? `Pull request #${escape(pr.number)}` : 'Pull request'}</h2>
+    <p class="result-badge ${pr?.status === 'merged' ? 'pass' : 'warning'}"><span aria-hidden="true">${pr?.status === 'merged' ? '✓' : '•'}</span> ${pr?.error && pr.status !== 'unknown' ? 'Last verified status: ' : ''}${escape(reviewLabel(pr))}</p>
+    ${pr?.checkedAt ? `<p class="hint">Last verified: <time datetime="${escape(pr.checkedAt)}">${escape(pr.checkedAt)}</time></p>` : '<p class="hint">No verified status check has been recorded yet.</p>'}
+    ${pr?.lastAttemptAt && pr.lastAttemptAt !== pr.checkedAt ? `<p class="hint">Latest attempt: <time datetime="${escape(pr.lastAttemptAt)}">${escape(pr.lastAttemptAt)}</time></p>` : ''}
+    ${pr?.error ? `<p class="warning"><span aria-hidden="true">!</span> The latest PR operation could not be verified: ${escape(pr.error)}. Your uploaded version remains preserved.</p>` : ''}
+    ${pr?.warning ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(pr.warning)}</p>` : ''}
+    ${pr?.reviewRequestError ? `<p class="warning"><span aria-hidden="true">!</span> The PR exists, but the review request was not confirmed: ${escape(pr.reviewRequestError)}. Do not upload the version again.</p>` : ''}
+    ${pr?.reviewerRequested && pr.reviewer ? `<p>Review requested from <strong>@${escape(pr.reviewer)}</strong>.</p>` : ''}
+    ${directory ? `<div class="button-row">${pr?.number ? secondary('openPullRequest', `Open PR #${pr.number}`, attrs) : ''}${secondary('checkPullRequest', 'Check status', attrs)}${pr?.supported !== false && !pr?.number ? secondary('createPullRequest', 'Create PR for this upload', attrs) : ''}${pr?.reviewRequestError && pr.reviewer && pr.number ? secondary('requestReviewer', `Retry review request to @${pr.reviewer} — notify reviewer`, `${attrs} data-reviewer="${escape(pr.reviewer)}" data-confirmed="true"`) : ''}</div>` : ''}
+    <p class="hint">Approval does not mean merged. Only a verified merge is shown as Merged. SkillJetty never merges a PR for you.</p></section>`;
+}
+function reviews(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
+  return { title: 'Check PRs', hint: 'Check the connected repository’s uploaded versions. Refreshing status does not create PRs, request reviews, or merge anything.',
+    html: `${state.connection ? `<p class="connection">Repository: <strong>${escape(state.connection.repository)}</strong></p>` : '<p class="warning">Connect a repository on Start before checking its PRs.</p>'}
+      ${state.reviewQueueError ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(state.reviewQueueError)}</p>` : ''}
+      ${(state.reviewQueue ?? []).length ? (state.reviewQueue ?? []).map(item => `<article class="review-item"><h2>${escape(item.skillName)} <span class="hint">${escape(item.version)}</span></h2>${pullRequestPanel(item.pr, item.directory)}</article>`).join('') : '<section class="card"><p>No uploaded versions are listed for this connected repository yet. Versions prepared only on this computer are not PR submissions.</p></section>'}`,
+    primary: { label: 'Refresh PR statuses', action: 'checkPullRequests' } };
+}
 function repositoryForm(state: GuidedState, main = false): string {
   const connection = state.connection;
   const repository = state.form?.repository ?? connection?.repository ?? '';
   return `<section class="card repository-card">
     <h2>${connection ? 'Repository connection' : 'Connect your repository once'}</h2>
-    ${connection ? `<p class="connection"><span aria-hidden="true">✓</span> Connected to <strong>${escape(connection.repository)}</strong></p><p class="hint">The repository’s default branch is detected automatically. Future skills use this connection.</p>` : '<p>Choose where published skills should go. You can use an existing repository or create one below.</p>'}
+    ${connection ? `<p class="connection"><span aria-hidden="true">✓</span> Connected to <strong>${escape(connection.repository)}</strong></p><p class="hint">The repository’s default branch is detected automatically. Future skills use this connection.</p>` : '<p>Choose where submitted skills should go. You can use an existing repository or create one below.</p>'}
     <form id="repository-form" action="#" method="post" data-form-action="connectRepository">
       <fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Connect an existing repository</legend>
       ${state.repositories.length ? `<div class="field"><label for="repository-choice">Available repositories</label><select id="repository-choice" name="repository-choice"><option value="">Choose a repository or enter its address below</option>${state.repositories.map(item => `<option value="${escape(item.repository)}" ${item.repository === repository ? 'selected' : ''}>${escape(item.label)}</option>`).join('')}</select></div>` : ''}
@@ -55,7 +98,7 @@ function repositoryForm(state: GuidedState, main = false): string {
         ${field('repositoryName', 'New repository name (required)', state.form?.repositoryName ?? state.form?.name ?? '', 'required maxlength="100" pattern="[A-Za-z0-9_.\\-]+" autocomplete="off" autocapitalize="off" spellcheck="false"', 'For example Skills. This creates a repository in your signed-in GitHub account.')}
         <fieldset class="visibility"><legend>Repository visibility</legend>
           <label for="visibility-private"><input id="visibility-private" type="radio" name="visibility" value="private" ${state.form?.visibility !== 'public' ? 'checked' : ''} data-persist> Private — only people you grant access can see it</label>
-          <label for="visibility-public"><input id="visibility-public" type="radio" name="visibility" value="public" ${state.form?.visibility === 'public' ? 'checked' : ''} data-persist> Public — anyone can see the repository and skills you publish</label>
+          <label for="visibility-public"><input id="visibility-public" type="radio" name="visibility" value="public" ${state.form?.visibility === 'public' ? 'checked' : ''} data-persist> Public — anyone can see the repository and skills you submit</label>
         </fieldset>
         <p class="hint">Creating the repository connects it to this workspace. No skill is uploaded at this step.</p>
         <button type="submit" class="secondary" id="create-repository-button">Create private repository</button>
@@ -68,16 +111,17 @@ function savedWork(state: GuidedState): string {
   if (!state.drafts.length && !state.library.length && !state.libraryError) return '';
   return `<section class="saved-work"><h2>Continue saved work</h2>
     ${state.drafts.length ? `<h3>Drafts</h3><ul class="work-list">${state.drafts.map(draft => `<li><span><strong>${escape(draft.name)}</strong><small>Editable draft</small></span>${secondary('resume', `Resume ${draft.name}`, `data-id="${escape(draft.id)}"`)}</li>`).join('')}</ul>` : ''}
-    ${state.library.length ? `<h3>Version library</h3><ul class="work-list">${state.library.map(entry => `<li><span><strong>${escape(entry.skillName)} ${escape(entry.version)}</strong><small>${escape(entry.status === 'uploaded' ? 'Recorded upload — merge status is not tracked here' : entry.status === 'archived' ? 'Preserved version — upload not verified' : 'Prepared locally')}</small></span>${secondary('restoreVersion', `Edit next version of ${entry.skillName} ${entry.version}`, `data-directory="${escape(entry.directory)}"`)}</li>`).join('')}</ul>` : ''}
+    ${state.library.length ? `<h3>Version library</h3><ul class="work-list">${state.library.map(entry => `<li><span><strong>${escape(entry.skillName)} ${escape(entry.version)}</strong><small>${escape(entry.pr ? `${reviewLabel(entry.pr)}${entry.pr.checkedAt ? ` · last verified ${entry.pr.checkedAt}` : ''}` : entry.status === 'uploaded' ? 'Uploaded — use Check PRs for review status' : entry.status === 'archived' ? 'Preserved version — upload not verified' : 'Prepared locally')}</small></span>${secondary('restoreVersion', `Edit next version of ${entry.skillName} ${entry.version}`, `data-directory="${escape(entry.directory)}"`)}</li>`).join('')}</ul>` : ''}
     ${state.libraryError ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(state.libraryError)}</p>` : ''}
   </section>`;
 }
 function start(state: GuidedState): { title: string; hint: string; html: string; primary?: Primary } {
   if (!state.hasWorkspace) return {
     title: 'Start with a workspace', hint: 'Choose a folder to keep your drafts, original packages, and version history together.',
-    html: '<section class="card"><h2>Your skills stay in your workspace</h2><p>Choose an existing folder or an empty folder for this work. You will connect the publication repository next.</p></section>',
+    html: '<section class="card"><h2>Your skills stay in your workspace</h2><p>Choose an existing folder or an empty folder for this work. You can connect a repository later, before submitting a version.</p></section>',
     primary: { label: 'Choose workspace folder', action: 'chooseWorkspace' }
   };
+  if (state.form?.mode === 'reviews') return reviews(state);
   if (state.form?.mode === 'create') return {
     title: 'Create your draft', hint: 'Give the skill a name, describe when it should be used, and write its instructions.',
     html: `<section class="card"><form id="create-form" action="#" method="post" data-form-action="createSkill"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">New skill</legend>
@@ -88,18 +132,18 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
     primary: { label: 'Create draft', form: 'create-form' }
   };
   if (state.form?.mode === 'repository') return {
-    title: 'Connect your repository', hint: 'Set the publication destination once. The workbench detects its default branch for you.',
+    title: 'Connect your repository', hint: 'Set the submission destination once. The workbench detects its default branch for you.',
     html: repositoryForm(state, true) + savedWork(state), primary: { label: 'Connect repository', form: 'repository-form' }
   };
   return {
-    title: 'Create or open a skill', hint: 'Choose one of the three options below. Edit and check locally; connect a repository when you are ready to publish.',
+    title: 'Create or open a skill', hint: 'Choose one of the three options below. Edit and check locally; connect a repository when you are ready to submit a version for review.',
     html: `<section class="card start-card"><h2>Choose how to start</h2><p>No repository connection is needed to create, open, or edit a skill.</p><div class="start-choices">
       <div class="start-option">${secondary('showCreate', 'Create a new skill', 'aria-describedby="create-choice-help"')}<p class="hint" id="create-choice-help">Start from an idea. Write the name, purpose, and instructions.</p></div>
       <div class="start-option">${secondary('openPackage', 'Open a .skill file', 'aria-describedby="package-choice-help"')}<p class="hint" id="package-choice-help">Choose an existing .skill file in the file picker. Its contents open for editing.</p></div>
       <div class="start-option">${secondary('openFolder', 'Open a skill folder', 'aria-describedby="folder-choice-help"')}<p class="hint" id="folder-choice-help">Choose a folder containing SKILL.md and any supporting files.</p></div>
       </div></section>
-      ${state.connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Publishing destination: <strong>${escape(state.connection.repository)}</strong></span></section>` : '<p class="hint">Ready to upload later? Connect a repository below or at the Publish step.</p>'}
-      ${savedWork(state)}<details class="optional" ${state.repositories.length ? 'open' : ''}><summary>${state.connection ? 'Change the connected repository' : 'Connect a repository for publishing'}</summary>${repositoryForm(state)}</details>`,
+      ${state.connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submission destination: <strong>${escape(state.connection.repository)}</strong></span></section><section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">Ready to upload later? Connect a repository below or at the Submit step.</p>'}
+      ${savedWork(state)}<details class="optional" ${state.repositories.length ? 'open' : ''}><summary>${state.connection ? 'Change the connected repository' : 'Connect a repository for submitting'}</summary>${repositoryForm(state)}</details>`,
     primary: undefined
   };
 }
@@ -123,28 +167,30 @@ function check(state: GuidedState): { title: string; hint: string; html: string;
   const result = state.check;
   const passed = !!result?.valid;
   return {
-    title: passed ? 'Your local checks passed' : 'Fix these items before publishing',
-    hint: passed ? 'Review the warnings and compatibility notes, then continue to the publication summary.' : 'Open an affected file or return to editing, fix the errors, and check again.',
+    title: passed ? 'Your local checks passed' : 'Fix these items before submitting',
+    hint: passed ? 'Review the warnings and compatibility notes, then continue to the submission summary.' : 'Open an affected file or return to editing, fix the errors, and check again.',
     html: `<p class="result-badge ${passed ? 'pass' : 'warning'}"><span aria-hidden="true">${passed ? '✓' : '!'}</span> ${passed ? 'Passed — local checks' : 'Needs attention — local checks'}</p>
       ${findings('Errors', result?.errors ?? [], 'error-card')}${findings('Warnings', result?.warnings ?? [], '')}
-      <section class="card"><h2>Compatibility and manual testing</h2><p>${escape(result?.compatibility ?? 'Run local checks to see compatibility notes.')}</p><p class="hint">${escape(result?.behaviorNote ?? 'No AI model has been run. These checks do not prove that the skill improves model behavior.')}</p><p>If you test the skill in your chosen environment, review the actual output before publishing. This workbench does not report an unrun model test as passed.</p></section>`,
-    primary: passed ? { label: 'Continue to publish', action: 'preparePublish' } : { label: 'Fix and return to editing', action: 'edit' }
+      <section class="card"><h2>Compatibility and manual testing</h2><p>${escape(result?.compatibility ?? 'Run local checks to see compatibility notes.')}</p><p class="hint">${escape(result?.behaviorNote ?? 'No AI model has been run. These checks do not prove that the skill improves model behavior.')}</p><p>If you test the skill in your chosen environment, review the actual output before submitting. This workbench does not report an unrun model test as passed.</p></section>`,
+    primary: passed ? { label: 'Continue to submission', action: 'preparePublish' } : { label: 'Fix and return to editing', action: 'edit' }
   };
 }
 function publish(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
   const details = state.publish;
+  const reviewSupported = details?.reviewSupported !== false;
   const version = state.form?.version ?? details?.version ?? '1.0.0';
   const changelog = state.form?.changelog ?? details?.changelog ?? '';
   return {
-    title: 'Review and publish this version', hint: 'Confirm the destination, version, and changes. Publish version uploads this checked release to a review branch.',
-    html: `${!state.connection ? repositoryForm(state, true) : `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Publishing to <strong>${escape(state.connection.repository)}</strong></span></section>`}
-      <section class="card"><form id="publish-form" action="#" method="post" data-form-action="publish"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Version to publish</legend>
-      ${field('releaseVersion', 'Version (required)', version, 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'The suggested version preserves existing releases. You can change it before publishing.')}
+    title: reviewSupported ? 'Submit this version for review' : 'Upload this version', hint: reviewSupported ? 'Confirm the destination, version, and notes. Upload & create PR uploads this checked version and opens a pull request. Nothing is merged automatically.' : 'This repository supports a Git upload, but GitHub PRs and reviewer requests are unavailable. Your source, package, and changelog will be uploaded without a PR.',
+    html: `${!state.connection ? repositoryForm(state, true) : `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submitting to <strong>${escape(state.connection.repository)}</strong></span></section>`}
+      <section class="card"><form id="publish-form" action="#" method="post" data-form-action="publish"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Version to submit</legend>
+      ${field('releaseVersion', 'Version (required)', version, 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'The suggested version preserves existing releases. You can change it before submitting.')}
       ${textField('releaseChangelog', 'What changed in this version? (required)', changelog, 'required rows="4"', 'For the first version, describe what the skill does. For later versions, describe what changed. Every version includes CHANGELOG.md.')}
+      ${state.connection && reviewSupported ? reviewerPicker(state) : ''}
       </fieldset></form></section>
-      <section class="card"><h2>What will be published</h2><ul class="package-summary"><li><span aria-hidden="true">✓</span><span><strong>Editable source</strong> — ${details?.fileCount ?? state.files.length} files with their existing folder structure</span></li><li><span aria-hidden="true">✓</span><span><strong>Installable .skill package</strong> — rebuilt and checked against this source</span></li><li><span aria-hidden="true">✓</span><span><strong>CHANGELOG.md</strong> — your version notes</span></li></ul><p class="hint">Original imported packages and previous versions remain preserved. The upload uses a review branch; merging is a separate repository decision.</p></section>
+      <section class="card"><h2>What will be submitted</h2><ul class="package-summary"><li><span aria-hidden="true">✓</span><span><strong>Editable source</strong> — ${details?.fileCount ?? state.files.length} files with their existing folder structure</span></li><li><span aria-hidden="true">✓</span><span><strong>Installable .skill package</strong> — rebuilt and checked against this source</span></li><li><span aria-hidden="true">✓</span><span><strong>CHANGELOG.md</strong> — your version notes</span></li></ul><p class="hint">Original imported packages and previous versions remain preserved. ${reviewSupported ? 'A successful GitHub submission creates a pull request; merging is a separate repository decision. Selecting a reviewer sends that person a review request when you submit.' : 'This upload does not create a PR or notify a reviewer.'}</p></section>
       ${state.connection ? `<details class="optional" ${state.error ? 'open' : ''}><summary>Change or reconnect the repository</summary>${repositoryForm(state)}</details>` : ''}`,
-    primary: state.connection ? { label: 'Publish version', form: 'publish-form', disabled: !details } : { label: 'Connect repository', form: 'repository-form' }
+    primary: state.connection ? { label: reviewSupported ? 'Upload & create PR' : 'Upload version', form: 'publish-form', disabled: !details } : { label: 'Connect repository', form: 'repository-form' }
   };
 }
 function verifiedLink(url: string | undefined, label: string): string {
@@ -157,18 +203,20 @@ function verifiedLink(url: string | undefined, label: string): string {
 }
 function done(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
   const receipt = state.receipt;
+  const pr = receipt?.pr;
   return {
-    title: receipt ? `${receipt.name} ${receipt.version} is uploaded` : 'No publication receipt is available',
-    hint: receipt ? 'Open the exact source, package, and changelog below. A recorded branch upload does not establish that it has been merged.' : 'Return to Start to resume a saved draft or inspect your version library.',
-    html: `<section class="card done-card"><p class="result-badge ${receipt ? 'pass' : 'warning'}"><span aria-hidden="true">${receipt ? '✓' : '!'}</span> ${receipt ? 'Uploaded — awaiting review or merge verification' : 'No verified upload recorded'}</p><p>${escape(receipt?.note ?? 'No publication receipt is available yet.')}</p>
-      <ul class="receipt-links"><li>${verifiedLink(receipt?.sourceUrl, 'Open editable source')}</li><li>${verifiedLink(receipt?.packageUrl, 'Open .skill package')}</li><li>${verifiedLink(receipt?.changelogUrl, 'Open CHANGELOG.md')}</li><li>${verifiedLink(receipt?.reviewUrl, 'Open review branch or comparison')}</li></ul>
+    title: receipt ? `${receipt.name} ${receipt.version} — ${pr?.number ? `${pr.error && pr.status !== 'unknown' ? 'last verified: ' : ''}${reviewLabel(pr)}` : 'uploaded'}` : 'No submission receipt is available',
+    hint: receipt ? 'Your upload is preserved. Check the PR status below; approval alone does not mean merged. You can start another skill while review continues.' : 'Return to Start to resume a saved draft or inspect your version library.',
+    html: `${receipt ? pullRequestPanel(pr, receipt.directory) : ''}<section class="card done-card"><p class="result-badge ${receipt ? 'pass' : 'warning'}"><span aria-hidden="true">${receipt ? '✓' : '!'}</span> ${receipt ? 'Version upload verified' : 'No verified upload recorded'}</p><p>${escape(receipt?.note ?? 'No submission receipt is available yet.')}</p>
+      <ul class="receipt-links"><li>${verifiedLink(receipt?.sourceUrl, 'Open editable source')}</li><li>${verifiedLink(receipt?.packageUrl, 'Open .skill package')}</li><li>${verifiedLink(receipt?.changelogUrl, 'Open CHANGELOG.md')}</li><li>${verifiedLink(receipt?.reviewUrl, 'Open uploaded branch or comparison')}</li></ul>
       ${receipt?.branch ? `<p class="detail"><strong>Review branch:</strong> ${escape(receipt.branch)}</p>` : ''}${receipt?.commit ? `<p class="detail"><strong>Verified upload commit:</strong> ${escape(receipt.commit)}</p>` : ''}
-      ${receipt?.cleanupError ? `<p class="warning"><span aria-hidden="true">!</span> The upload succeeded, but local completion needs attention: ${escape(receipt.cleanupError)}. Your remaining draft is retained. Do not upload again to fix local completion.</p>` : '<p>Your version history remains available under the Start screen’s version library. Use Edit next version when you want to revise it.</p>'}</section>`,
+      ${receipt?.cleanupError ? `<p class="warning"><span aria-hidden="true">!</span> The upload succeeded, but local completion needs attention: ${escape(receipt.cleanupError)}. Your remaining draft is retained. Do not upload again to fix local completion.</p>` : '<p>Your version history remains available under the Start screen’s version library. Use Edit next version when you want to revise it.</p>'}${receipt ? `<div class="button-row">${secondary('checkPullRequests', 'Check all PRs')}</div>` : ''}</section>`,
     primary: { label: 'Start another skill', action: 'startAnother' }
   };
 }
 
 const styles = `
+  html { scroll-padding-block-end: 7rem; } :where(button, a, input, select, textarea, summary) { scroll-margin-block: 1rem 7rem; }
   :root { color-scheme: light dark; font-family: var(--vscode-font-family, system-ui, sans-serif); color: var(--vscode-editor-foreground, CanvasText); background: var(--vscode-editor-background, Canvas); font-size: var(--vscode-font-size, 14px); line-height: 1.55; }
   * { box-sizing: border-box; } body { margin: 0; } button, input, select, textarea { font: inherit; } button, input, select { min-block-size: 2.6rem; } button { cursor: pointer; border: 1px solid var(--vscode-contrastBorder, var(--vscode-button-border, transparent)); border-radius: .35rem; padding: .6rem .95rem; } button:disabled { cursor: wait; opacity: .65; } input, select, textarea { inline-size: 100%; padding: .65rem .75rem; color: var(--vscode-input-foreground, CanvasText); background: var(--vscode-input-background, Canvas); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, GrayText)); border-radius: .25rem; } textarea { resize: vertical; min-block-size: 6rem; } :where(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid var(--vscode-focusBorder, Highlight); outline-offset: 3px; } input:user-invalid, textarea:user-invalid { border-color: var(--vscode-inputValidation-errorBorder, #be3f3f); } a { color: var(--vscode-textLink-foreground, LinkText); } a:hover { color: var(--vscode-textLink-activeForeground, LinkText); } h1 { font-size: clamp(1.6rem, 3vw, 2.15rem); line-height: 1.2; margin: .4rem 0 .75rem; font-weight: 650; letter-spacing: -.025em; } h2 { font-size: 1.12rem; line-height: 1.35; margin: 0 0 .75rem; } h3 { font-size: 1rem; margin-block: 1.2rem .6rem; } p { margin-block: .45rem .9rem; } [hidden] { display: none !important; }
   .shell { max-inline-size: 1120px; margin-inline: auto; padding: 1.4rem clamp(1rem, 3.3vw, 2.7rem) 0; } .brand { font-size: .92rem; color: var(--vscode-descriptionForeground, GrayText); letter-spacing: .04em; } .progress { padding: 0; margin: 1.3rem 0 2rem; list-style: none; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; } .step { display: flex; align-items: center; gap: .6rem; border-block-end: 2px solid var(--vscode-panel-border, GrayText); padding-block: .45rem .75rem; min-inline-size: 0; } .step-marker { display: grid; place-items: center; min-inline-size: 1.9rem; min-block-size: 1.9rem; border: 1px solid var(--vscode-panel-border, GrayText); border-radius: 50%; font-weight: 700; } .step-name { font-weight: 600; display: block; } .step-state { display: block; font-size: .76rem; color: var(--vscode-descriptionForeground, GrayText); } .step.current { border-color: var(--workbench-accent, #0b635d); } .step.current .step-marker { background: #0b635d; color: #ffffff; border-color: var(--workbench-accent, #0b635d); } .step.completed .step-marker { color: var(--vscode-testing-iconPassed, #55a66a); border-color: currentColor; }
@@ -179,6 +227,7 @@ const styles = `
   @media (prefers-color-scheme: dark) { :root { --workbench-accent: #67c3b8; } } body.vscode-light { --workbench-accent: #0b635d; } body.vscode-dark { --workbench-accent: #67c3b8; }
   .editor-skip { position: absolute; inline-size: 1px; block-size: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; } .editor-skip:focus { position: static; display: block; inline-size: auto; block-size: auto; clip-path: none; overflow: visible; white-space: normal; padding: .5rem; margin-block-end: .5rem; }
   .start-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .8rem; } .start-option { min-inline-size: 0; } .start-choices button { inline-size: 100%; min-block-size: 3.5rem; font-weight: 650; } .start-option .hint { margin: .6rem .15rem 0; }
+  .account-strip { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; padding-block-end: .9rem; border-block-end: 1px solid var(--vscode-panel-border, GrayText); } .account-strip p { margin: .1rem 0 0; overflow-wrap: anywhere; } .account-strip .hint { flex-basis: 100%; }
   @media (max-width: 760px) { .editor-layout { grid-template-columns: 1fr; } .file-list { max-block-size: 12rem; } .code-editor { min-block-size: 24rem; } .step { flex-direction: column; align-items: start; gap: .35rem; } .step-name { font-size: .9rem; } .step-state { font-size: .7rem; } .work-list li { align-items: start; flex-direction: column; gap: .5rem; } .action-bar { align-items: stretch; } .action-bar .primary { min-inline-size: 0; flex: 1; } }
   @media (pointer: coarse) { button, input, select, summary { min-block-size: 3rem; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -192,6 +241,8 @@ const script = `
   const activeId = main.dataset.activeId || '';
   const scope = main.dataset.formScope || step;
   let saved = vscode.getState() || {};
+  const reviewerContext = main.dataset.reviewerContext || '';
+  const reviewerContextChanged = saved.reviewerContext !== reviewerContext;
   let saveTimer;
   let savePending = false;
   let queuedAction;
@@ -210,6 +261,7 @@ const script = `
     const value = element.type === 'radio' ? String(element.checked) : element.value;
     initialFields[key] = value;
     const previous = saved.fields && saved.fields[key];
+    if (element.name === 'reviewer' && reviewerContextChanged) { if (saved.fields) delete saved.fields[key]; return; }
     if (previous && previous.base === value) {
       if (element.type === 'radio') element.checked = previous.value === 'true';
       else element.value = previous.value;
@@ -227,7 +279,7 @@ const script = `
       const key = scope + ':' + element.id;
       fields[key] = { base: initialFields[key], value: element.type === 'radio' ? String(element.checked) : element.value };
     });
-    saved = Object.assign({}, saved, { fields, step, activeId });
+    saved = Object.assign({}, saved, { fields, step, activeId, reviewerContext });
     if (editor && !editor.readOnly) saved.editor = { activeId, path: editor.dataset.editorPath, base: initialEditorContent, content: editor.value };
     const focused = document.activeElement;
     if (focused && focused.id) saved.focus = { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd };
@@ -256,6 +308,11 @@ const script = `
   function post(action, payload = {}) {
     if (actionPending) return;
     persist();
+    if (action === 'connectGitHub') {
+      document.querySelectorAll('select[name="reviewer"]').forEach(element => { element.value = ''; });
+      for (const key of Object.keys(saved.fields || {})) if (key.endsWith(':reviewer')) delete saved.fields[key];
+      vscode.setState(saved);
+    }
     clearTimeout(saveTimer);
     if (action !== 'save' && savePending) { queuedAction = { action, payload }; lockActions(true); return; }
     if (action === 'save') {
@@ -293,7 +350,10 @@ const script = `
     if (action === 'createSkill') payload = { name: fieldValue('skillName'), description: fieldValue('skillDescription'), instructions: fieldValue('skillInstructions') };
     if (action === 'addFile') payload = { path: fieldValue('addFilePath') };
     if (action === 'createFile') payload = { path: fieldValue('newFilePath') };
-    if (action === 'publish') payload = { version: fieldValue('releaseVersion'), changelog: fieldValue('releaseChangelog') };
+    if (action === 'publish') {
+      const reviewer = fieldValue('reviewer');
+      payload = { version: fieldValue('releaseVersion'), changelog: fieldValue('releaseChangelog'), reviewer, confirmed: !!reviewer };
+    }
     post(action, payload);
   }));
   document.addEventListener('click', event => {
@@ -301,7 +361,8 @@ const script = `
     if (!element) return;
     event.preventDefault();
     const payload = {};
-    for (const key of ['id', 'directory', 'path', 'url']) if (element.dataset[key] !== undefined) payload[key] = element.dataset[key];
+    for (const key of ['id', 'directory', 'path', 'url', 'reviewer']) if (element.dataset[key] !== undefined) payload[key] = element.dataset[key];
+    if (element.dataset.confirmed === 'true') payload.confirmed = true;
     post(element.dataset.action, payload);
   });
   document.addEventListener('input', event => {
@@ -354,8 +415,8 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
   const backDisabled = state.step === 'start' && !state.form?.mode;
   const primary = screen.primary;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>${escape(screen.title)} | ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}</style></head><body>
-    <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell"><header>${brandHeader(brand)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
-    <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-busy="${!!state.busy}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
+    <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell"><header>${brandHeader(brand)}${gitHubAccount(state)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
+    <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>
       <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="progress-message" ${!state.progress ? 'hidden' : ''}>${escape(state.progress ?? '')}</p><p id="client-error" class="error-message" hidden></p></div>
       ${screen.html}
@@ -366,5 +427,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
 
 export function renderGuidedLauncher(nonce: string, brand?: GuidedBrand): string {
   nonce = nonceValue(nonce);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>Open ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}body{padding:1.1rem}.primary{inline-size:100%;min-inline-size:0;margin-block:1rem}.brand-lockup{gap:.7rem;margin-block-end:1.25rem}.brand-product{font-size:1.25rem}.brand-tagline{font-size:.77rem}.launcher-steps{padding-inline-start:1.2rem}.launcher-steps li{margin-block:.35rem}</style></head><body><main>${brandHeader(brand, true)}<p>Create or open a skill, edit its files, check it, and publish a version.</p><ol class="launcher-steps"><li>Start with a draft</li><li>Edit and check</li><li>Publish and keep its history</li></ol><button type="button" class="primary" id="open-workbench">Open Workbench <span aria-hidden="true">→</span></button><p class="hint">The full workflow opens in an editor tab. Your drafts and original packages stay in the workspace.</p></main><script nonce="${nonce}">const vscode=acquireVsCodeApi();document.getElementById('open-workbench').addEventListener('click',()=>vscode.postMessage({action:'openWorkbench'}));</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>Open ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}body{padding:1.1rem}.primary{inline-size:100%;min-inline-size:0;margin-block:1rem}.brand-lockup{gap:.7rem;margin-block-end:1.25rem}.brand-product{font-size:1.25rem}.brand-tagline{font-size:.77rem}.launcher-steps{padding-inline-start:1.2rem}.launcher-steps li{margin-block:.35rem}</style></head><body><main>${brandHeader(brand, true)}<p>Create or open a skill, edit its files, check it, and submit a version for review.</p><ol class="launcher-steps"><li>Start with a draft</li><li>Edit and check</li><li>Submit and check its PR status</li></ol><button type="button" class="primary" id="open-workbench">Open Workbench <span aria-hidden="true">→</span></button><p class="hint">The full workflow opens in an editor tab. Your drafts and original packages stay in the workspace.</p></main><script nonce="${nonce}">const vscode=acquireVsCodeApi();document.getElementById('open-workbench').addEventListener('click',()=>vscode.postMessage({action:'openWorkbench'}));</script></body></html>`;
 }
+
+
