@@ -1,234 +1,75 @@
-# Claude Skills Toolkit
+# SkillJetty by DAF-TECH
 
-Build, manage, validate, and package Claude-compatible skills directly from VS Code.
+<img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
-Claude Skills Toolkit gives Claude skill builders a small VS Code-native control panel for working with `SKILL.md` folders, generated skill structure, validation, and upload-ready ZIP packages.
+**Agent Skills Studio — Build it. Version it. Ship it.**
 
-[Install from the VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=DavidFarris.skill-builder)
+Create, edit, check and publish Agent Skills from one guided VS Code workbench.
 
-## Screenshots
+**One connected repository. One folder per skill. Source, a valid `.skill` package and a changelog for every version.**
 
-![Claude Skills sidebar](images/sidebar.png)
+## Open the workbench
 
-![Create a skill](images/create-skill.png)
+Click the **SkillJetty** icon on VS Code's left activity bar. It opens the guided workbench directly. You can also run **SkillJetty: Open Workbench** from the Command Palette; that is the only normal public command you need.
 
-![Package a skill](images/package-skill.png)
+Choose how to start, then follow the highlighted **Next step** action:
 
-![Validate a skill](images/validate-skill.png)
+1. **Start:** choose **Create a new skill**, **Open a .skill file**, or **Open a skill folder**. You can also resume saved work. A repository connection is needed only when you are ready to publish.
+2. **Edit:** write the skill's instructions and edit its supporting files in the workbench. Add text files or copy existing assets. Changes save locally.
+3. **Check:** see problems with links to the files that need attention. Fix them, then check again. Checking does not upload anything, and a passed structural check does not establish model behavior.
+4. **Publish:** connect the repository once if needed, confirm the version, enter what changed, review the destination and contents, and choose **Publish version**.
+5. **Done:** open the source, `.skill` and changelog links. Choose **Work on another skill** when finished.
 
-## What It Does
+No terminal commands or Git branch names are needed for normal use. The extension detects the repository's actual default branch. Git credentials and repository access still need to work on your machine.
 
-- Creates Claude-compatible skill folders with `SKILL.md`, `references/`, `scripts/`, `assets/`, and `evals/`.
-- Opens and edits skill metadata, workflow modules, files, evals, and package actions from a VS Code webview.
-- Packages skills into upload-ready ZIP files for Claude.ai.
-- Runs bundled validation from the VS Code terminal.
-- Syncs local skills into Claude Code's personal skill folder.
-- Imports and publishes skill folders through configurable Git workflows.
-- Helps turn rough skill ideas into structured drafts without forcing a rigid form.
-
-## Quick Start
-
-1. Install [Claude Skills Toolkit](https://marketplace.visualstudio.com/items?itemName=DavidFarris.skill-builder).
-2. Open a workspace in VS Code.
-3. Open the Explorer sidebar.
-4. Find the `Claude Skills` view.
-5. Run `Skill Builder: Interactive Builder`.
-6. Describe the skill workflow you want.
-7. Click `Create Skill Draft`.
-
-The toolkit creates a starter `SKILL.md`, starter evals, and an optional workbench brief from one form.
-
-## Expected Folder Structure
-
-Claude skill deliverables live under `skills/`:
+## What is saved in the repository?
 
 ```text
-skills/
-  my-skill/
-    SKILL.md
-    references/
-    scripts/
-    assets/
-    evals/evals.json
+Skills/
+  meeting-notes/
+    1.0.0/
+      source/meeting-notes/
+        SKILL.md
+        references/...
+        assets/...
+        scripts/...
+        evals/...
+        agents/...
+      meeting-notes-1.0.0.skill
+      CHANGELOG.md
+      release.json
+      original.skill           # only for an originally imported package
 ```
 
-Authoring notes live outside the packaged skill:
+Only existing supporting folders are included. Complex nested files and binary assets are preserved. First versions need changelogs too. Past versions are immutable; publish a new version for changes.
 
-```text
-workbench/
-  my-skill/
-    brief.md
-    creation-plan.md
-    authoring-prompt.md
-```
+The upload creates a **review branch**, with links to its exact files. Merge through your repository's review process before expecting the version on the repository's default branch. The workbench does not automatically merge or track merge status. It does not upload the skill into an AI application or publish this extension to the Marketplace.
 
-Packaged ZIP files are written to:
+## Portable skills and application checks
 
-```text
-dist/
-  my-skill.zip
-```
+The default is the [open Agent Skills format](https://agentskills.io/specification): `SKILL.md` plus optional supporting files. You can select Portable, Claude, ChatGPT/Codex, Gemini CLI or GitHub Copilot for compatibility guidance. Application-specific files such as `agents/openai.yaml` are preserved. Compatibility checks do not promise identical behavior across applications, install the skill, or run a model.
 
-## Commands
+## Your work stays recoverable
 
-- `Skill Builder: Interactive Builder` opens the free-form skill intake UI.
-- `Skill Builder: Open Skill Editor` opens the tabbed metadata, modules, files, evals, and package editor.
-- `Skill Builder: Create Skill` creates a minimal starter skill through prompts.
-- `Skill Builder: Open Skill` opens the selected `SKILL.md`.
-- `Skill Builder: Add Supporting Files` copies docs, scripts, or assets into a skill.
-- `Skill Builder: Package Skill` creates a Claude.ai upload ZIP.
-- `Skill Builder: Sync to Claude Code` copies a skill to the Claude Code skills folder.
-- `Skill Builder: Import/Update Skill from Git` pulls one skill folder from a Git repository into the local `skills/` directory.
-- `Skill Builder: Publish Skill to Git` commits and pushes a configured skill path through the manual publish script.
-- `Skill Builder: Validate Skill` runs the bundled `skills-ref` validator.
-- `Skill Builder: Health Check` opens a local structure and quality report.
-- `Skill Builder: Copy Free-Form Chat Prompt` copies a prompt for deeper skill authoring work with an AI assistant.
+- Failed checks, canceled file pickers and failed uploads retain your draft.
+- A verified upload removes an unchanged completed draft from active work and archives it recoverably.
+- Newer unpublished changes remain active.
+- Resume saved drafts or choose a library version to edit its next version.
+- If another editor changes a file, conflicting workbench edits are saved in local recovery records rather than overwriting the newer file.
+- The UI uses text and icons alongside color. There are no flashing prompts; reduced-motion and high-contrast preferences are respected.
 
-## Create Skills From Rough Ideas
+See [the short workflow and recovery guide](docs/workbench-guide.md).
 
-Use `Skill Builder: Interactive Builder` when you are still thinking out loud.
+## Requirements and development
 
-Example:
+VS Code 1.90+. Publishing requires Git, a configured commit identity, and repository access. GitHub repository discovery and creation use your signed-in GitHub CLI account. No model credentials, paid service, or global validator installation is required.
 
-```text
-I need a skill that turns messy Jira security architecture updates into a weekly executive-ready status report. It should use our preferred sections, flag blockers, and create copy I can paste into Confluence.
-```
-
-The builder can capture:
-
-- target surface: portable, Claude.ai, Claude Code, or Claude API
-- trigger description
-- should-trigger and should-not-trigger examples
-- inputs Claude should gather
-- workflow steps and edge cases
-- references, scripts, and assets
-- eval prompts
-- security and external-system assumptions
-
-## Package For Claude.ai
-
-Right-click a skill in the `Claude Skills` tree and choose:
-
-```text
-Skill Builder: Package Skill
-```
-
-The toolkit writes:
-
-```text
-dist/<skill-name>.zip
-```
-
-The ZIP preserves the skill folder inside the archive, which is the structure Claude.ai expects for custom skill upload.
-
-## Validate A Skill
-
-Right-click a skill and choose:
-
-```text
-Skill Builder: Validate Skill
-```
-
-The command opens an integrated terminal and runs the bundled validator:
-
-```bash
-node "<extension-folder>/node_modules/skills-ref/dist/cli.js" validate "<skill-path>"
-```
-
-A global `skills-ref` install is not required.
-
-## Sync To Claude Code
-
-Right-click a skill and choose:
-
-```text
-Skill Builder: Sync to Claude Code
-```
-
-By default, the toolkit copies the skill to:
-
-```text
-~/.claude/skills/<skill-name>/
-```
-
-You can override the destination with `skillBuilder.claudeCodeSkillsDirectory`.
-
-## Git Workflows
-
-Claude Skills Toolkit includes manual Git import and publish helpers.
-
-For publishing, copy the example config first:
-
-```bash
-cp skill-builder.config.example.json skill-builder.config.json
-```
-
-Then set `git.enabled` to `true` and review the remote, branch prefix, validation, and include rules.
-
-The publisher can handle:
-
-- a workspace skill
-- a selected `SKILL.md`
-- an Anthropic `.skill` package file
-- an extracted skill folder
-
-External selections are copied into the workspace before Git staging so the publish command can commit them cleanly.
-
-## Settings
-
-- `skillBuilder.skillsDirectory`: workspace-relative skill source directory. Default: `skills`.
-- `skillBuilder.distDirectory`: ZIP output directory. Default: `dist`.
-- `skillBuilder.claudeCodeSkillsDirectory`: sync destination for Claude Code. Default: `~/.claude/skills`.
-- `skillBuilder.projectRoot`: optional project root override.
-
-## Requirements
-
-- VS Code `1.90.0` or newer.
-- Node.js only for local development or direct script use.
-- Git only for import or publish workflows.
-- No global `skills-ref` install is required; the extension bundles its validator dependency.
-
-## What This Extension Does Not Do
-
-Claude Skills Toolkit does not upload skills into Claude.ai or the Claude API for you. It prepares the local folder or ZIP artifact.
-
-It also does not run Claude inside VS Code. The interactive builder creates a strong local draft and optional authoring prompt, but deeper refinement still happens by editing the generated files or using your preferred AI assistant.
-
-## Official References
-
-- [How to create a skill with Claude through conversation](https://support.claude.com/en/articles/12599426-how-to-create-a-skill-with-claude-through-conversation)
-- [How to create custom Skills](https://support.claude.com/en/articles/12512198-how-to-create-custom-skills)
-- [Use Skills in Claude](https://support.claude.com/en/articles/12512180-use-skills-in-claude)
-- [Using Agent Skills with the API](https://platform.claude.com/docs/en/build-with-claude/skills-guide)
-- [Extend Claude with skills in Claude Code](https://code.claude.com/docs/en/skills)
-- [Anthropic skills repository](https://github.com/anthropics/skills)
-
-## Development
-
-Install dependencies:
-
-```bash
+```sh
 npm install
-```
-
-Compile:
-
-```bash
-npm run compile
-```
-
-Package:
-
-```bash
+npm test
 npm run package
 ```
 
-Publish a configured skill:
-
-```bash
-npm run publish-skill -- my-skill
-```
-
-## License
+Older authoring commands remain internal for compatibility. The guided workbench is the normal entry point. Local preview builds may be newer than the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=DavidFarris.skill-builder).
 
 MIT License. See [LICENSE](LICENSE).
