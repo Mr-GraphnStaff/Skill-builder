@@ -8,7 +8,9 @@ import {
   prepareSkillRelease, listSkillReleases, verifySkillRelease, completeWorkbenchSkill,
   type WorkbenchSkill, type WorkbenchRelease
 } from './skill-workbench.js';
-import { listLibraryReleases, recordLibraryPublication } from './workbench-library.js';
+import { listLibraryReleases, recordLibraryPublication, recordLibraryReview, type LibraryRelease } from './workbench-library.js';
+import { githubRepository, GitHubReviewService, type GitHubRunner, type ReviewContext } from './github-review.js';
+import type { PullRequestRecord } from './guided-contract.js';
 import { resolveRepositoryDefaultBranch, verifyRepositoryBranchCommit, prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview } from './repository-publisher.js';
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
@@ -185,7 +187,7 @@ function sameFiles(left: { path: string; size: number; sha256: string }[], right
 }
 
 /** Called only from the guided screen's explicit Publish version action. */
-export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: (message: string) => void): Promise<GuidedPublication> {
+export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: (message: string) => void, options: { deferCleanup?: boolean } = {}): Promise<GuidedPublication> {
   const saved = getWorkspaceConnection(root);
   if (!saved) throw new Error('Connect your skill repository first.');
   const skill = listWorkbenchSkills(root).find(item => item.id === id);
@@ -209,7 +211,7 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
       onProgress?.('Checking the previously uploaded version; it will not be uploaded again.');
       if (!await verifyRepositoryBranchCommit(receipt.repository, receipt.branch, receipt.commit)) throw new Error(`The recorded upload branch for version ${version} has changed or was removed. Open its receipt to review repository state; no upload was repeated.`);
       let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
-      try { cleanup = completeWorkbenchSkill(root, skill.id, release.directory); }
+      try { if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory); }
       catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
       return { release, publication: { repository: receipt.repository, branch: receipt.branch, commit: receipt.commit }, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
     }
@@ -220,8 +222,45 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
     let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
     try {
       recordLibraryPublication(root, release.directory, { ...publication, baseBranch: connection.baseBranch });
-      cleanup = completeWorkbenchSkill(root, skill.id, release.directory);
+      if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory);
     } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
     return { release, publication, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
   } finally { await disposePublishPreview(preview, onProgress); }
+}
+
+function connectedRepository(root: string, repository: string): boolean {
+  const connection = getWorkspaceConnection(root); if (!connection) return false;
+  const left = githubRepository(connection.repository), right = githubRepository(repository);
+  return left && right ? left.fullName.toLowerCase() === right.fullName.toLowerCase() : sameRepository(connection.repository, repository);
+}
+
+export function connectedReviewReleases(root: string): LibraryRelease[] {
+  return listLibraryReleases(root).filter(item => item.status === 'uploaded' && !!item.repository && connectedRepository(root, item.repository));
+}
+
+export function libraryReviewContext(root: string, directory: string): { item: LibraryRelease; context: ReviewContext } {
+  if (typeof directory !== 'string') throw new Error('Choose a recorded uploaded version.');
+  const item = connectedReviewReleases(root).find(release => path.resolve(release.directory) === path.resolve(directory));
+  const connection = getWorkspaceConnection(root);
+  if (!item?.repository || !item.branch || !item.commit || !connection) throw new Error('This version has no verified upload in the connected repository. Connect its recorded repository before checking or creating its PR.');
+  return { item, context: { repository: item.repository, baseBranch: item.baseBranch ?? connection.baseBranch, branch: item.branch, commit: item.commit, skillName: item.skillName, version: item.version } };
+}
+
+export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer', reviewer?: string, runner?: GitHubRunner): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
+  const { item, context } = libraryReviewContext(root, directory);
+  const service = new GitHubReviewService(root, runner);
+  let pr = action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
+    ? item.pr ? await service.requestReviewer(context, item.pr, reviewer ?? '') : { supported: !!githubRepository(context.repository), status: 'uploaded' as const, reviewRequestError: 'Create the PR before requesting a reviewer.' }
+    : await service.check(context, item.pr);
+  // Confirm the PR receipt on disk before any optional notification or cleanup.
+  pr = recordLibraryReview(root, item.directory, pr);
+  if (action === 'create' && reviewer && pr.number && pr.identityVerified) {
+    pr = recordLibraryReview(root, item.directory, await service.requestReviewer(context, pr, reviewer));
+  }
+  let cleanupError: string | undefined;
+  if (action !== 'check' && pr.number && pr.identityVerified) {
+    const draft = listWorkbenchSkills(root).find(skill => skill.name === item.skillName);
+    if (draft) { try { completeWorkbenchSkill(root, draft.id, item.directory); } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); } }
+  }
+  return { pr, ...(cleanupError ? { cleanupError } : {}) };
 }

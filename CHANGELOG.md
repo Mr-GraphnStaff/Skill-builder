@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- Extend GitHub.com submission from branch upload to pull request creation, with recovery that reuses matching PRs instead of creating duplicates.
+- Add optional collaborator reviewer selection, explicit notification consent, and separate recovery when review assignment fails.
+- Add Check PRs and per-version status refresh for current and older saved uploads, distinguishing approval, merge, closure and unavailable status.
+- Use VS Code-managed GitHub authentication for PR tools, with explicit account switching and API-access checks before fresh uploads.
+- Keep review metadata separate from immutable skill versions. Retain branch uploads for other Git destinations; additional integrated providers are deferred.
+
 ## 0.8.0
 
 - Present SkillJetty by DAF-TECH consistently in extension metadata, settings and authoring tools while keeping the existing extension identity and update path.

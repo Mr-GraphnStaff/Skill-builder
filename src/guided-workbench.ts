@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { GuidedWorkbenchController } from './guided-controller.js';
 import { renderGuidedWorkbench, renderGuidedLauncher } from './guided-workbench-html.js';
 import { GuidedMessage } from './guided-contract.js';
+import { createGitHubSessionRunner } from './github-session.js';
 
 export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks: { getRoot(): Promise<string | undefined> }) {
   const brand = {
@@ -56,6 +57,14 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         enableScripts: true, retainContextWhenHidden: true, localResourceRoots: []
       });
       controller = new GuidedWorkbenchController(root, {
+        github: createGitHubSessionRunner(async () => {
+          const session = await vscode.authentication.getSession('github', ['repo'], { createIfNone: true });
+          return session.accessToken;
+        }),
+        connectGitHub: async () => {
+          const session = await vscode.authentication.getSession('github', ['repo'], { forceNewSession: { detail: 'Choose the GitHub account with access to your connected skill repository. This account is managed by VS Code.' }, clearSessionPreference: true });
+          return session.account.label;
+        },
         pickPackage: () => pick('package'), pickFolder: () => pick('folder'), pickFile: () => pick('file'),
         chooseWorkspace: async () => {
           const folder = (await vscode.window.showOpenDialog({ title: 'Choose your local skill work folder', canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];

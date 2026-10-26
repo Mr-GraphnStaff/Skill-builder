@@ -24,23 +24,37 @@ Choose **Check and continue**.
 
 ## Check
 
-Review structural errors and warnings. Errors link back to the relevant file where possible. Choose the highlighted fix action, edit, and check again. When the check passes, continue to Publish.
+Review structural errors and warnings. Errors link back to the relevant file where possible. Choose the highlighted fix action, edit, and check again. When the check passes, continue to Submit.
 
 Checking is local and does not upload your skill. A static check does not establish tool availability, script safety, skill triggering, model behavior or successful installation in a particular application. Run realistic prompts in the intended application before deciding the skill is ready for others.
 
-## Publish
+## Submit
 
 Connect a repository if needed, then review the destination, suggested version and contents. Enter change notes, including for `1.0.0`. If an identical unpublished release was already prepared, its version and immutable notes can be reused; changed source or notes require a new version.
 
-**Publish version** is the explicit upload action. The workbench checks the repository's current default branch, validates the source, packages and reopens the archive, verifies its bytes, and prepares an isolated destination checkout. It uploads only the version folder and verifies the remote commit.
+For GitHub.com, choose **Connect GitHub account** (or **Switch GitHub account** after selecting one) if you need to select the account used for PRs. VS Code handles sign-in and permission consent. This account must have access to the destination; existing Git push access alone does not prove API access. Repository discovery and creation still use GitHub CLI sign-in, which can be a different account. You can enter an existing repository URL instead of using discovery.
+
+Optionally load available reviewers and choose a person, or skip review assignment. The list uses eligible collaborators, excludes yourself and bots, and does not automatically assign past contributors. Submitting with a selected reviewer requests their review and sends a GitHub notification. If collaborator listing is unavailable, you can still create the PR and arrange review on GitHub.
+
+**Upload & create PR** is the explicit submission action. SkillJetty checks GitHub API access before a fresh upload, checks the repository's current default branch, validates the source, packages and reopens the archive, verifies its bytes, and prepares an isolated destination checkout. It uploads only the version folder, verifies the remote commit, then creates or finds the matching PR. It never merges automatically.
 
 The repository receives `<skill>/<version>/source/<skill>/**`, the versioned `.skill`, `CHANGELOG.md` and `release.json`. An originally imported package is retained as `original.skill`. Scratch-created skills do not invent an original archive. Empty directories survive in the archive and manifest, although Git cannot represent them in the exploded tree.
 
 ## Done
 
-The completion screen links to source, package and changelog on the recorded review branch. Follow the review link to finish your repository's normal merge process. Uploaded means available on that branch; it does not establish that the default branch has been updated.
+The completion screen links to the PR, source, package and changelog. Use **Check status** for the latest review state. Uploaded means available on the recorded branch; approved means a review approved it. Only a verified merge means it reached the target branch. Repository checks and review rules still apply.
 
-After a verified upload and persisted receipt, an unchanged draft leaves active work and is archived recoverably. Later local changes remain active and the completion screen explains that outcome. Start another skill without deleting your history.
+After successful submission and persisted recovery evidence, an unchanged draft leaves active work and is archived recoverably. Later local changes remain active and the completion screen explains that outcome. If PR creation or reviewer assignment fails after upload, follow the explicit recovery action; the upload receipt is retained. Start another skill without deleting your history.
+
+## Check PRs
+
+From Start, choose **Check PRs** to refresh saved uploads. Each entry shows the skill/version, review status and last check time, with **Open PR** and recovery actions when available. This checks submissions recorded in your local workspace; it is not a list of every PR in the repository.
+
+Older uploads can show **Uploaded — no PR**. Choose **Create PR** for that version. A status refresh itself is read-only: it does not create PRs or request reviews. Existing matching PRs are reused. Closed PRs remain closed; they are not silently reopened.
+
+**Awaiting review**, **Changes requested**, **Approved**, **Merged** and **Closed without merge** describe different outcomes. A connection failure is shown with the last verified result and timestamp; it does not mean the PR disappeared. Review details can always be inspected on GitHub.
+
+The integrated review flow currently supports GitHub.com. Other Git destinations receive a branch upload and must use their own review tools. Additional providers are deferred.
 
 ## Recovery
 
@@ -49,6 +63,10 @@ After a verified upload and persisted receipt, an unchanged draft leaves active 
 | File picker canceled | Continue editing; no upload happened. |
 | Structural check failed | Use the indicated file/fix action, then check again. |
 | Repository could not be accessed | Reconnect from the workbench after checking your normal Git access. |
+| GitHub sign-in canceled or API access denied | Use Connect GitHub account or Switch GitHub account and select an authorized account. A fresh submission stops before uploading. |
+| Upload succeeded but PR creation failed | Use the PR recovery action. SkillJetty rechecks for a matching PR before creating one; the version does not need another upload. |
+| PR exists but reviewer request failed | Open the PR or retry the explicit review request. The uploaded version and PR remain intact. |
+| Status could not refresh | Check connectivity/account access, then check again. The last verified result remains visible. |
 | Old saved branch is invalid | Reconnect; the workbench detects the default branch automatically. |
 | Git timed out | Draft and prepared release remain safe. Check connectivity and retry. |
 | Version is already prepared with different contents or notes | Choose a new version. Old release bytes remain unchanged. |
@@ -56,4 +74,4 @@ After a verified upload and persisted receipt, an unchanged draft leaves active 
 | Another editor changed the file | Both versions are preserved; inspect the recovery record, then reload the saved file. |
 | Historical version is corrupt | Drafts remain available. Recover that version from a known good copy before restoring it. |
 
-Keep `skills/`, `releases/`, `workbench/` and `.skill-workbench/` with the local workspace. The shared repository contains published version bundles; each teammate uses their own workspace and Git identity. The workbench is not a remote task board, automatic merge tracker or universal model-runtime tester.
+Keep `skills/`, `releases/`, `workbench/` and `.skill-workbench/` with the local workspace. The shared repository contains version bundles; each teammate uses their own workspace and Git identity. PR metadata is stored separately from immutable release contents. The workbench does not run AI models or replace repository merge rules.

@@ -13,10 +13,12 @@ function report(progress: Progress | undefined, message: string): void { try { p
 
 /** Internal runtime boundary, exported for process-lifecycle regression tests.
  * The deadline belongs to the returned process, never a matching process name. */
-export function runPublisherProcess(command: string, args: string[], options: { cwd: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }): Promise<{ stdout: string; stderr: string }> {
+export function runPublisherProcess(command: string, args: string[], options: { cwd: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; input?: string }): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const timeoutMs = options.timeoutMs ?? 120_000;
-    const child = spawn(command, args, { cwd: options.cwd, windowsHide: true, detached: process.platform !== 'win32', env: options.env ?? process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd: options.cwd, windowsHide: true, detached: process.platform !== 'win32', env: options.env ?? process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    child.stdin.on('error', () => { /* Process exit/error owns the outcome, including a closed stdin. */ });
+    child.stdin.end(options.input);
     const stdout: Buffer[] = []; const stderr: Buffer[] = [];
     let outputBytes = 0; let stopReason: string | undefined; let finished = false;
     let termination: Promise<void> = Promise.resolve(); let lastResort: NodeJS.Timeout | undefined;
