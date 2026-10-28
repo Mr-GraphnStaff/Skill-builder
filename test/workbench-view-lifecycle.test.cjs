@@ -73,19 +73,19 @@ function fixture(t) {
 
 test('guided workbench owns its activity container while retained native commands remain internal', async t => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-  const container = manifest.contributes.viewsContainers.activitybar.find(item => item.id === 'skillBuilder');
-  assert.equal(container.title, 'SkillJetty');
+  const container = manifest.contributes.viewsContainers.activitybar.find(item => item.id === 'skillJettyBeta');
+  assert.equal(container.title, 'SkillJetty Beta');
   assert(fs.existsSync(path.join(__dirname, '..', container.icon)));
-  assert.equal(manifest.contributes.views.skillBuilder[0].id, 'skillBuilder.guidedLauncher');
-  assert.equal(manifest.contributes.views.skillBuilder[0].type, 'webview');
+  assert.equal(manifest.contributes.views.skillJettyBeta[0].id, 'skillJettyBeta.guidedLauncher');
+  assert.equal(manifest.contributes.views.skillJettyBeta[0].type, 'webview');
   assert.equal(manifest.contributes.views.explorer, undefined);
   const hidden = manifest.contributes.menus.commandPalette;
-  assert(manifest.contributes.commands.every(item => item.command === 'skillBuilder.openWorkbench' || hidden.some(rule => rule.command === item.command && rule.when === 'false')));
+  assert(manifest.contributes.commands.every(item => item.command === 'skillJettyBeta.openWorkbench' || hidden.some(rule => rule.command === item.command && rule.when === 'false')));
   const declared = new Set(manifest.contributes.commands.map(item => item.command));
   for (const item of Object.values(manifest.contributes.menus).flat()) assert(declared.has(item.command), `Menu references undeclared command ${item.command}`);
   const f = fixture(t);
-  await f.commands.get('skillBuilder.openWorkbench')();
-  assert.deepEqual(f.executions, ['workbench.view.extension.skillBuilder', 'skillBuilder.workbenchView.focus']);
+  await f.commands.get('skillJettyBeta.openWorkbench')();
+  assert.deepEqual(f.executions, ['workbench.view.extension.skillJettyBeta', 'skillJettyBeta.workbenchView.focus']);
 });
 
 test('native lifecycle tree separates drafts and library with Edit, Check, Publish as dominant draft actions', async t => {
@@ -101,17 +101,17 @@ test('native lifecycle tree separates drafts and library with Edit, Check, Publi
 
 test('confirmed repository association is remembered, cancellation is not, and later drafts reuse it', async t => {
   const f = fixture(t);
-  await f.commands.get('skillBuilder.workbenchAssociateRepository')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.workbenchAssociateRepository')({ skill: f.skill });
   assert.equal(f.memory.size, 0);
   f.picks.push(items => items.find(item => item.repository)); f.inputs.push('main');
-  await f.commands.get('skillBuilder.workbenchAssociateRepository')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.workbenchAssociateRepository')({ skill: f.skill });
   assert.equal(f.inputOptions.at(-1).value, 'main');
-  assert.deepEqual(f.memory.get('skillBuilder.defaultRepository'), { repository: f.repository, baseBranch: 'main' });
+  assert.deepEqual(f.memory.get('skillJettyBeta.defaultRepository'), { repository: f.repository, baseBranch: 'main' });
   const second = f.draft('second');
   f.inputs.push('1.0.0', 'Initial second skill.');
   const repositoryCalls = f.counts.repositories;
   const pickCount = f.pickOptions.length;
-  await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: second });
+  await f.commands.get('skillJettyBeta.workbenchPublishRelease')({ skill: second });
   assert.deepEqual(f.errors, []);
   assert.equal(f.counts.repositories, repositoryCalls, 'a confirmed workspace default avoids another repository chooser');
   assert.equal(f.pickOptions.length, pickCount, 'freshly prepared single version needs no redundant version picker');
@@ -122,9 +122,9 @@ test('confirmed repository association is remembered, cancellation is not, and l
 
 test('a verified upload stays in the library and Edit next version prepares a new version instead of republishing v1', async t => {
   const f = fixture(t);
-  f.memory.set('skillBuilder.defaultRepository', { repository: f.repository, baseBranch: 'main' });
+  f.memory.set('skillJettyBeta.defaultRepository', { repository: f.repository, baseBranch: 'main' });
   f.inputs.push('1.0.0', 'Initial publication.'); f.confirmations.push('Push Release Branch');
-  await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.workbenchPublishRelease')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
   assert.equal(f.counts.pushed, 1);
   assert.equal(core.listWorkbenchSkills(f.root).length, 0);
@@ -142,12 +142,12 @@ test('a verified upload stays in the library and Edit next version prepares a ne
   assert.match(receipt.content, /CHANGELOG.md/);
   assert.match(receipt.content, /%28round%29/);
   const immutable = fs.readFileSync(path.join(entries[0].libraryEntry.directory, 'source', 'sample', 'SKILL.md'));
-  await f.commands.get('skillBuilder.workbenchRestoreRelease')(entries[0]);
+  await f.commands.get('skillJettyBeta.workbenchRestoreRelease')(entries[0]);
   const restored = core.listWorkbenchSkills(f.root)[0];
   fs.appendFileSync(path.join(restored.sourcePath, 'SKILL.md'), '\nNew revision content.\n');
   f.inputs.push(undefined);
   const prepared = f.counts.prepared;
-  await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: restored });
+  await f.commands.get('skillJettyBeta.workbenchPublishRelease')({ skill: restored });
   assert.deepEqual(f.errors, []);
   assert.equal(f.inputOptions.at(-1).value, '1.0.1');
   assert.equal(f.counts.prepared, prepared, 'cancelling the next-version prompt must not republish the old version');
@@ -159,9 +159,9 @@ test('stale prepared snapshots are not offered when the current draft has change
   const f = fixture(t);
   core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Prepared old draft.');
   fs.appendFileSync(path.join(f.skill.sourcePath, 'SKILL.md'), '\nChanged after preparation.\n');
-  f.memory.set('skillBuilder.defaultRepository', { repository: f.repository, baseBranch: 'main' });
+  f.memory.set('skillJettyBeta.defaultRepository', { repository: f.repository, baseBranch: 'main' });
   f.inputs.push(undefined);
-  await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.workbenchPublishRelease')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
   assert.equal(f.inputOptions.at(-1).value, '1.0.1');
   assert.equal(f.counts.prepared, 0); assert.equal(f.counts.pushed, 0);
@@ -171,7 +171,7 @@ test('stale prepared snapshots are not offered when the current draft has change
 test('checks use readable Markdown and block repository work for an invalid draft', async t => {
   const f = fixture(t);
   fs.writeFileSync(path.join(f.skill.sourcePath, 'SKILL.md'), '---\nname: sample\ndescription: ""\n---\n# Invalid\n');
-  await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.workbenchPublishRelease')({ skill: f.skill });
   assert.equal(f.counts.repositories, 0); assert.equal(f.counts.prepared, 0);
   const report = f.documents.at(-1);
   assert.equal(report.language, 'markdown');
@@ -193,6 +193,6 @@ test('a damaged old library entry cannot hide Drafts or offer restoration of cor
   assert.equal(issues.length, 1);
   assert.match(issues[0].label, /Library needs attention/);
   assert.equal(issues[0].libraryEntry, undefined);
-  await f.commands.get('skillBuilder.workbenchLibraryIssue')('Package hash mismatch.');
+  await f.commands.get('skillJettyBeta.workbenchLibraryIssue')('Package hash mismatch.');
   assert.match(f.documents.at(-1).content, /Drafts/);
 });

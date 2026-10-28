@@ -1,23 +1,27 @@
-# SkillJetty by DAF-TECH
+# SkillJetty Beta — local UAT
+
+**This is the separate local Beta extension (`DavidFarris.skill-builder-beta`).** Open **SkillJetty Beta: Open Workbench**. It runs alongside production SkillJetty with separate commands, settings and `.skilljetty-beta` drafts/history. Test only this clearly named Beta extension. Production remains on its approved baseline. Marketplace pre-release publication is a separate step after UAT approval.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
-**Agent Skills Studio — Build it. Version it. Ship it.**
+**Agent Skills Studio — Build it. Improve it. Share it.**
 
 Create, edit, check and publish Agent Skills from one guided VS Code workbench.
 
-**One connected repository. One folder per skill. Source, a valid `.skill` package and a changelog for every version.**
+Focus on what your skill should do. SkillJetty reads its declared identity, manages release numbers and prepares factual file-change notes. Save an installable package locally without a repository, or connect one when you want to share for review.
+
+The beta acknowledges clicks with an activity indicator and explains what is happening. Expensive local checks run in the background; routine saves no longer reopen every saved release. See [performance measurements and feedback behavior](docs/performance-and-feedback.md).
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar. It opens the guided workbench directly. You can also run **SkillJetty: Open Workbench** from the Command Palette; that is the only normal public command you need.
+For UAT, click the **SkillJetty Beta** icon on VS Code's left activity bar, or run **SkillJetty Beta: Open Workbench** from the Command Palette. Confirm the Beta / UAT banner. The separately installed **SkillJetty** extension and **SkillJetty: Open Workbench** command are production; leave them unchanged during beta testing.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
 1. **Start:** choose **Create a new skill**, **Open a .skill file**, or **Open a skill folder**. You can also resume saved work. A repository connection is needed only when you are ready to publish.
 2. **Edit:** write the skill's instructions and edit its supporting files in the workbench. Add text files or copy existing assets. Changes save locally.
 3. **Check:** see problems with links to the files that need attention. Fix them, then check again. Checking does not upload anything, and a passed structural check does not establish model behavior.
-4. **Submit:** connect the repository once if needed, confirm the version, enter what changed, and choose **Upload & create PR**. For GitHub.com, sign in through VS Code when prompted. You can optionally choose a reviewer; requesting review notifies that person.
+4. **Submit:** review the detected file changes and managed release number. Add optional context, then save a package on this computer. To share through GitHub, connect a repository and choose **Upload & create PR**. You can optionally choose a reviewer; requesting review notifies that person. A manual release-number override is available under Advanced.
 5. **Done:** open the pull request or the source, `.skill` and changelog links. Use **Check status** to refresh review progress. Choose **Work on another skill** when finished.
 
 No terminal commands or Git branch names are needed for normal use. The extension detects the repository's actual default branch. Git credentials and repository access still need to work on your machine.

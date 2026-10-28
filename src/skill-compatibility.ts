@@ -5,7 +5,7 @@ import type { SkillTarget } from './guided-contract.js';
 const yaml: { load(value: string): unknown } = require('js-yaml');
 const common = new Set(['name', 'description', 'license', 'compatibility', 'metadata', 'allowed-tools']);
 const claude = new Set(['argument-hint', 'arguments', 'context', 'agent', 'disable-model-invocation', 'user-invocable', 'disallowed-tools', 'hooks', 'model']);
-export function checkSkillCompatibility(skill: WorkbenchSkill, target: SkillTarget) {
+export function checkSkillCompatibility(skill: WorkbenchSkill, target: SkillTarget, validatedPaths?: readonly string[]) {
   const warnings: { message: string; file?: string }[] = [];
   const text = readGuidedFile(skill, 'SKILL.md');
   const block = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
@@ -13,8 +13,8 @@ export function checkSkillCompatibility(skill: WorkbenchSkill, target: SkillTarg
   for (const key of Object.keys(frontmatter ?? {})) {
     if (!common.has(key) && !(target === 'claude' && claude.has(key))) warnings.push({ message: `“${key}” is an application-specific setting. Confirm support in your selected application before using this skill.`, file: 'SKILL.md' });
   }
-  const files = listGuidedFiles(skill);
-  if (files.some(file => file.path === 'agents/openai.yaml')) {
+  const files = validatedPaths ?? listGuidedFiles(skill).map(file => file.path);
+  if (files.includes('agents/openai.yaml')) {
     try {
       const data = yaml.load(readGuidedFile(skill, 'agents/openai.yaml'));
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Expected a YAML mapping.');

@@ -14,6 +14,9 @@ export type GuidedState = {
   step: GuidedStep;
   busy?: boolean;
   progress?: string;
+  waitingForInput?: boolean;
+  skillsLoaded?: boolean;
+  skillsStale?: boolean;
   error?: string;
   notice?: string;
   hasWorkspace: boolean;
@@ -28,18 +31,21 @@ export type GuidedState = {
   reviewQueueError?: string;
   githubAccount?: string;
   libraryError?: string;
-  active?: { id: string; name: string };
+  active?: { id: string; name: string; version?: string; versionNote?: string };
+  history?: { id: string; path: string; at: string }[];
   files: { path: string; size: number; text: boolean }[];
   editor?: { path: string; content: string; readOnly?: boolean };
   target: SkillTarget;
   check?: { valid: boolean; errors: { message: string; file?: string }[]; warnings: { message: string; file?: string }[]; compatibility: string; behaviorNote: string };
-  publish?: { version: string; changelog: string; repository?: string; fileCount: number; reviewSupported?: boolean };
-  receipt?: { name: string; version: string; directory?: string; pr?: PullRequestRecord; sourceUrl?: string; packageUrl?: string; changelogUrl?: string; reviewUrl?: string; commit?: string; branch?: string; cleanupError?: string; note: string };
+  publish?: { version: string; changelog: string; repository?: string; fileCount: number; reviewSupported?: boolean;
+    versionSource?: string; versionWarning?: string; suggestedChangelog?: string;
+    changeSummary?: { baselineVersion?: string; added: string[]; changed: string[]; removed: string[]; unchanged: number; note?: string } };
+  receipt?: { name: string; version: string; directory?: string; local?: boolean; packagePath?: string; pr?: PullRequestRecord; sourceUrl?: string; packageUrl?: string; changelogUrl?: string; reviewUrl?: string; commit?: string; branch?: string; cleanupError?: string; note: string };
   form?: Record<string, string>;
 };
 
-export type GuidedAction = 'ready' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
-  | 'showCreate' | 'createSkill' | 'openPackage' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
+export type GuidedAction = 'ready' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
+  | 'showCreate' | 'createSkill' | 'openPackage' | 'openPackagePath' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
-  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub';
+  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage';
 export type GuidedMessage = { action: GuidedAction; payload?: Record<string, unknown>; editorSkillId?: string; editorPath?: string; editorContent?: string };

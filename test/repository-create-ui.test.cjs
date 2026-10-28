@@ -50,7 +50,7 @@ function fixture() {
   return {
     skill, picks, inputs, warnings, errors, creates, associations, inputOptions, pickOptions,
     confirm(value) { confirmation = value; }, failCreate(error) { createError = error; },
-    run() { return commands.get('skillBuilder.workbenchAssociateRepository')({ skill }); }
+    run() { return commands.get('skillJettyBeta.workbenchAssociateRepository')({ skill }); }
   };
 }
 

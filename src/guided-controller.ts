@@ -1,12 +1,16 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { importSkillPackage, registerSkillFolder, listWorkbenchSkills, validateWorkbenchSkill, WorkbenchSkill } from './skill-workbench.js';
-import { listLibraryReleases, restoreLibraryRelease, suggestReleaseVersion } from './workbench-library.js';
+import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
+import { suggestReleaseVersion } from './workbench-library.js';
+import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
-import { connectWorkspaceRepository, getWorkspaceConnection, migrateAssociation, createGuidedSkill, listGuidedFiles, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, publishGuidedSkill, connectedReviewReleases, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
+import { connectWorkspaceRepository, getWorkspaceConnection, migrateAssociation, createGuidedSkill, listGuidedFiles, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
 import { checkSkillCompatibility } from './skill-compatibility.js';
 import { GuidedState, GuidedMessage, SkillTarget } from './guided-contract.js';
+import { runWorkbenchJob } from './workbench-jobs.js';
+import type { ValidationReport } from './skill-workbench.js';
+import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export type GuidedHooks = {
   pickPackage?(): Promise<string | undefined>;
@@ -14,6 +18,7 @@ export type GuidedHooks = {
   pickFile?(): Promise<string | undefined>;
   chooseWorkspace?(): Promise<string | undefined>;
   openLink?(url: string): Promise<void>;
+  revealFile?(file: string): Promise<void>;
   onState?(state: GuidedState): void;
   github?: GitHubRunner;
   connectGitHub?(): Promise<string | undefined>;
@@ -21,6 +26,7 @@ export type GuidedHooks = {
 
 export class GuidedWorkbenchController {
   private pending: Promise<void> = Promise.resolve();
+  private previewInventory?: string;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
   constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; }
   private workspace(): string { if (!this.root) throw new Error('Choose a local folder for your skill work before continuing.'); return this.root; }
@@ -29,29 +35,41 @@ export class GuidedWorkbenchController {
     if (!skill) throw new Error('Choose a draft to continue editing. Your saved files have not been removed.');
     return skill;
   }
-  private refresh() {
+  private refreshConnection() {
     if (!this.root) return;
     this.state.hasWorkspace = true;
     try { this.state.connection = getWorkspaceConnection(this.root); }
     catch { this.state.connection = undefined; this.state.notice = 'Your repository connection needs reconnecting. Saved drafts are still available.'; }
+  }
+  private async loadSkills() {
+    if (!this.root) return;
+    this.refreshConnection();
     this.state.drafts = listWorkbenchSkills(this.root).map(({ id, name }) => ({ id, name }));
     try {
-      this.state.library = listLibraryReleases(this.root).map(({ skillName, version, directory, status, pr }) => ({ skillName, version, directory, status, ...(pr ? { pr } : {}) }));
-      if (this.state.reviewQueue !== undefined) this.refreshReviews();
+      const releases = await runWorkbenchJob({ kind: 'library', root: this.root });
+      if (!this.state.connection) this.state.connection = await migrateAssociation(this.root, releases);
+      this.state.library = releases.map(({ skillName, version, directory, status, pr }) => ({ skillName, version, directory, status, ...(pr ? { pr } : {}) }));
+      if (this.state.reviewQueue !== undefined) await this.refreshReviews();
       this.state.libraryError = undefined;
     } catch { this.state.libraryError = 'A saved version could not be verified. Your drafts are still available.'; this.state.library = []; }
+    this.state.skillsLoaded = true;
+    this.state.skillsStale = false;
   }
-  private refreshReviews() {
-    this.state.reviewQueue = connectedReviewReleases(this.workspace()).map(({ directory, skillName, version, repository, pr }) => ({ directory, skillName, version, repository, ...(pr ? { pr } : {}) }));
+  private async refreshReviews() {
+    this.state.reviewQueue = (await runWorkbenchJob({ kind: 'reviews', root: this.workspace() })).map(({ directory, skillName, version, repository, pr }) => ({ directory, skillName, version, repository, ...(pr ? { pr } : {}) }));
     if (this.state.receipt?.directory) {
       const current = this.state.reviewQueue.find(item => item.directory === this.state.receipt!.directory);
       if (current?.pr) this.state.receipt.pr = current.pr;
     }
   }
   private select(skill: WorkbenchSkill) {
-    this.state.active = { id: skill.id, name: skill.name };
+    const identity = readSkillIdentity(readGuidedFile(skill, 'SKILL.md'));
+    this.state.active = { id: skill.id, name: skill.name, version: identity.declaredVersion,
+      versionNote: identity.warnings.join(' ') || (identity.declaredVersion ? `Declared in SKILL.md → ${identity.versionSource}.` : 'No version declared. SkillJetty will manage the release number when you share.') };
     this.state.files = listGuidedFiles(skill);
     this.state.editor = { path: 'SKILL.md', content: readGuidedFile(skill, 'SKILL.md') };
+    this.state.history = listGuidedHistory(this.workspace(), skill, 'SKILL.md');
+    this.previewInventory = undefined;
     this.state.step = 'edit'; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined; this.state.form = undefined;
   }
   private buffer(message: GuidedMessage) {
@@ -72,7 +90,7 @@ export class GuidedWorkbenchController {
     if (saved !== this.state.editor.content) {
       if (unchanged) {
         this.state.editor.content = saved;
-        this.state.files = listGuidedFiles(skill);
+        this.state.files = this.state.files.map(file => file.path === message.editorPath ? { ...file, size: Buffer.byteLength(saved, 'utf8') } : file);
         this.state.check = undefined;
         return;
       }
@@ -83,27 +101,63 @@ export class GuidedWorkbenchController {
       const original = this.state.editor.content;
       const uniformCrlf = original.includes('\r\n') && !/[\r\n]/.test(original.replace(/\r\n/g, ''));
       const content = uniformCrlf ? browserText(message.editorContent).replace(/\n/g, '\r\n') : message.editorContent;
+      const earlierEdit = saveGuidedRecovery(this.workspace(), skill, message.editorPath, original);
       writeGuidedFile(skill, message.editorPath, content);
       this.state.check = undefined;
       this.state.editor.content = content;
-      this.state.files = listGuidedFiles(skill);
+      // The other files and release archives did not change. Avoid reading
+      // every binary asset and earlier edit on each debounced text save.
+      this.state.files = this.state.files.map(file => file.path === message.editorPath ? { ...file, size: Buffer.byteLength(content, 'utf8') } : file);
+      this.state.history = [{ id: path.basename(earlierEdit, '.json'), path: message.editorPath, at: new Date().toISOString() }, ...(this.state.history ?? [])].slice(0, 50);
+      if (message.editorPath === 'SKILL.md' && this.state.active) {
+        const identity = readSkillIdentity(content);
+        this.state.active.version = identity.declaredVersion;
+        this.state.active.versionNote = identity.warnings.join(' ') || (identity.declaredVersion ? `Declared in SKILL.md → ${identity.versionSource}.` : 'No version declared. Release numbering is automatic.');
+      }
     }
   }
-  private check() {
+  private async publicationDetails(suppliedNotes?: string): Promise<{ details: NonNullable<GuidedState['publish']>; inventory: ValidationReport['files'] }> {
     const skill = this.active();
-    const result = validateWorkbenchSkill(skill);
+    const snapshot = await runWorkbenchJob({ kind: 'snapshot', root: this.workspace(), skill });
+    if (!snapshot.validation.valid) throw new Error(snapshot.validation.errors.join('\n'));
+    const versions = snapshot.releases;
+    const inventory = snapshot.validation.files;
+    const matching = versions.find(item => {
+      const manifest = JSON.parse(fs.readFileSync(path.join(item.directory, 'release.json'), 'utf8'));
+      return JSON.stringify(manifest.files) === JSON.stringify(inventory)
+        && (!suppliedNotes || fs.readFileSync(path.join(item.directory, 'CHANGELOG.md'), 'utf8').trim() === suppliedNotes);
+    });
+    const identity = readSkillIdentity(readGuidedFile(skill, 'SKILL.md'));
+    const summary = snapshot.summary;
+    const section = (label: string, values: string[]) => values.length ? `${label} (${values.length}): ${values.slice(0, 12).join(', ')}${values.length > 12 ? ', …' : ''}.` : '';
+    const notes = [summary.baselineVersion ? `File changes since saved release ${summary.baselineVersion}.` : `First saved release of ${skill.name}.`,
+      section('Added', summary.added), section('Updated', summary.changed), section('Removed', summary.removed),
+      !summary.hasChanges ? 'No skill file changes.' : '', 'Generated from file comparisons; skill behavior has not been tested.'].filter(Boolean).join('\n');
+    const version = matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version));
+    return { details: { version, changelog: matching ? fs.readFileSync(path.join(matching.directory, 'CHANGELOG.md'), 'utf8').trim() : '',
+      repository: this.state.connection?.repository, fileCount: inventory.length,
+      reviewSupported: !!githubRepository(this.state.connection?.repository ?? ''),
+      versionSource: matching ? 'Reusing this exact saved release; no duplicate is needed.' : identity.declaredVersion && version === identity.declaredVersion
+        ? `From SKILL.md → ${identity.versionSource}.` : identity.declaredVersion
+          ? `Managed release number. The skill itself declares ${identity.declaredVersion}; its metadata is preserved.`
+          : 'Managed automatically by SkillJetty.',
+      versionWarning: identity.warnings.join(' ') || undefined, changeSummary: summary, suggestedChangelog: notes }, inventory };
+  }
+  private async check() {
+    const skill = this.active();
+    const result = await runWorkbenchJob({ kind: 'validate', skill });
     const fileFinding = (message: string) => {
       const file = this.state.files.find(entry => message.startsWith(`${entry.path}:`))?.path;
       return { message, ...(file ? { file } : {}) };
     };
     let compatibility: ReturnType<typeof checkSkillCompatibility>;
-    try { compatibility = checkSkillCompatibility(skill, this.state.target); }
+    try { compatibility = checkSkillCompatibility(skill, this.state.target, result.files.map(file => file.path)); }
     catch { compatibility = { warnings: [], compatibility: 'Correct the file errors before compatibility can be checked.', behaviorNote: 'No AI model was run.' }; }
     this.state.check = { valid: result.valid, errors: result.errors.map(fileFinding), warnings: [...result.warnings.map(fileFinding), ...compatibility.warnings], compatibility: compatibility.compatibility, behaviorNote: compatibility.behaviorNote };
     this.state.step = 'check';
     return result.valid;
   }
-  private progress(message: string) { this.state.progress = message; this.hooks.onState?.(this.state); }
+  private progress(message: string, waitingForInput = false) { this.state.progress = message; this.state.waitingForInput = waitingForInput; this.hooks.onState?.(this.state); }
   dispatch(message: GuidedMessage): Promise<GuidedState> {
     // Pickers and network calls can yield while another message arrives. Keep
     // their complete transitions ordered instead of changing the active skill
@@ -119,19 +173,32 @@ export class GuidedWorkbenchController {
     const string = (key: string, fallback = '') => typeof payload[key] === 'string' ? payload[key] as string : fallback;
     this.state.error = undefined; this.state.notice = undefined;
     try {
+      if (message.action !== 'save' && message.action !== 'ready') {
+        this.state.busy = true;
+        this.progress(activityForAction(message.action), actionNeedsInput(message.action));
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
       if (message.action !== 'reloadFile') this.buffer(message);
       this.state.form = Object.fromEntries(Object.entries(payload).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
       switch (message.action) {
-        case 'ready': case 'refresh': {
-          this.refresh();
-          if (this.root && !this.state.connection) {
-            this.state.busy = true; this.progress('Checking your existing repository connection…');
-            await migrateAssociation(this.root);
-          }
-          break;
-        }
+        case 'ready': this.refreshConnection(); break;
+        case 'loadSkills': case 'refresh': this.workspace(); await this.loadSkills(); break;
+        case 'unloadSkills':
+          this.state.drafts = []; this.state.library = []; this.state.reviewQueue = undefined;
+          this.state.libraryError = undefined; this.state.reviewQueueError = undefined;
+          this.state.skillsLoaded = false; this.state.skillsStale = false; break;
         case 'chooseWorkspace': {
-          const root = await this.hooks.chooseWorkspace?.(); if (root) { this.root = root; this.refresh(); }
+          const root = await this.hooks.chooseWorkspace?.();
+          if (root) {
+            this.progress('Opening your selected work folder…'); this.root = root;
+            this.state.drafts = []; this.state.library = []; this.state.reviewQueue = undefined;
+            this.state.skillsLoaded = false; this.state.skillsStale = false;
+            this.state.active = undefined; this.state.editor = undefined; this.state.files = []; this.state.history = undefined;
+            this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined;
+            this.state.libraryError = undefined; this.state.reviewQueueError = undefined; this.state.step = 'start';
+            this.refreshConnection();
+          }
+          else this.state.notice = 'Folder selection canceled. Your saved work is still available.';
           break;
         }
         case 'discoverRepositories':
@@ -157,22 +224,34 @@ export class GuidedWorkbenchController {
           this.select(skill); break;
         }
         case 'openPackage': {
-          const file = await this.hooks.pickPackage?.(); if (file) this.select(importSkillPackage(file, this.workspace())); break;
+          const file = await this.hooks.pickPackage?.();
+          if (file) { this.progress('Opening and checking the selected skill package…'); this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file })); }
+          else this.state.notice = 'Opening canceled. No package was imported.';
+          break;
+        }
+        case 'openPackagePath': {
+          const file = string('path').trim();
+          if (!file || !path.isAbsolute(file) || path.extname(file).toLowerCase() !== '.skill') throw new Error('Enter the full path to a .skill package.');
+          this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file })); break;
         }
         case 'openFolder': {
-          const folder = await this.hooks.pickFolder?.(); if (folder) this.select(registerSkillFolder(this.workspace(), folder)); break;
+          const folder = await this.hooks.pickFolder?.();
+          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder })); }
+          else this.state.notice = 'Opening canceled. No folder was imported.';
+          break;
         }
         case 'resume': {
           const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === string('id'));
           if (!skill) throw new Error('That draft is no longer active. Refresh to see saved drafts.');
           this.select(skill); break;
         }
-        case 'restoreVersion': this.select(restoreLibraryRelease(this.workspace(), string('directory'))); break;
+        case 'restoreVersion': this.select(await runWorkbenchJob({ kind: 'restoreRelease', root: this.workspace(), directory: string('directory') })); break;
         case 'openFile': {
           const skill = this.active(); const relative = string('path');
           const file = listGuidedFiles(skill).find(item => item.path === relative);
           if (!file) throw new Error('Choose a file belonging to this skill.');
           this.state.editor = { path: relative, content: file.text ? readGuidedFile(skill, relative) : 'This binary file is preserved in full. Use your normal desktop application to edit it.', readOnly: !file.text };
+          this.state.history = file.text ? listGuidedHistory(this.workspace(), skill, relative) : [];
           this.state.step = 'edit'; break;
         }
         case 'createFile': {
@@ -183,12 +262,30 @@ export class GuidedWorkbenchController {
         }
         case 'addFile': {
           const file = await this.hooks.pickFile?.(); if (!file) break;
+          this.progress('Adding the selected supporting file…');
           const relative = string('path', `references/${path.basename(file)}`);
           const skill = this.active();
           copyGuidedFile(skill, relative, file);
           this.state.files = listGuidedFiles(skill); break;
         }
-        case 'save': this.state.notice = 'Saved locally.'; break;
+        case 'save': this.state.notice = 'Saved on this computer. Use Refresh earlier edits below the editor to see saved history.'; break;
+        case 'refreshHistory': {
+          const skill = this.active();
+          this.state.history = this.state.editor && !this.state.editor.readOnly ? listGuidedHistory(this.workspace(), skill, this.state.editor.path) : [];
+          this.state.form = { ...this.state.form, historyOpen: 'true' };
+          this.state.notice = 'Earlier edits refreshed. Your current work is saved.'; break;
+        }
+        case 'restoreEdit': {
+          const skill = this.active();
+          if (!this.state.editor || this.state.editor.readOnly) throw new Error('Select an editable text file first.');
+          const relative = this.state.editor.path;
+          restoreGuidedEdit(this.workspace(), skill, relative, string('id'));
+          this.state.editor.content = readGuidedFile(skill, relative);
+          this.state.history = listGuidedHistory(this.workspace(), skill, relative);
+          this.state.form = { ...this.state.form, historyOpen: 'true' };
+          this.state.files = listGuidedFiles(skill); this.state.check = undefined; this.state.publish = undefined;
+          this.state.notice = 'Earlier edit restored. The content it replaced is also kept in Earlier edits.'; break;
+        }
         case 'reloadFile': {
           const skill = this.active();
           const relative = this.state.editor?.path ?? 'SKILL.md';
@@ -200,37 +297,52 @@ export class GuidedWorkbenchController {
           if (!['portable', 'claude', 'codex', 'gemini', 'copilot'].includes(target)) throw new Error('Choose a supported compatibility target.');
           this.state.target = target as SkillTarget; this.state.check = undefined; break;
         }
-        case 'check': this.check(); break;
+        case 'check': await this.check(); break;
         case 'edit': this.state.step = 'edit'; break;
         case 'preparePublish': {
-          if (!this.check()) break;
-          if (!this.state.connection) { this.state.error = 'Connect your repository below before publishing.'; this.state.step = 'publish'; }
-          else this.state.step = 'publish';
-          const skill = this.active();
-          const versions = listLibraryReleases(this.workspace(), skill.name);
-          const inventory = validateWorkbenchSkill(skill).files;
-          const matching = versions.find(item => {
-            if (item.status !== 'prepared') return false;
-            const manifest = JSON.parse(fs.readFileSync(path.join(item.directory, 'release.json'), 'utf8'));
-            return JSON.stringify(manifest.files) === JSON.stringify(inventory);
-          });
-          this.state.publish = { version: matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version)), changelog: matching ? fs.readFileSync(path.join(matching.directory, 'CHANGELOG.md'), 'utf8').trim() : '', repository: this.state.connection?.repository, fileCount: listGuidedFiles(skill).length, reviewSupported: !!githubRepository(this.state.connection?.repository ?? '') };
+          if (!await this.check()) break;
+          this.state.step = 'publish';
+          const preview = await this.publicationDetails();
+          this.state.publish = preview.details;
+          this.previewInventory = JSON.stringify(preview.inventory);
           break;
         }
-        case 'publish': {
+        case 'savePackage': case 'publish': {
           if (this.state.step !== 'publish') throw new Error('Check this skill and review the publication screen first.');
-          const version = string('version', this.state.publish?.version ?? '');
-          const changelog = string('changelog');
+          const preview = await this.publicationDetails(string('changelog').trim() || undefined);
+          const details = preview.details;
+          const override = string('version').trim();
+          const version = override || details.version;
+          const changelog = string('changelog').trim() || details.changelog || details.suggestedChangelog || `Saved release of ${this.active().name}.`;
+          const currentInventory = JSON.stringify(preview.inventory);
+          if (this.previewInventory !== currentInventory || (!override && this.state.publish?.version !== details.version)) {
+            this.state.publish = details; this.previewInventory = currentInventory;
+            throw new Error('Your skill or saved release history changed since this summary was shown. The summary has been updated; review it before submitting. Nothing was uploaded.');
+          }
           if (string('reviewer') && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request when submitting.');
-          this.state.publish = { version, changelog, repository: this.state.connection?.repository, fileCount: this.state.files.length };
+          this.state.publish = { ...details, changelog };
+          if (message.action === 'savePackage') {
+            this.state.step = 'publish';
+            const skill = this.active();
+            const existing = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: skill.name })).find(item => item.version === version);
+            let release;
+            if (existing) {
+              release = await runWorkbenchJob({ kind: 'verifyRelease', directory: existing.directory });
+              if (JSON.stringify(release.manifest.files) !== currentInventory) throw new Error('This release number already preserves different files. Leave the advanced number blank to let SkillJetty choose the next one.');
+              if (fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim()) throw new Error('This saved release has different notes. It is preserved unchanged; choose a new release number to save different notes.');
+            } else release = await runWorkbenchJob({ kind: 'prepareRelease', root: this.workspace(), id: skill.id, version, changelog });
+            if (JSON.stringify(release.manifest.files) !== currentInventory) throw new Error('The draft changed while the local package was being prepared. The prepared package is preserved, but it has not been accepted as the reviewed release. Check the draft and review a fresh summary. Nothing was uploaded.');
+            this.state.receipt = { name: skill.name, version, directory: release.directory, packagePath: release.packagePath, local: true,
+              note: 'Package saved on this computer. No repository was contacted and nothing was uploaded. Your editable draft and earlier edits are retained.' };
+            this.state.step = 'done'; break;
+          }
           if (!this.state.connection) throw new Error('Connect your repository before publishing.');
-          if (!this.check()) break;
           this.state.step = 'publish';
           this.state.busy = true; this.progress('Checking and packaging this version…');
           const supported = !!githubRepository(this.state.connection.repository);
-          const priorUpload = listLibraryReleases(this.workspace(), this.active().name).find(item => item.version === version && item.status === 'uploaded');
+          const priorUpload = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: this.active().name })).find(item => item.version === version && item.status === 'uploaded');
           if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(this.state.connection.repository); }
-          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, message => this.progress(message), { deferCleanup: supported });
+          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, message => this.progress(message), { deferCleanup: supported, expectedFiles: preview.inventory });
           this.state.receipt = receiptFor(result);
           if (supported) {
             this.progress('Upload verified. Creating or finding its pull request…');
@@ -245,6 +357,13 @@ export class GuidedWorkbenchController {
           } else this.state.receipt.pr = { supported: false, status: 'unsupported', warning: 'Uploaded to a review branch. Automatic PR review is available for GitHub.com only; no PR was created for this provider.' };
           this.state.step = 'done'; this.state.editor = undefined; this.state.files = []; this.state.active = undefined; break;
         }
+        case 'revealPackage': {
+          const receipt = this.state.receipt;
+          const saved = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: receipt?.name })).find(item => item.directory === receipt?.directory && item.version === receipt?.version);
+          if (!receipt?.local || !saved) throw new Error('Save a local package first.');
+          const release = await runWorkbenchJob({ kind: 'verifyRelease', directory: saved.directory });
+          await this.hooks.revealFile?.(release.packagePath); break;
+        }
         case 'loadReviewers': {
           this.state.busy = true; this.progress('Finding eligible collaborator reviewers…');
           const connection = getWorkspaceConnection(this.workspace());
@@ -257,7 +376,7 @@ export class GuidedWorkbenchController {
           break;
         }
         case 'connectGitHub': {
-          this.state.busy = true; this.progress('Choose your GitHub account in VS Code. Cancelling keeps your draft unchanged.');
+          this.state.busy = true; this.progress('Choose your GitHub account in VS Code. Cancelling keeps your draft unchanged.', true);
           this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
           const account = await this.hooks.connectGitHub?.();
           if (!account) throw new Error('GitHub sign-in was cancelled. No upload or review request was made.');
@@ -267,13 +386,13 @@ export class GuidedWorkbenchController {
         case 'checkPullRequests': {
           this.state.step = 'start'; this.state.form = { mode: 'reviews' }; this.state.busy = true; this.state.reviewQueueError = undefined;
           this.progress('Checking PRs for recorded uploads in the connected repository…');
-          const items = connectedReviewReleases(this.workspace());
+          const items = await runWorkbenchJob({ kind: 'reviews', root: this.workspace() });
           for (const item of items.slice(0, 50)) {
             try { await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github); }
             catch { this.state.reviewQueueError = 'Some saved upload metadata could not be checked. Inspect the affected version and reconnect its recorded repository; known statuses are retained.'; }
           }
           if (items.length > 50) this.state.reviewQueueError = 'The first 50 versions were checked. Check additional versions individually to keep requests bounded.';
-          this.refreshReviews(); break;
+          await this.refreshReviews(); break;
         }
         case 'checkPullRequest': case 'createPullRequest': case 'requestReviewer': {
           if (message.action === 'requestReviewer' && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request first.');
@@ -281,7 +400,7 @@ export class GuidedWorkbenchController {
           this.state.busy = true; this.progress(message.action === 'checkPullRequest' ? 'Checking this recorded PR…' : message.action === 'createPullRequest' ? 'Finding or creating the PR for the existing upload…' : 'Requesting the selected eligible reviewer…');
           const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github);
           if (this.state.receipt?.directory === string('directory')) { this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError; }
-          this.refreshReviews(); break;
+          await this.refreshReviews(); break;
         }
         case 'openPullRequest': {
           const { item, context } = libraryReviewContext(this.workspace(), string('directory'));
@@ -305,8 +424,8 @@ export class GuidedWorkbenchController {
       this.state.error = friendlyError(detail);
     } finally {
       if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
-      this.state.busy = false; this.state.progress = undefined;
-      try { this.refresh(); } catch { this.state.error ??= 'Saved work could not be listed. Keep the workspace and try reopening the workbench.'; }
+      this.state.busy = false; this.state.progress = undefined; this.state.waitingForInput = false;
+      if (this.state.skillsLoaded && ['createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action)) this.state.skillsStale = true;
     }
     return this.state;
   }

@@ -1,0 +1,34 @@
+# Build the separate local-UAT identity. This definition never publishes to a store.
+trigger:
+  branches:
+    include: [codex/human-workbench-beta]
+pr: none
+
+pool:
+  vmImage: ubuntu-24.04
+
+jobs:
+- job: BetaTestPackage
+  displayName: Validate and package SkillJetty Beta for local UAT
+  condition: eq(variables['Build.SourceBranch'], 'refs/heads/codex/human-workbench-beta')
+  timeoutInMinutes: 25
+  steps:
+  - checkout: self
+    clean: true
+    persistCredentials: false
+  - task: UseNode@1
+    inputs:
+      version: 22.x
+  - script: npm ci
+    displayName: Install locked dependencies
+  - script: npm test
+    displayName: Compile and test the beta source
+  - script: npm audit --omit=dev
+    displayName: Audit production dependencies
+  - script: npm audit --audit-level=high
+    displayName: Audit build and packaging tools
+  - script: npm run ci:beta-package
+    displayName: Package and verify the separate beta VSIX
+  - publish: dist/beta-ci
+    artifact: skilljetty-beta-uat-vsix
+    displayName: Retain downloadable beta VSIX and provenance receipt

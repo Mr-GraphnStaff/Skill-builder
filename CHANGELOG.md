@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.1 (local beta / UAT)
+
+- Acknowledge step clicks immediately with action-specific activity messages and an indeterminate indicator; explain long waits and canceled selections.
+- Update progress without rebuilding the editor; preserve focus and outgoing edits, prevent duplicate actions, and stop queued submission after a failed save.
+- Remove release-library verification and full-file rescans from debounced saves. Run expensive local validation, package import/preparation and library verification in trusted background workers.
+- Bind sharing summaries to the exact files shown, and reject asynchronous external changes before accepting a package or uploading it.
+- Add a local Performance output channel containing operation labels, duration and outcome only; no skill contents, paths or credentials.
+
+
+## 0.11.0 (pre-release candidate)
+
+- Detect a submitted skill's declared version with provenance and visible conflict warnings; manage release numbers without a required Version field.
+- Show verified file changes and generate factual release notes, with optional human context and an advanced release-number override.
+- Save an installable package locally without connecting GitHub; identical content reuses the preserved release, while changed work receives the next number.
+- Preserve earlier text edits outside distributable skill contents and restore them without losing the content being replaced.
+- Retain exact imported originals, source metadata, binary assets, immutable release packages and explicit repository publication/reviewer actions.
+
 ## 0.9.0
 
 - Extend GitHub.com submission from branch upload to pull request creation, with recovery that reuses matching PRs instead of creating duplicates.
@@ -180,3 +197,21 @@
 - Added Claude Code sync support.
 - Added free-form authoring prompt generation.
 - Added target-surface-aware starter skill generation.
+## 0.11.2 (local beta UAT)
+
+- Open the workbench without enumerating drafts, verifying release archives or migrating repository associations. Load skills explicitly; unload clears the displayed catalog. Other actions do not silently rescan it.
+- Separate waiting for a file selection from processing feedback. Add Open by file path as an alternative to the hanging native Windows chooser.
+- Record startup/action duration and shared extension-host heap/external memory in the local Performance output channel. No skill content or paths are logged.
+
+## 0.11.3 (local beta UAT)
+
+- Initialize connection metadata before the first workbench page; remove startup progress messages that could arrive after rendering and leave a stale Opening spinner.
+- Place Load skills before the create/open choices and show the running beta version in the header.
+
+## 0.11.4 (local beta UAT)
+
+- Give secondary buttons and form controls visible theme-aware boundaries, including transparent button themes; disabled controls retain a distinct dashed boundary.
+- Follow the selected VS Code theme for native control color scheme and high-contrast primary actions.
+- Preserve selected-file metadata and error-message text contrast; keep warning/error meaning in words alongside color.
+- Review the rendered workflow across light, dark, high-contrast dark/light and forced-colors variants, including narrow layouts.
+

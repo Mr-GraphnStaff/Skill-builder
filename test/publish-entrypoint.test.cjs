@@ -8,8 +8,9 @@ const AdmZip = require('adm-zip');
 const core = require('../out/skill-workbench.js');
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-entrypoint-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-entrypoint-'));
+  const root = path.join(sandbox, '.skilljetty-beta'); fs.mkdirSync(root);
+  t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }));
   const source = path.join(root, 'skills', 'sample');
   fs.mkdirSync(source, { recursive: true });
   const manifest = '---\nname: sample\ndescription: Prepare sample reports. Use when asked for a sample report.\n---\n\n# Sample\n\nInspect inputs and prepare the requested report.\n';
@@ -74,9 +75,9 @@ function fixture(t) {
 
 test('legacy Publish to Git command delegates to guided publishing without a config or terminal', async t => {
   const f = fixture(t);
-  await f.commands.get('skillBuilder.publishSkillToGit')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.publishSkillToGit')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
-  assert(f.executions.some(item => item.id === 'skillBuilder.workbenchPublishSource' && item.args[0] === f.source));
+  assert(f.executions.some(item => item.id === 'skillJettyBeta.workbenchPublishSource' && item.args[0] === f.source));
   assert.equal(f.counters.repositories, 1, 'native repository chooser must be reached');
   assert.equal(f.counters.terminal, 0);
   assert.equal(f.counters.create, 0); assert.equal(f.counters.push, 0);
@@ -86,12 +87,12 @@ test('legacy Publish to Git command delegates to guided publishing without a con
 
 test('legacy editor publish button routes to the same native flow and offers the new label', async t => {
   const f = fixture(t);
-  await f.commands.get('skillBuilder.openSkillEditor')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.openSkillEditor')({ skill: f.skill });
   assert.equal(f.panels.length, 1);
   assert.match(f.panels[0].webview.html, /Publish Skill Version…/);
   await f.panels[0].receive({ command: 'publishSkillToGit' });
   assert.deepEqual(f.errors, []);
-  assert(f.executions.some(item => item.id === 'skillBuilder.workbenchPublishSource'));
+  assert(f.executions.some(item => item.id === 'skillJettyBeta.workbenchPublishSource'));
   assert.equal(f.counters.repositories, 1);
   assert.equal(f.counters.terminal, 0);
   assert.equal(fs.existsSync(path.join(f.root, 'skill-builder.config.json')), false);
@@ -107,7 +108,7 @@ test('external legacy editor publish saves the original dirty document before ma
   const externalSkill = { name: 'external-sample', directoryName: 'external-input', skillPath: external, manifestPath };
   let saves = 0;
   f.documents.push({ uri: f.Uri.file(manifestPath), isDirty: true, async save() { saves++; fs.writeFileSync(manifestPath, latest); this.isDirty = false; return true; } });
-  await f.commands.get('skillBuilder.openSkillEditor')({ skill: externalSkill });
+  await f.commands.get('skillJettyBeta.openSkillEditor')({ skill: externalSkill });
   await f.panels[0].receive({ command: 'publishSkillToGit' });
   assert.deepEqual(f.errors, []);
   assert.equal(saves, 1);
@@ -125,7 +126,7 @@ test('failed original document save aborts external legacy editor publish before
   fs.writeFileSync(manifestPath, original);
   const externalSkill = { name: 'external-sample', directoryName: 'external-input', skillPath: external, manifestPath };
   f.documents.push({ uri: f.Uri.file(manifestPath), isDirty: true, async save() { return false; } });
-  await f.commands.get('skillBuilder.openSkillEditor')({ skill: externalSkill });
+  await f.commands.get('skillJettyBeta.openSkillEditor')({ skill: externalSkill });
   await f.panels[0].receive({ command: 'publishSkillToGit' });
   assert.match(f.errors.join('\n'), /Save the skill files/);
   assert.equal(fs.existsSync(path.join(f.root, 'skills', 'external-sample')), false);
@@ -141,7 +142,7 @@ test('Manage Folder also aborts before registration when an original document ca
   fs.writeFileSync(manifestPath, f.manifest.replace('name: sample', 'name: external-sample'));
   f.documents.push({ uri: f.Uri.file(manifestPath), isDirty: true, async save() { return false; } });
   f.openDialogs.push([f.Uri.file(external)]);
-  await f.commands.get('skillBuilder.manageFolder')();
+  await f.commands.get('skillJettyBeta.manageFolder')();
   assert.match(f.errors.join('\n'), /Save the skill files/);
   assert.equal(fs.existsSync(path.join(f.root, 'skills', 'external-sample')), false);
   assert.deepEqual(core.listWorkbenchSkills(f.root), []);
@@ -151,7 +152,7 @@ test('Manage Folder also aborts before registration when an original document ca
 test('selected SKILL.md reuses its managed folder and cancellation stops before preparing a release', async t => {
   const f = fixture(t);
   core.registerSkillFolder(f.root, f.source);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(f.skill.manifestPath);
+  await f.commands.get('skillJettyBeta.workbenchPublishSource')(f.skill.manifestPath);
   assert.deepEqual(f.errors, []);
   assert.equal(core.listWorkbenchSkills(f.root).length, 1);
   assert.equal(f.counters.repositories, 1);
@@ -163,9 +164,9 @@ test('missing release prompts for preparation after association and stops safely
   const f = fixture(t);
   f.choices.push(items => items.find(item => item.repository));
   f.inputs.push('main', undefined);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(f.source);
+  await f.commands.get('skillJettyBeta.workbenchPublishSource')(f.source);
   assert.deepEqual(f.errors, []);
-  assert(f.executions.some(item => item.id === 'skillBuilder.workbenchPrepareRelease'));
+  assert(f.executions.some(item => item.id === 'skillJettyBeta.workbenchPrepareRelease'));
   assert.equal(core.listWorkbenchSkills(f.root)[0].repository, 'https://github.com/example/Skills.git');
   assert.equal(fs.existsSync(path.join(f.root, 'releases')), false);
   assert.equal(f.counters.prepare, 0); assert.equal(f.counters.push, 0); assert.equal(f.counters.create, 0);
@@ -175,7 +176,7 @@ test('guided legacy publish reaches review after association and preparation but
   const f = fixture(t);
   f.choices.push(items => items.find(item => item.repository), items => items[0]);
   f.inputs.push('main', '1.0.0', 'Initial test release.');
-  await f.commands.get('skillBuilder.publishSkillToGit')({ skill: f.skill });
+  await f.commands.get('skillJettyBeta.publishSkillToGit')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
   assert.equal(core.listSkillReleases(f.root, 'sample').length, 1);
   assert.equal(f.counters.prepare, 1);
@@ -193,7 +194,7 @@ test('.skill publish import preserves original bytes and never overwrites a coll
   zip.addFile('sample/SKILL.md', Buffer.from(f.manifest)); zip.writeZip(archive);
   const original = fs.readFileSync(archive);
   core.registerSkillFolder(f.root, f.source);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(archive);
+  await f.commands.get('skillJettyBeta.workbenchPublishSource')(archive);
   assert.match(f.errors.join('\n'), /No existing draft was replaced/);
   assert.match(f.errors.join('\n'), /Open SkillJetty/);
   assert.deepEqual(fs.readFileSync(archive), original);
@@ -207,7 +208,7 @@ test('a standalone .skill publish selection imports reversibly before the reposi
   const zip = new AdmZip();
   zip.addFile('imported/SKILL.md', Buffer.from(f.manifest.replace('name: sample', 'name: imported'))); zip.writeZip(archive);
   const original = fs.readFileSync(archive);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(archive);
+  await f.commands.get('skillJettyBeta.workbenchPublishSource')(archive);
   assert.deepEqual(f.errors, []);
   const managed = core.listWorkbenchSkills(f.root);
   assert.equal(managed.length, 1); assert.equal(managed[0].name, 'imported');

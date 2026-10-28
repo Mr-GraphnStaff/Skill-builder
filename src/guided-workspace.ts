@@ -6,7 +6,7 @@ import { isUtf8 } from 'node:buffer';
 import {
   registerSkillFolder, listWorkbenchSkills, updateSkillRepository, validateWorkbenchSkill,
   prepareSkillRelease, listSkillReleases, verifySkillRelease, completeWorkbenchSkill,
-  type WorkbenchSkill, type WorkbenchRelease
+  type WorkbenchSkill, type WorkbenchRelease, type FileDigest
 } from './skill-workbench.js';
 import { listLibraryReleases, recordLibraryPublication, recordLibraryReview, type LibraryRelease } from './workbench-library.js';
 import { githubRepository, GitHubReviewService, type GitHubRunner, type ReviewContext } from './github-review.js';
@@ -73,6 +73,51 @@ export function saveGuidedRecovery(root: string, skill: WorkbenchSkill, relative
   return file;
 }
 
+/** Earlier file contents live outside the skill; they are never packaged or uploaded. */
+export function listGuidedHistory(root: string, skill: WorkbenchSkill, relative: string): { id: string; path: string; at: string }[] {
+  fileTarget(skill, relative);
+  const directory = path.join(path.resolve(root), '.skill-workbench', 'recovery', skill.id);
+  ensureSafe(root, directory);
+  if (!fs.existsSync(directory)) return [];
+  const history: { id: string; path: string; at: string }[] = [];
+  const candidates = fs.readdirSync(directory, { withFileTypes: true })
+    .filter(entry => entry.isFile() && /^[a-f0-9-]{36}\.json$/i.test(entry.name))
+    .map(entry => { const file = path.join(directory, entry.name); ensureSafe(root, file); return { name: entry.name, file, stat: fs.statSync(file) }; })
+    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs).slice(0, 200);
+  let bytesRead = 0;
+  for (const entry of candidates) {
+    const file = entry.file;
+    if (entry.stat.size > MAX_TEXT * 6 + 4096) continue;
+    bytesRead += entry.stat.size;
+    if (bytesRead > MAX_TEXT * 6 + 4096) break;
+    try {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (saved.skillId === skill.id && saved.path === relative && typeof saved.content === 'string'
+        && Buffer.byteLength(saved.content, 'utf8') <= MAX_TEXT && typeof saved.at === 'string' && Number.isFinite(Date.parse(saved.at))) {
+        history.push({ id: entry.name.slice(0, -5), path: relative, at: saved.at });
+      }
+    } catch { /* One damaged history record must not hide the editable draft. */ }
+  }
+  return history.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50);
+}
+
+export function restoreGuidedEdit(root: string, skill: WorkbenchSkill, relative: string, id: string): void {
+  if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('Choose an earlier edit from this file’s history.');
+  const active = listWorkbenchSkills(root).find(item => item.id === skill.id && path.resolve(item.sourcePath) === path.resolve(skill.sourcePath));
+  if (!active) throw new Error('This draft is no longer active. No file was changed.');
+  fileTarget(active, relative);
+  const file = path.join(path.resolve(root), '.skill-workbench', 'recovery', active.id, `${id}.json`);
+  ensureSafe(root, file);
+  if (fs.statSync(file).size > MAX_TEXT * 6 + 4096) throw new Error('The earlier edit exceeds the recovery limit.');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (saved.skillId !== active.id || saved.path !== relative || typeof saved.content !== 'string'
+    || Buffer.byteLength(saved.content, 'utf8') > MAX_TEXT) throw new Error('This earlier edit does not belong to the selected skill file.');
+  const current = readGuidedFile(active, relative);
+  if (current === saved.content) return;
+  saveGuidedRecovery(root, active, relative, current);
+  writeGuidedFile(active, relative, saved.content);
+}
+
 export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
   repository = validateRepository(repository);
   const baseBranch = await resolveRepositoryDefaultBranch(repository);
@@ -91,11 +136,11 @@ export async function connectWorkspaceRepository(root: string, repository: strin
   return { repository, baseBranch };
 }
 
-export async function migrateAssociation(root: string): Promise<WorkspaceConnection | undefined> {
+export async function migrateAssociation(root: string, verifiedReleases?: LibraryRelease[]): Promise<WorkspaceConnection | undefined> {
   const saved = getWorkspaceConnection(root);
   if (saved) return saved;
   const repositories = listWorkbenchSkills(root).flatMap(skill => skill.repository ? [skill.repository] : []);
-  try { repositories.push(...listLibraryReleases(root).flatMap(release => release.repository ? [release.repository] : [])); }
+  try { repositories.push(...(verifiedReleases ?? listLibraryReleases(root)).flatMap(release => release.repository ? [release.repository] : [])); }
   catch { /* A corrupt historic snapshot must not prevent editing active drafts. */ }
   const unique = repositories.filter((repository, index) => repositories.findIndex(other => sameRepository(repository, other)) === index);
   return unique.length === 1 ? connectWorkspaceRepository(root, unique[0]) : undefined;
@@ -187,7 +232,7 @@ function sameFiles(left: { path: string; size: number; sha256: string }[], right
 }
 
 /** Called only from the guided screen's explicit Publish version action. */
-export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: (message: string) => void, options: { deferCleanup?: boolean } = {}): Promise<GuidedPublication> {
+export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: (message: string) => void, options: { deferCleanup?: boolean; expectedFiles?: FileDigest[] } = {}): Promise<GuidedPublication> {
   const saved = getWorkspaceConnection(root);
   if (!saved) throw new Error('Connect your skill repository first.');
   const skill = listWorkbenchSkills(root).find(item => item.id === id);
@@ -199,6 +244,7 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
   updateSkillRepository(root, skill.id, connection.repository, connection.baseBranch);
   const validation = validateWorkbenchSkill(skill);
   if (!validation.valid) throw new Error(`Fix the skill check errors before publishing: ${validation.errors.join('; ')}`);
+  if (options.expectedFiles && !sameFiles(validation.files, options.expectedFiles)) throw new Error('The draft changed after the sharing summary was reviewed. Check it and review a fresh summary before submitting. Nothing was uploaded.');
   const previous = listSkillReleases(root, skill.id).find(item => item.version === version);
   let release: WorkbenchRelease;
   if (previous) {
@@ -216,6 +262,7 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
       return { release, publication: { repository: receipt.repository, branch: receipt.branch, commit: receipt.commit }, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
     }
   } else release = prepareSkillRelease(root, skill.id, version, changelog);
+  if (options.expectedFiles && !sameFiles(release.manifest.files, options.expectedFiles)) throw new Error('The prepared release differs from the reviewed sharing summary. The local files are preserved and nothing was uploaded. Review a fresh summary.');
   const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress);
   try {
     const publication = await pushPreparedRelease(preview, onProgress);

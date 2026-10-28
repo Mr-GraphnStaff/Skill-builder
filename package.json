@@ -1,8 +1,8 @@
 {
-  "name": "skill-builder",
-  "displayName": "SkillJetty — Agent Skills Studio",
-  "description": "Create, edit, version and publish portable Agent Skills with SkillJetty by DAF-TECH. Build it. Version it. Ship it.",
-  "version": "0.9.0",
+  "name": "skill-builder-beta",
+  "displayName": "SkillJetty Beta — UAT",
+  "description": "Local BETA / UAT of SkillJetty. Separate from production, with isolated drafts and settings. Not a production release.",
+  "version": "0.11.4",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -42,36 +42,36 @@
     "skilljetty"
   ],
   "activationEvents": [
-    "workspaceContains:skills/*/SKILL.md"
+    "workspaceContains:.skilljetty-beta/skills/*/SKILL.md"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "skillBuilder.openWorkbench",
-        "title": "SkillJetty: Open Workbench",
+        "command": "skillJettyBeta.openWorkbench",
+        "title": "SkillJetty Beta: Open Workbench",
         "icon": "$(tools)"
       }
     ],
     "configuration": {
-      "title": "SkillJetty",
+      "title": "SkillJetty Beta — UAT",
       "properties": {
-        "skillBuilder.skillsDirectory": {
+        "skillJettyBeta.skillsDirectory": {
           "type": "string",
           "default": "skills",
           "description": "Workspace-relative directory containing Agent Skills folders."
         },
-        "skillBuilder.projectRoot": {
+        "skillJettyBeta.projectRoot": {
           "type": "string",
           "default": "",
-          "description": "Optional workspace-relative SkillJetty project root. Leave empty to auto-detect."
+          "description": "Optional beta work folder. Beta state is always stored in a .skilljetty-beta child folder, separate from production."
         },
-        "skillBuilder.distDirectory": {
+        "skillJettyBeta.distDirectory": {
           "type": "string",
           "default": "dist",
           "description": "Workspace-relative directory for legacy skill ZIP package exports."
         },
-        "skillBuilder.claudeCodeSkillsDirectory": {
+        "skillJettyBeta.claudeCodeSkillsDirectory": {
           "type": "string",
           "default": "",
           "description": "Directory used by 'Sync to Claude Code'. Leave empty to use ~/.claude/skills."
@@ -86,17 +86,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "skillBuilder",
-          "title": "SkillJetty",
+          "id": "skillJettyBeta",
+          "title": "SkillJetty Beta",
           "icon": "images/workbench.svg"
         }
       ]
     },
     "views": {
-      "skillBuilder": [
+      "skillJettyBeta": [
         {
-          "id": "skillBuilder.guidedLauncher",
-          "name": "SkillJetty",
+          "id": "skillJettyBeta.guidedLauncher",
+          "name": "SkillJetty Beta — UAT",
           "type": "webview"
         }
       ]
@@ -107,8 +107,10 @@
     "compile": "tsc -p ./",
     "test": "npm run compile && node --test test/*.test.cjs",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "package": "npm run package:pre-release",
+    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-beta-0.11.4.vsix",
     "ci:package": "node scripts/ci/release.cjs prepare",
+    "ci:beta-package": "node scripts/ci/beta-release.cjs prepare",
     "import-skill": "node scripts/import-skill.mjs",
     "publish-skill": "node scripts/publish-skill.mjs"
   },
@@ -121,16 +123,16 @@
     "@types/adm-zip": "^0.5.8",
     "@types/node": "^20.19.0",
     "@types/vscode": "1.90.0",
-    "@vscode/vsce": "3.9.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@vscode/vsce": "3.9.2"
+  },
+  "galleryBanner": {
+    "color": "#0b2727",
+    "theme": "dark"
   },
   "overrides": {
     "@vscode/vsce": {
       "@azure/identity": "4.13.0"
     }
-  },
-  "galleryBanner": {
-    "color": "#0b2727",
-    "theme": "dark"
   }
 }

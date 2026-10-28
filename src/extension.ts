@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import AdmZip from 'adm-zip';
 import * as vscode from 'vscode';
+import { betaWorkspaceRoot } from './beta-workspace.js';
 import { analyzeSkill, parseEvalSuite, runEvalPreflight, type SkillFile } from './skill-analysis.js';
 import { activateWorkbench } from './workbench-view.js';
 import { activateGuidedWorkbench } from './guided-workbench.js';
@@ -133,22 +134,22 @@ export function activate(context: vscode.ExtensionContext) {
   activateGuidedWorkbench(context, { getRoot: async () => {
     const root = getWorkspaceRoot();
     if (!root) return undefined;
-    const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
-    // A skill workspace is the folder the user opened. Never silently switch
-    // into a nested extension-source repository just because it has AGENTS.md.
-    return configured ? path.resolve(root, configured) : root;
+    const configured = vscode.workspace.getConfiguration('skillJettyBeta').get<string>('projectRoot', '').trim();
+    // The beta always receives an isolated child data tree. Opening the same
+    // VS Code workspace as production does not share its drafts or repository.
+    return betaWorkspaceRoot(root, configured);
   } });
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('skillBuilder.refresh', () => provider.refresh()),
-    vscode.commands.registerCommand('skillBuilder.openSkill', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.refresh', () => provider.refresh()),
+    vscode.commands.registerCommand('skillJettyBeta.openSkill', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
       }
       await vscode.window.showTextDocument(vscode.Uri.file(skill.manifestPath));
     }),
-    vscode.commands.registerCommand('skillBuilder.createSkill', async () => {
+    vscode.commands.registerCommand('skillJettyBeta.createSkill', async () => {
       const skill = await createSkill();
       if (!skill) {
         return;
@@ -156,10 +157,10 @@ export function activate(context: vscode.ExtensionContext) {
       provider.refresh();
       await vscode.window.showTextDocument(vscode.Uri.file(skill.manifestPath));
     }),
-    vscode.commands.registerCommand('skillBuilder.openInteractiveBuilder', async () => {
+    vscode.commands.registerCommand('skillJettyBeta.openInteractiveBuilder', async () => {
       await openInteractiveBuilder(context, provider);
     }),
-    vscode.commands.registerCommand('skillBuilder.openSkillEditor', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.openSkillEditor', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
@@ -167,7 +168,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       await openSkillEditor(context, provider, skill);
     }),
-    vscode.commands.registerCommand('skillBuilder.copyChatPrompt', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.copyChatPrompt', async (item?: SkillItem) => {
       const skill = item?.skill;
       const prompt = buildChatPrompt(skill);
       await vscode.env.clipboard.writeText(prompt);
@@ -187,7 +188,7 @@ export function activate(context: vscode.ExtensionContext) {
         await vscode.window.showTextDocument(document);
       }
     }),
-    vscode.commands.registerCommand('skillBuilder.packageSkill', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.packageSkill', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
@@ -207,7 +208,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     }),
-    vscode.commands.registerCommand('skillBuilder.addSupportingFiles', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.addSupportingFiles', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
@@ -226,7 +227,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     }),
-    vscode.commands.registerCommand('skillBuilder.syncToClaudeCode', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.syncToClaudeCode', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
@@ -247,10 +248,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
       }
     }),
-    vscode.commands.registerCommand('skillBuilder.importSkillFromGit', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.importSkillFromGit', async (item?: SkillItem) => {
       await importSkillFromGit(context, provider, item?.skill);
     }),
-    vscode.commands.registerCommand('skillBuilder.publishSkillToGit', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.publishSkillToGit', async (item?: SkillItem) => {
       const selection = item?.skill
         ? toPublishSkillSelection(item.skill)
         : await pickPublishSkill(provider);
@@ -260,14 +261,14 @@ export function activate(context: vscode.ExtensionContext) {
 
       await publishSkillToGit(context, selection);
     }),
-    vscode.commands.registerCommand('skillBuilder.validateSkill', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.validateSkill', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
       }
       await validateSkill(context, skill);
     }),
-    vscode.commands.registerCommand('skillBuilder.healthCheck', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.healthCheck', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (!skill) {
         return;
@@ -275,13 +276,13 @@ export function activate(context: vscode.ExtensionContext) {
 
       await showSkillHealthCheck(skill);
     }),
-    vscode.commands.registerCommand('skillBuilder.trustScan', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.trustScan', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (skill) {
         await showTrustScan(skill);
       }
     }),
-    vscode.commands.registerCommand('skillBuilder.runEvals', async (item?: SkillItem) => {
+    vscode.commands.registerCommand('skillJettyBeta.runEvals', async (item?: SkillItem) => {
       const skill = item?.skill ?? await pickSkill(provider);
       if (skill) {
         await runSkillEvals(skill);
@@ -328,7 +329,7 @@ class SkillItem extends vscode.TreeItem {
     this.contextValue = 'skill';
     this.resourceUri = vscode.Uri.file(skill.manifestPath);
     this.command = {
-      command: 'skillBuilder.openSkill',
+      command: 'skillJettyBeta.openSkill',
       title: 'Open Skill',
       arguments: [this]
     };
@@ -522,7 +523,7 @@ async function openInteractiveBuilder(context: vscode.ExtensionContext, provider
   };
 
   const panel = vscode.window.createWebviewPanel(
-    'skillBuilder.interactiveBuilder',
+    'skillJettyBeta.interactiveBuilder',
     'SkillJetty Authoring',
     vscode.ViewColumn.One,
     {
@@ -1653,7 +1654,7 @@ async function importSkillFromGit(
 }
 
 async function publishSkillToGit(_context: vscode.ExtensionContext, selection: PublishSkillSelection): Promise<void> {
-  await vscode.commands.executeCommand('skillBuilder.workbenchPublishSource', selection.publishPath);
+  await vscode.commands.executeCommand('skillJettyBeta.workbenchPublishSource', selection.publishPath);
 }
 async function pickPublishRepository(root: string): Promise<{ repository?: string } | undefined> {
   const configuredRemote = await readConfiguredGitRemote(root);
@@ -1812,7 +1813,7 @@ async function openSkillEditor(
   skill: SkillSummary
 ) {
   const panel = vscode.window.createWebviewPanel(
-    'skillBuilder.skillEditor',
+    'skillJettyBeta.skillEditor',
     `Skill Editor: ${skill.name}`,
     vscode.ViewColumn.One,
     {
@@ -3026,17 +3027,8 @@ async function getProjectRoot(): Promise<string | undefined> {
     return undefined;
   }
 
-  const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
-  if (configured) {
-    return path.resolve(workspaceRoot, configured);
-  }
-
-  if (await looksLikeSkillBuilderRoot(workspaceRoot)) {
-    return workspaceRoot;
-  }
-
-  const childRoot = await findChildSkillBuilderRoot(workspaceRoot);
-  return childRoot ?? workspaceRoot;
+  const configured = vscode.workspace.getConfiguration('skillJettyBeta').get<string>('projectRoot', '').trim();
+  return betaWorkspaceRoot(workspaceRoot, configured);
 }
 
 async function findChildSkillBuilderRoot(workspaceRoot: string): Promise<string | undefined> {
@@ -3105,17 +3097,17 @@ async function listGitRemotes(root: string): Promise<GitRemoteSummary[]> {
 }
 
 function getSkillsDirectory(root: string): string {
-  const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('skillsDirectory', 'skills');
+  const configured = vscode.workspace.getConfiguration('skillJettyBeta').get<string>('skillsDirectory', 'skills');
   return path.resolve(root, configured);
 }
 
 function getDistDirectory(root: string): string {
-  const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('distDirectory', 'dist');
+  const configured = vscode.workspace.getConfiguration('skillJettyBeta').get<string>('distDirectory', 'dist');
   return path.resolve(root, configured);
 }
 
 function getClaudeCodeSkillsDirectory(root: string): string {
-  const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('claudeCodeSkillsDirectory', '').trim();
+  const configured = vscode.workspace.getConfiguration('skillJettyBeta').get<string>('claudeCodeSkillsDirectory', '').trim();
   if (!configured) {
     return path.join(os.homedir(), '.claude', 'skills');
   }

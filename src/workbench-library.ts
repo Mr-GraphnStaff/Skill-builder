@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { verifySkillRelease, restoreSkillRelease, updateSkillRepository, WorkbenchSkill } from './skill-workbench.js';
+import { verifySkillRelease, restoreSkillRelease, updateSkillRepository, validateWorkbenchSkill, WorkbenchSkill, type FileDigest } from './skill-workbench.js';
+import { readSkillIdentity, semanticVersion, compareReleaseVersions, nextReleaseVersion } from './skill-identity.js';
 import { githubRepository, reviewRecord } from './github-review.js';
 import type { PullRequestRecord } from './guided-contract.js';
 
@@ -12,7 +13,7 @@ export type LibraryRelease = {
   repository?: string; baseBranch?: string; branch?: string; commit?: string; publishedAt?: string;
   pr?: PullRequestRecord;
 };
-const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const semver = semanticVersion;
 
 function safe(root: string, target: string): void {
   root = path.resolve(root); target = path.resolve(target);
@@ -128,7 +129,7 @@ export function listLibraryReleases(root: string, skillFilter?: string): Library
       items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, ...data, ...(pr ? { pr } : {}) });
     }
   }
-  return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || b.version.localeCompare(a.version, undefined, { numeric: true }));
+  return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || compareReleaseVersions(b.version, a.version) || b.version.localeCompare(a.version));
 }
 
 export function restoreLibraryRelease(root: string, directory: string): WorkbenchSkill {
@@ -139,22 +140,61 @@ export function restoreLibraryRelease(root: string, directory: string): Workbenc
   return draft;
 }
 
-/** Suggest a new immutable version; the publisher still validates user input. */
+/** Allocate the next immutable release identity without asking the user to do bookkeeping. */
 export function suggestReleaseVersion(skill: WorkbenchSkill, versions: string[]): string {
-  let declared = '1.0.0';
+  let declared: string | undefined;
   try {
+    safe(skill.sourcePath, path.join(skill.sourcePath, 'SKILL.md'));
     const text = fs.readFileSync(path.join(skill.sourcePath, 'SKILL.md'), 'utf8');
-    const block = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-    const parsed = block ? require('js-yaml').load(block[1]) : undefined;
-    if (typeof parsed?.metadata?.version === 'string' && semver.test(parsed.metadata.version)) declared = parsed.metadata.version;
+    declared = readSkillIdentity(text).declaredVersion;
   } catch { /* Normal validation reports metadata errors before packaging. */ }
-  const compare = (a: string, b: string) => {
-    const left = a.split(/[.+-]/).slice(0, 3).map(BigInt), right = b.split(/[.+-]/).slice(0, 3).map(BigInt);
-    for (let i = 0; i < 3; i++) { if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1; }
-    return 0;
+  const previous = versions.filter(value => semver.test(value)).sort(compareReleaseVersions).at(-1);
+  if (!previous) return declared ?? '1.0.0';
+  if (declared && compareReleaseVersions(declared, previous) > 0) return declared;
+  let next = nextReleaseVersion(previous);
+  while (versions.includes(next)) next = nextReleaseVersion(next);
+  return next;
+}
+
+export type SkillChangeSummary = {
+  baselineVersion?: string;
+  added: string[];
+  changed: string[];
+  removed: string[];
+  unchanged: number;
+  hasChanges: boolean;
+  note: string;
+};
+
+/** Compare verified bytes, not guessed semantic changes or generated claims. */
+export function summarizeSkillChanges(root: string, skill: WorkbenchSkill): SkillChangeSummary {
+  safe(root, skill.sourcePath);
+  const validation = validateWorkbenchSkill(skill);
+  if (!validation.valid) throw new Error(validation.errors.join('\n'));
+  const baseline = listLibraryReleases(root, skill.name)[0];
+  const prior = baseline ? localRelease(root, baseline.directory).manifest.files : undefined;
+  return summarizeFileChanges(validation.files, baseline && prior ? { version: baseline.version, files: prior } : undefined);
+}
+
+/** Pure comparison of inventories already obtained through guarded validation.
+ * This does not itself establish file or package integrity. */
+export function summarizeFileChanges(files: FileDigest[], baseline?: { version: string; files: FileDigest[] }): SkillChangeSummary {
+  const current = new Map(files.filter(file => !file.path.endsWith('/')).map(file => [file.path, file]));
+  const result: SkillChangeSummary = {
+    ...(baseline ? { baselineVersion: baseline.version } : {}),
+    added: [], changed: [], removed: [], unchanged: 0, hasChanges: false,
+    note: baseline ? `Compared with the saved release ${baseline.version}. This lists file changes, not a claim about behavior.` : 'First saved release in this workspace. Original imported packages remain preserved.'
   };
-  const previous = versions.filter(value => semver.test(value)).sort(compare).at(-1);
-  if (!previous || compare(declared, previous) > 0) return declared;
-  const parts = previous.split(/[.+-]/).slice(0, 3);
-  return `${parts[0]}.${parts[1]}.${BigInt(parts[2]) + 1n}`;
+  const prior = new Map((baseline ? baseline.files : [])
+    .filter(file => !file.path.endsWith('/')).map(file => [file.path, file]));
+  for (const [name, file] of current) {
+    const previous = prior.get(name);
+    if (!previous) result.added.push(name);
+    else if (previous.sha256 !== file.sha256 || previous.size !== file.size) result.changed.push(name);
+    else result.unchanged++;
+  }
+  for (const name of prior.keys()) if (!current.has(name)) result.removed.push(name);
+  result.added.sort(); result.changed.sort(); result.removed.sort();
+  result.hasChanges = result.added.length + result.changed.length + result.removed.length > 0;
+  return result;
 }

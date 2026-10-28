@@ -1,6 +1,8 @@
 # SkillJetty contributor instructions
 
-SkillJetty by DAF-TECH is an Agent Skills Studio. Preserve the existing DavidFarris.skill-builder extension identity and update path.
+SkillJetty by DAF-TECH is an Agent Skills Studio. This is the separate local Beta/UAT repository, established at the team lead's explicit direction on October 26, 2026. Its local co-installable identity is DavidFarris.skill-builder-beta, display name SkillJetty Beta — UAT, with skillJettyBeta command/view/settings names and isolated .skilljetty-beta work data. Do not replace the production DavidFarris.skill-builder installation with this package. The production checkout is a protected baseline and receives no beta changes.
+
+After local UAT passes, Marketplace pre-release preparation is a separate reviewed packaging/promotion step against the existing public identity. This local beta identity is not authorization to publish a second Marketplace listing. Preserve both original source and approved production artifacts; no automatic publication.
 
 Keep the workbench local-first: Create/Open -> Edit -> Check -> Publish -> Done. Repository setup is needed for publication, not for local creation or editing. Show clear clickable actions and accessible feedback. Keep the existing DAF-TECH brand asset unchanged.
 
