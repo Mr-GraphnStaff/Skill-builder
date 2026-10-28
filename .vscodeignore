@@ -13,6 +13,9 @@ AGENTS.md
 skill-builder.config.json
 tsconfig.json
 *.vsix
+azure-pipelines.yml
+scripts/ci/**
+docs/delivery.md
 images/create-skill.png
 images/package-skill.png
 images/validate-skill.png
