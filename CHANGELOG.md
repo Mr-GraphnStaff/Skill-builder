@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.4 (public pre-release preparation)
+
+- Prepare the existing `DavidFarris.skill-builder` Marketplace identity with production command, setting and view names, preserving the established listing and icon.
+- Identify the public preview and version inside the workbench. Keep its work data under `.skilljetty-prerelease` with a channel-specific repository preference; do not automatically migrate stable or local-beta state.
+- Confine inherited skills and export directory settings to the preview data tree, using safe defaults for absolute or escaping values.
+- Preserve the original local UAT and production checkouts. Packaging, publication, native smoke checks and human UAT are distinct evidence; this preparation does not claim they passed.
+
 ## 0.11.1 (local beta / UAT)
 
 - Acknowledge step clicks immediately with action-specific activity messages and an indeterminate indicator; explain long waits and canceled selections.

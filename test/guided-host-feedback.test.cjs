@@ -49,14 +49,16 @@ function fixture() {
       return originalLoad.call(this, id, parent, main);
     };
     require(file).activateGuidedWorkbench({ subscriptions: [], extensionPath: path.resolve(__dirname, '..'),
-      extension: { packageJSON: { displayName: 'SkillJetty Beta — UAT' } } }, { getRoot: async () => path.resolve('fake-beta-data') });
+      extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: async () => path.resolve('fake-prerelease-data') });
   } finally { Module._load = originalLoad; delete require.cache[file]; }
   return { panels, controllers, commands, events, dispatchHooks,
-    async open() { await commands.get('skillJettyBeta.openWorkbench')(); return panels.at(-1); } };
+    async open() { await commands.get('skillBuilder.openWorkbench')(); return panels.at(-1); } };
 }
 
 test('actual host delivers activity before dispatch and sends stage updates without replacing the page', async () => {
   const f = fixture(), panel = await f.open();
+  assert.match(panel.html, /Public pre-release 0\.11\.4/);
+  assert.doesNotMatch(panel.html, /UAT only/);
   const entered = deferred(), release = deferred();
   f.dispatchHooks.set('check', async controller => {
     controller.state.progress = 'Reading and checking the selected skill…'; controller.hooks.onState(controller.state);

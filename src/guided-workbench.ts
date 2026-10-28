@@ -6,13 +6,13 @@ import { GuidedWorkbenchController } from './guided-controller.js';
 import { renderGuidedWorkbench, renderGuidedLauncher } from './guided-workbench-html.js';
 import { GuidedMessage } from './guided-contract.js';
 import { createGitHubSessionRunner } from './github-session.js';
-import { betaWorkspaceRoot } from './beta-workspace.js';
+import { prereleaseWorkspaceRoot } from './prerelease-workspace.js';
 import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks: { getRoot(): Promise<string | undefined> }) {
   const brand = {
     productName: String(context.extension.packageJSON.displayName ?? 'SkillJetty').split(' — ')[0],
-    descriptor: `BETA ${String(context.extension.packageJSON.version ?? '')} · UAT only · isolated local workspace`,
+    descriptor: `Public pre-release ${String(context.extension.packageJSON.version ?? '')} · isolated .skilljetty-prerelease workspace`,
     tagline: 'Build it. Improve it. Share it.',
     logoDataUri: `data:image/png;base64,${readFileSync(path.join(context.extensionPath, 'images', 'icon.png')).toString('base64')}`
   };
@@ -20,7 +20,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
   let controller: GuidedWorkbenchController | undefined;
   let opening: Promise<void> | undefined;
   let handling: Promise<void> = Promise.resolve();
-  const activityLog = vscode.window.createOutputChannel('SkillJetty Beta — Performance');
+  const activityLog = vscode.window.createOutputChannel('SkillJetty — Pre-release Performance');
   context.subscriptions.push(activityLog);
   const nonce = () => randomBytes(24).toString('base64');
   const render = () => { if (panel && controller) panel.webview.html = renderGuidedWorkbench(controller.state, nonce(), brand); };
@@ -82,7 +82,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       const started = Date.now();
       const memoryBefore = process.memoryUsage().heapUsed;
       const root = await hooks.getRoot();
-      panel = vscode.window.createWebviewPanel('skillJettyBeta.guidedWorkbench', brand.productName, vscode.ViewColumn.One, {
+      panel = vscode.window.createWebviewPanel('skillBuilder.guidedWorkbench', brand.productName, vscode.ViewColumn.One, {
         enableScripts: true, retainContextWhenHidden: true, localResourceRoots: []
       });
       const createdPanel = panel;
@@ -99,11 +99,11 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         chooseWorkspace: async () => {
           const folder = (await vscode.window.showOpenDialog({ title: 'Choose your local skill work folder', canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
           if (folder) {
-            const betaRoot = betaWorkspaceRoot(folder.fsPath);
-            if (vscode.workspace.workspaceFolders?.length) await vscode.workspace.getConfiguration('skillJettyBeta').update('projectRoot', betaRoot, vscode.ConfigurationTarget.Workspace);
+            const betaRoot = prereleaseWorkspaceRoot(folder.fsPath);
+            if (vscode.workspace.workspaceFolders?.length) await vscode.workspace.getConfiguration('skillBuilder').update('projectRoot', betaRoot, vscode.ConfigurationTarget.Workspace);
             else void vscode.commands.executeCommand('vscode.openFolder', folder, false);
           }
-          return folder ? betaWorkspaceRoot(folder.fsPath) : undefined;
+          return folder ? prereleaseWorkspaceRoot(folder.fsPath) : undefined;
         },
         openLink: async url => { await vscode.env.openExternal(vscode.Uri.parse(url)); },
         revealFile: async file => { await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(file)); },
@@ -124,8 +124,8 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     })();
     try { await opening; } finally { opening = undefined; }
   };
-  context.subscriptions.push(vscode.commands.registerCommand('skillJettyBeta.openWorkbench', open));
-  context.subscriptions.push(vscode.window.registerWebviewViewProvider('skillJettyBeta.guidedLauncher', {
+  context.subscriptions.push(vscode.commands.registerCommand('skillBuilder.openWorkbench', open));
+  context.subscriptions.push(vscode.window.registerWebviewViewProvider('skillBuilder.guidedLauncher', {
     resolveWebviewView(view) {
       view.webview.options = { enableScripts: true, localResourceRoots: [] };
       view.webview.html = renderGuidedLauncher(nonce(), brand);

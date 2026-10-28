@@ -74,7 +74,7 @@ test('native workbench exposes named keyboard-addressable actions and nested bin
 test('add-file command rejects traversal even if a host bypasses input validation', async t => {
   const f = fixture(t);
   f.choices.push('Create an empty text file'); f.inputs.push('../escaped.md');
-  await f.commands.get('skillJettyBeta.workbenchAddFile')({ skill: f.skill });
+  await f.commands.get('skillBuilder.workbenchAddFile')({ skill: f.skill });
   assert.match(f.errors.join('\n'), /Unsafe file path/);
   assert.equal(fs.existsSync(path.join(f.root, 'skills', 'escaped.md')), false);
 });
@@ -83,7 +83,7 @@ test('copy-file command preserves nested binary bytes without flattening', async
   const f = fixture(t); const bytes = Buffer.from([0, 255, 13, 10, 128]);
   fs.writeFileSync(path.join(f.root, 'input.bin'), bytes);
   f.choices.push('Copy an existing file'); f.inputs.push('assets/deep/data.bin');
-  await f.commands.get('skillJettyBeta.workbenchAddFile')({ skill: f.skill });
+  await f.commands.get('skillBuilder.workbenchAddFile')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
   assert.deepEqual(fs.readFileSync(path.join(f.source, 'assets', 'deep', 'data.bin')), bytes);
 });
@@ -92,7 +92,7 @@ test('failed dirty-document save stops release preparation before prompting or w
   const f = fixture(t); let saved = 0;
   f.documents.push({ uri: f.Uri.file(path.join(f.source, 'SKILL.md')), isDirty: true, async save() { saved++; return false; } });
   f.inputs.push('1.0.0', 'Changes');
-  await f.commands.get('skillJettyBeta.workbenchPrepareRelease')({ skill: f.skill });
+  await f.commands.get('skillBuilder.workbenchPrepareRelease')({ skill: f.skill });
   assert.equal(saved, 1); assert.equal(f.inputs.length, 2);
   assert.match(f.errors.join('\n'), /Save the skill files/);
   assert.equal(fs.existsSync(path.join(f.root, 'releases')), false);
@@ -103,7 +103,7 @@ test('publish cancellation disposes preview without push or active-skill cleanup
   wb.updateSkillRepository(f.root, f.skill.id, '/local/repository', 'main');
   const release = wb.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Changes');
   f.choices.push({ release });
-  await f.commands.get('skillJettyBeta.workbenchPublishRelease')({ skill: f.skill });
+  await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
   assert.deepEqual(f.counters, { prepared: 1, pushed: 0, disposed: 1 });
   assert.equal(wb.listWorkbenchSkills(f.root).length, 1);

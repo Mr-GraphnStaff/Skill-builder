@@ -1,34 +1,75 @@
-# Build the separate local-UAT identity. This definition never publishes to a store.
+# The local-beta branch retains its own build-only definition at this path.
 trigger:
   branches:
-    include: [codex/human-workbench-beta]
+    include: [codex/public-prerelease]
 pr: none
+
+parameters:
+- name: publishMarketplace
+  displayName: Publish reviewed public pre-release VSIX
+  type: boolean
+  default: false
 
 pool:
   vmImage: ubuntu-24.04
 
-jobs:
-- job: BetaTestPackage
-  displayName: Validate and package SkillJetty Beta for local UAT
-  condition: eq(variables['Build.SourceBranch'], 'refs/heads/codex/human-workbench-beta')
-  timeoutInMinutes: 25
-  steps:
-  - checkout: self
-    clean: true
-    persistCredentials: false
-  - task: UseNode@1
-    inputs:
-      version: 22.x
-  - script: npm ci
-    displayName: Install locked dependencies
-  - script: npm test
-    displayName: Compile and test the beta source
-  - script: npm audit --omit=dev
-    displayName: Audit production dependencies
-  - script: npm audit --audit-level=high
-    displayName: Audit build and packaging tools
-  - script: npm run ci:beta-package
-    displayName: Package and verify the separate beta VSIX
-  - publish: dist/beta-ci
-    artifact: skilljetty-beta-uat-vsix
-    displayName: Retain downloadable beta VSIX and provenance receipt
+stages:
+- stage: Build
+  jobs:
+  - job: PublicPreRelease
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/codex/public-prerelease')
+    timeoutInMinutes: 25
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: false
+    - task: UseNode@1
+      inputs:
+        version: 22.x
+    - script: npm ci
+      displayName: Install locked dependencies
+    - script: node scripts/ci/prerelease-release.cjs check-gate
+      displayName: Verify readable public pre-release approval configuration
+      condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    - script: npm test
+      displayName: Compile and test promoted public identity
+    - script: npm audit --omit=dev
+      displayName: Audit production dependencies
+    - script: npm audit --audit-level=high
+      displayName: Audit packaging and publishing tools
+    - script: npm run ci:prerelease-package
+      displayName: Package and verify public pre-release VSIX
+    - publish: dist/prerelease-ci
+      artifact: skilljetty-prerelease-vsix
+      displayName: Retain reviewed public pre-release VSIX and receipt
+
+- stage: Publish
+  dependsOn: Build
+  condition: and(succeeded(), ${{ eq(parameters.publishMarketplace, true) }}, eq(variables['Build.SourceBranch'], 'refs/heads/codex/public-prerelease'), eq(variables['Build.Reason'], 'Manual'))
+  jobs:
+  - deployment: PublicPreReleaseMarketplace
+    environment: skilljetty-marketplace-prerelease
+    timeoutInMinutes: 15
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: none
+          - checkout: self
+            clean: true
+            persistCredentials: false
+          - task: UseNode@1
+            inputs:
+              version: 22.x
+          - script: npm ci --ignore-scripts
+            displayName: Install locked verifier and publisher
+          - download: current
+            artifact: skilljetty-prerelease-vsix
+          - script: node scripts/ci/prerelease-release.cjs publish
+            displayName: Verify exact artifact and gate; publish once and verify public payload
+            env:
+              PRERELEASE_ARTIFACT_DIR: $(Pipeline.Workspace)/skilljetty-prerelease-vsix
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              VSCE_PAT: $(VSCE_PAT)

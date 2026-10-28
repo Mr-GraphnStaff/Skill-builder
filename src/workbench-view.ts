@@ -19,7 +19,7 @@ type Hooks = {
 type ManualCase = { id: string; prompt: string; expected: string; runs: { at: string; result: string; actual: string; method: 'manual' }[] };
 type Playground = { format: 1; note: string; cases: ManualCase[] };
 type RepositoryDefault = { repository: string; baseBranch: string };
-const DEFAULT_REPOSITORY_KEY = 'skillJettyBeta.defaultRepository';
+const DEFAULT_REPOSITORY_KEY = 'skillBuilder.prerelease.defaultRepository';
 
 class WorkbenchNode extends vscode.TreeItem {
   group?: 'drafts' | 'library';
@@ -73,9 +73,9 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     async getChildren(node) {
       if (!node) {
         const actions = [
-          action('Create a new skill…', 'skillJettyBeta.newManagedSkill'),
-          action('Open a .skill package…', 'skillJettyBeta.importPackage'),
-          action('Open a skill folder…', 'skillJettyBeta.manageFolder')
+          action('Create a new skill…', 'skillBuilder.newManagedSkill'),
+          action('Open a .skill package…', 'skillBuilder.importPackage'),
+          action('Open a skill folder…', 'skillBuilder.manageFolder')
         ];
         const root = await hooks.getRoot();
         if (!root) return actions;
@@ -94,13 +94,13 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
         if (!root) return [];
         if (node.group === 'drafts') {
           const drafts = listWorkbenchSkills(root).map(skill => new WorkbenchNode(skill.name, 'skill', skill));
-          return drafts.length ? drafts : [action('Create your first draft…', 'skillJettyBeta.newManagedSkill')];
+          return drafts.length ? drafts : [action('Create your first draft…', 'skillBuilder.newManagedSkill')];
         }
         const scan = scanLibrary(root);
         if (scan.error) {
           const issue = new WorkbenchNode('Library needs attention — view details', 'action');
           issue.tooltip = scan.error;
-          issue.command = { command: 'skillJettyBeta.workbenchLibraryIssue', title: 'View Library Issue', arguments: [scan.error] };
+          issue.command = { command: 'skillBuilder.workbenchLibraryIssue', title: 'View Library Issue', arguments: [scan.error] };
           return [issue];
         }
         return scan.entries.map(entry => {
@@ -109,38 +109,38 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
           item.id = `workbench-library:${entry.skillName}:${entry.version}`;
           item.description = entry.status === 'uploaded' ? 'uploaded · awaiting merge' : entry.status === 'archived' ? 'archived · upload unverified' : 'prepared locally';
           item.tooltip = `${item.description}\n${entry.repository ?? entry.directory}`;
-          item.command = { command: 'skillJettyBeta.workbenchOpenLibraryEntry', title: 'View Version', arguments: [item] };
+          item.command = { command: 'skillBuilder.workbenchOpenLibraryEntry', title: 'View Version', arguments: [item] };
           return item;
         });
       }
       if (node.kind === 'library' && node.libraryEntry) {
-        const open = action('View files and publication receipt', 'skillJettyBeta.workbenchOpenLibraryEntry');
-        const restore = action('Edit next version…', 'skillJettyBeta.workbenchRestoreRelease');
+        const open = action('View files and publication receipt', 'skillBuilder.workbenchOpenLibraryEntry');
+        const restore = action('Edit next version…', 'skillBuilder.workbenchRestoreRelease');
         open.libraryEntry = node.libraryEntry; restore.libraryEntry = node.libraryEntry;
         return [open, restore];
       }
       if (node.kind === 'skill' && node.skill) {
         const actions = [
-          action('Edit skill', 'skillJettyBeta.workbenchEditSkill', node.skill),
-          action('Check skill', 'skillJettyBeta.workbenchValidate', node.skill),
-          action('Publish…', 'skillJettyBeta.workbenchPublishRelease', node.skill)
+          action('Edit skill', 'skillBuilder.workbenchEditSkill', node.skill),
+          action('Check skill', 'skillBuilder.workbenchValidate', node.skill),
+          action('Publish…', 'skillBuilder.workbenchPublishRelease', node.skill)
         ];
         const tools = new WorkbenchNode('Files, tests, and publishing options', 'tools', node.skill);
         return [...actions, tools, ...await fileNodes(node.skill, node.skill.sourcePath)];
       }
       if (node.kind === 'tools' && node.skill) {
         return [
-          action('Add or create a file…', 'skillJettyBeta.workbenchAddFile', node.skill),
-          action('Playground — manual test cases', 'skillJettyBeta.workbenchPlayground', node.skill),
-          action('Change repository and base branch…', 'skillJettyBeta.workbenchAssociateRepository', node.skill),
-          action('Prepare a version without uploading…', 'skillJettyBeta.workbenchPrepareRelease', node.skill)
+          action('Add or create a file…', 'skillBuilder.workbenchAddFile', node.skill),
+          action('Playground — manual test cases', 'skillBuilder.workbenchPlayground', node.skill),
+          action('Change repository and base branch…', 'skillBuilder.workbenchAssociateRepository', node.skill),
+          action('Prepare a version without uploading…', 'skillBuilder.workbenchPrepareRelease', node.skill)
         ];
       }
       if (node.kind === 'directory' && node.filePath && node.skill) return fileNodes(node.skill, node.filePath);
       return [];
     }
   };
-  const tree = hooks.guided ? { dispose() {} } : vscode.window.createTreeView('skillJettyBeta.workbenchView', { treeDataProvider: provider, showCollapseAll: true });
+  const tree = hooks.guided ? { dispose() {} } : vscode.window.createTreeView('skillBuilder.workbenchView', { treeDataProvider: provider, showCollapseAll: true });
   context.subscriptions.push(change, tree);
   const requireRoot = async () => {
     const root = await hooks.getRoot();
@@ -161,24 +161,24 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       finally { refresh(); }
     }));
   }
-  if (!hooks.guided) command('skillJettyBeta.openWorkbench', async () => {
-    await vscode.commands.executeCommand('workbench.view.extension.skillJettyBeta');
-    await vscode.commands.executeCommand('skillJettyBeta.workbenchView.focus');
+  if (!hooks.guided) command('skillBuilder.openWorkbench', async () => {
+    await vscode.commands.executeCommand('workbench.view.extension.skillBuilder');
+    await vscode.commands.executeCommand('skillBuilder.workbenchView.focus');
   });
-  command('skillJettyBeta.workbenchRefresh', async () => refresh());
-  command('skillJettyBeta.workbenchLibraryIssue', async (detail: string) => {
+  command('skillBuilder.workbenchRefresh', async () => refresh());
+  command('skillBuilder.workbenchLibraryIssue', async (detail: string) => {
     await showMarkdown(`# Library needs attention\n\nA saved version or publication receipt could not be verified. It has not been restored or labelled as a verified upload.\n\n${escapeMarkdown(String(detail))}\n\nYour **Drafts**, editing, and local checks remain available. Recover the affected saved version from a known good copy before using that version again.\n`);
   });
-  command('skillJettyBeta.workbenchEditSkill', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchEditSkill', async (node?: WorkbenchNode) => {
     const skill = await select(node);
     if (skill) await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
   });
-  command('skillJettyBeta.workbenchOpenLibraryEntry', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchOpenLibraryEntry', async (node?: WorkbenchNode) => {
     const root = await requireRoot();
     const entry = await selectLibraryEntry(root, node?.libraryEntry);
     if (entry) await showLibraryReceipt(entry);
   });
-  command('skillJettyBeta.workbenchRestoreRelease', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchRestoreRelease', async (node?: WorkbenchNode) => {
     const root = await requireRoot();
     const entry = await selectLibraryEntry(root, node?.libraryEntry);
     if (!entry) return;
@@ -186,7 +186,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
     void vscode.window.showInformationMessage(`Restored ${skill.name} ${entry.version} as an editable draft. The published version and original package remain preserved.`);
   });
-  command('skillJettyBeta.importPackage', async (uri?: vscode.Uri) => {
+  command('skillBuilder.importPackage', async (uri?: vscode.Uri) => {
     const root = await requireRoot();
     const selected = uri instanceof vscode.Uri ? uri : (await vscode.window.showOpenDialog({
       title: 'Import an Agent Skill package', canSelectMany: false, filters: { 'Agent Skill packages': ['skill'] }
@@ -196,7 +196,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
     void vscode.window.showInformationMessage(`Imported ${skill.name}. Your original package is preserved; edit the files under ${skill.sourcePath}.`);
   });
-  command('skillJettyBeta.manageFolder', async () => {
+  command('skillBuilder.manageFolder', async () => {
     const root = await requireRoot();
     const selected = (await vscode.window.showOpenDialog({ title: 'Choose a folder containing SKILL.md', canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
     if (!selected) return;
@@ -204,14 +204,14 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     const skill = registerSkillFolder(root, selected.fsPath);
     await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
   });
-  command('skillJettyBeta.newManagedSkill', async () => {
+  command('skillBuilder.newManagedSkill', async () => {
     const root = await requireRoot();
     const created = await hooks.createSkill();
     if (!created) return;
     const skill = registerSkillFolder(root, created);
     await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
   });
-  command('skillJettyBeta.workbenchPublishSource', async (sourceInput?: string | vscode.Uri) => {
+  command('skillBuilder.workbenchPublishSource', async (sourceInput?: string | vscode.Uri) => {
     const root = await requireRoot();
     const selected = sourceInput ?? (await vscode.window.showOpenDialog({
       title: 'Select a .skill package, SKILL.md, or skill folder to publish',
@@ -238,9 +238,9 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       skill = listWorkbenchSkills(root).find(record => path.relative(path.resolve(record.sourcePath), folder) === '')
         ?? registerSkillFolder(root, folder);
     }
-    await vscode.commands.executeCommand('skillJettyBeta.workbenchPublishRelease', { skill });
+    await vscode.commands.executeCommand('skillBuilder.workbenchPublishRelease', { skill });
   });
-  command('skillJettyBeta.workbenchAddFile', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchAddFile', async (node?: WorkbenchNode) => {
     const skill = await select(node);
     if (!skill) return;
     const choice = await vscode.window.showQuickPick(['Create an empty text file', 'Copy an existing file'], { placeHolder: 'Add a file to this skill' });
@@ -263,7 +263,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     await fs.writeFile(target, content, { flag: 'wx' });
     await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(target));
   });
-  command('skillJettyBeta.workbenchAssociateRepository', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchAssociateRepository', async (node?: WorkbenchNode) => {
     const root = await requireRoot();
     const skill = await select(node);
     if (!skill) return;
@@ -316,13 +316,13 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     await associate(root, skill, repository.trim(), branch.trim());
     void vscode.window.showInformationMessage(`Repository and base branch saved for ${skill.name}. Nothing was pushed.`);
   });
-  command('skillJettyBeta.workbenchValidate', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchValidate', async (node?: WorkbenchNode) => {
     const skill = await select(node);
     if (!skill) return;
     if (!await saveSkillDocuments(skill)) return;
     await showSkillCheck(skill, validateWorkbenchSkill(skill));
   });
-  command('skillJettyBeta.workbenchPrepareRelease', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchPrepareRelease', async (node?: WorkbenchNode) => {
     const root = await requireRoot();
     const skill = await select(node);
     if (!skill) return;
@@ -337,7 +337,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       .then(result => result ? vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(release.directory)) : undefined);
     return release;
   });
-  command('skillJettyBeta.workbenchPublishRelease', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchPublishRelease', async (node?: WorkbenchNode) => {
     const root = await requireRoot();
     let skill = await select(node);
     if (!skill) return;
@@ -347,7 +347,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     if (!skill.repository || !skill.baseBranch) {
       const remembered = rememberedRepository();
       if (remembered) updateSkillRepository(root, skill.id, remembered.repository, remembered.baseBranch);
-      else await vscode.commands.executeCommand('skillJettyBeta.workbenchAssociateRepository', { skill });
+      else await vscode.commands.executeCommand('skillBuilder.workbenchAssociateRepository', { skill });
       skill = listWorkbenchSkills(root).find(record => record.id === skill!.id);
       if (!skill?.repository || !skill.baseBranch) return;
     }
@@ -357,7 +357,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       && sameInventory(validation.files, release.manifest.files));
     let release: Release | undefined;
     if (!releases.length) {
-      release = await vscode.commands.executeCommand<Release | undefined>('skillJettyBeta.workbenchPrepareRelease', { skill });
+      release = await vscode.commands.executeCommand<Release | undefined>('skillBuilder.workbenchPrepareRelease', { skill });
     } else if (releases.length === 1) {
       release = releases[0];
     } else {
@@ -397,7 +397,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       } finally { await disposePublishPreview(preview, report); }
     });
   });
-  command('skillJettyBeta.workbenchPlayground', async (node?: WorkbenchNode) => {
+  command('skillBuilder.workbenchPlayground', async (node?: WorkbenchNode) => {
     const root = await requireRoot();
     const skill = await select(node);
     if (skill && await saveSkillDocuments(skill)) await openPlayground(root, skill);

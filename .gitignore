@@ -1,5 +1,6 @@
 node_modules/
 .skilljetty-beta/
+.skilljetty-prerelease/
 out/
 .vscode-test/
 *.vsix

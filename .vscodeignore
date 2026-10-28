@@ -8,6 +8,7 @@ dist/**
 workbench/**
 .skill-workbench/**
 .skilljetty-beta/**
+.skilljetty-prerelease/**
 releases/**
 docs/software-team/**
 AGENTS.md
@@ -19,6 +20,8 @@ azure-pipelines*.yml
 scripts/ci/**
 docs/delivery.md
 docs/beta-delivery.md
+docs/prerelease-delivery.md
+docs/public-prerelease-promotion.md
 scripts/benchmark-workbench.cjs
 scripts/benchmark-startup.cjs
 images/create-skill.png

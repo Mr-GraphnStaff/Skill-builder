@@ -1,7 +1,7 @@
 {
-  "name": "skill-builder-beta",
-  "displayName": "SkillJetty Beta — UAT",
-  "description": "Local BETA / UAT of SkillJetty. Separate from production, with isolated drafts and settings. Not a production release.",
+  "name": "skill-builder",
+  "displayName": "SkillJetty — Agent Skills Studio",
+  "description": "Create, edit, version and publish portable Agent Skills with SkillJetty by DAF-TECH. Build it. Version it. Ship it.",
   "version": "0.11.4",
   "publisher": "DavidFarris",
   "license": "MIT",
@@ -42,36 +42,36 @@
     "skilljetty"
   ],
   "activationEvents": [
-    "workspaceContains:.skilljetty-beta/skills/*/SKILL.md"
+    "workspaceContains:.skilljetty-prerelease/skills/*/SKILL.md"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "skillJettyBeta.openWorkbench",
-        "title": "SkillJetty Beta: Open Workbench",
+        "command": "skillBuilder.openWorkbench",
+        "title": "SkillJetty: Open Workbench",
         "icon": "$(tools)"
       }
     ],
     "configuration": {
-      "title": "SkillJetty Beta — UAT",
+      "title": "SkillJetty",
       "properties": {
-        "skillJettyBeta.skillsDirectory": {
+        "skillBuilder.skillsDirectory": {
           "type": "string",
           "default": "skills",
-          "description": "Workspace-relative directory containing Agent Skills folders."
+          "description": "Relative subdirectory inside the isolated prerelease work folder. Absolute or escaping inherited values use the safe default."
         },
-        "skillJettyBeta.projectRoot": {
+        "skillBuilder.projectRoot": {
           "type": "string",
           "default": "",
-          "description": "Optional beta work folder. Beta state is always stored in a .skilljetty-beta child folder, separate from production."
+          "description": "Optional work folder. Public pre-release work is isolated in a .skilljetty-prerelease child folder; stable data is not migrated."
         },
-        "skillJettyBeta.distDirectory": {
+        "skillBuilder.distDirectory": {
           "type": "string",
           "default": "dist",
-          "description": "Workspace-relative directory for legacy skill ZIP package exports."
+          "description": "Relative subdirectory inside the isolated prerelease work folder. Absolute or escaping inherited values use the safe default."
         },
-        "skillJettyBeta.claudeCodeSkillsDirectory": {
+        "skillBuilder.claudeCodeSkillsDirectory": {
           "type": "string",
           "default": "",
           "description": "Directory used by 'Sync to Claude Code'. Leave empty to use ~/.claude/skills."
@@ -86,17 +86,17 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "skillJettyBeta",
-          "title": "SkillJetty Beta",
+          "id": "skillBuilder",
+          "title": "SkillJetty",
           "icon": "images/workbench.svg"
         }
       ]
     },
     "views": {
-      "skillJettyBeta": [
+      "skillBuilder": [
         {
-          "id": "skillJettyBeta.guidedLauncher",
-          "name": "SkillJetty Beta — UAT",
+          "id": "skillBuilder.guidedLauncher",
+          "name": "SkillJetty — Public pre-release",
           "type": "webview"
         }
       ]
@@ -108,11 +108,12 @@
     "test": "npm run compile && node --test test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npm run package:pre-release",
-    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-beta-0.11.4.vsix",
+    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.11.4.vsix",
     "ci:package": "node scripts/ci/release.cjs prepare",
     "ci:beta-package": "node scripts/ci/beta-release.cjs prepare",
     "import-skill": "node scripts/import-skill.mjs",
-    "publish-skill": "node scripts/publish-skill.mjs"
+    "publish-skill": "node scripts/publish-skill.mjs",
+    "ci:prerelease-package": "node scripts/ci/prerelease-release.cjs prepare"
   },
   "dependencies": {
     "adm-zip": "0.6.1",

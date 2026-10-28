@@ -1,6 +1,8 @@
-# SkillJetty Beta — local UAT
+# SkillJetty — Agent Skills Studio
 
-**This is the separate local Beta extension (`DavidFarris.skill-builder-beta`).** Open **SkillJetty Beta: Open Workbench**. It runs alongside production SkillJetty with separate commands, settings and `.skilljetty-beta` drafts/history. Test only this clearly named Beta extension. Production remains on its approved baseline. Marketplace pre-release publication is a separate step after UAT approval.
+Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
+
+The 0.11.4 public preview identifies itself inside the workbench and stores its drafts, history, packages and repository connection in `.skilljetty-prerelease` beneath the selected work folder. It does not automatically import or migrate stable or local-beta data. Absolute or escaping inherited skills/export directory settings fall back to channel-local defaults. Import an existing skill explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -10,11 +12,11 @@ Create, edit, check and publish Agent Skills from one guided VS Code workbench.
 
 Focus on what your skill should do. SkillJetty reads its declared identity, manages release numbers and prepares factual file-change notes. Save an installable package locally without a repository, or connect one when you want to share for review.
 
-The beta acknowledges clicks with an activity indicator and explains what is happening. Expensive local checks run in the background; routine saves no longer reopen every saved release. See [performance measurements and feedback behavior](docs/performance-and-feedback.md).
+The preview acknowledges clicks with an activity indicator and explains what is happening. Expensive local checks run in the background; routine saves no longer reopen every saved release. See [performance measurements and feedback behavior](docs/performance-and-feedback.md).
 
 ## Open the workbench
 
-For UAT, click the **SkillJetty Beta** icon on VS Code's left activity bar, or run **SkillJetty Beta: Open Workbench** from the Command Palette. Confirm the Beta / UAT banner. The separately installed **SkillJetty** extension and **SkillJetty: Open Workbench** command are production; leave them unchanged during beta testing.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.11.4** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
