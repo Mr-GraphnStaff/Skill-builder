@@ -8,6 +8,9 @@ const ROOT = path.resolve(__dirname, '../..');
 const ID = 'DavidFarris.skill-builder';
 const BRANCH = 'refs/heads/codex/public-prerelease';
 const ENVIRONMENT = 'skilljetty-marketplace-prerelease';
+class ReconciliationError extends Error {
+  constructor(message, code, retryable = false) { super(message); this.code = code; this.retryable = retryable; }
+}
 function assert(value, message) { if (!value) throw new Error(message); }
 function required(name) { const value = process.env[name]; assert(value && !/^\$\(.+\)$/.test(value), `Missing ${name}`); return value; }
 function attributes(text) {
@@ -99,7 +102,10 @@ function publicVersion(metadata, version) {
   assert(metadata.extensionName === 'skill-builder' && metadata.publisher?.publisherName === 'DavidFarris', 'Unexpected public Marketplace identity');
   marketplaceVersions(metadata);
   const matches = metadata.versions.filter(value => value.version === version);
-  assert(matches.length === 1, 'Public pre-release version is missing or ambiguous');
+  if (matches.length === 0) throw new ReconciliationError('Version is not yet visible in the public Marketplace catalog', 'pending-public-visibility', true);
+  assert(matches.length === 1, 'Public pre-release version is ambiguous');
+  if (matches[0].validationResultMessage) throw new ReconciliationError(`Marketplace validation reported: ${matches[0].validationResultMessage}`, 'validation-rejected');
+  if (typeof matches[0].flags === 'number' && !(matches[0].flags & 1)) throw new ReconciliationError('Marketplace version has not passed validation', 'pending-validation', true);
   assert(Array.isArray(matches[0].properties) && matches[0].properties.some(property => property.key === 'Microsoft.VisualStudio.Code.PreRelease' && String(property.value).toLowerCase() === 'true'), 'Marketplace does not identify the version as pre-release');
   return matches[0];
 }
@@ -111,22 +117,58 @@ function verifyPublicPayload(expectedBytes, publicBytes) {
   return { publicSha256: sha256(publicBytes), exactPackageBytesMatch: sha256(expectedBytes) === sha256(publicBytes), installedPayloadMatches: true };
 }
 async function verifyPublic(artifact) {
-  const metadata = JSON.parse(runVsce(['show', ID, '--json'], true));
-  publicVersion(metadata, artifact.receipt.version);
   const url = `https://marketplace.visualstudio.com/_apis/public/gallery/publishers/DavidFarris/vsextensions/skill-builder/${encodeURIComponent(artifact.receipt.version)}/vspackage`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-  assert(response.ok, `Cannot download public VSIX (${response.status})`);
+  let response;
+  try { response = await fetch(url, { signal: AbortSignal.timeout(30000) }); }
+  catch { throw new ReconciliationError('Public package read is temporarily unavailable', 'public-read-unavailable', true); }
+  if (!response.ok) throw new ReconciliationError(`Public package download returned HTTP ${response.status}`, 'public-package-unavailable', response.status === 404 || response.status === 429 || response.status >= 500);
   assert(Number(response.headers.get('content-length') || 0) <= 32 * 1024 * 1024, 'Unexpected public VSIX size');
   const bytes = Buffer.from(await response.arrayBuffer());
   assert(bytes.length <= 32 * 1024 * 1024, 'Unexpected public VSIX size');
-  return verifyPublicPayload(artifact.bytes, bytes);
+  const payload = verifyPublicPayload(artifact.bytes, bytes);
+  let metadata;
+  try { metadata = JSON.parse(runVsce(['show', ID, '--json'], true)); }
+  catch { throw new ReconciliationError('Public catalog read is temporarily unavailable; approved public payload already matches', 'public-read-unavailable', true); }
+  try { publicVersion(metadata, artifact.receipt.version); }
+  catch (error) { error.publicPayloadVerified = true; throw error; }
+  return payload;
 }
-async function reconcilePublication(artifact) {
-  for (const delay of [0, 5000, 10000, 20000]) {
-    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
-    try { return await verifyPublic(artifact); } catch { /* Index/asset propagation may lag; never upload again here. */ }
+async function reconcilePublication(artifact, options = {}) {
+  const verify = options.verify || verifyPublic;
+  const sleep = options.sleep || (delay => new Promise(resolve => setTimeout(resolve, delay)));
+  const log = options.log || console.log;
+  const attempts = options.attempts ?? 11;
+  const interval = options.interval ?? 30000;
+  let pending;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt) await sleep(interval);
+    try { return await verify(artifact); }
+    catch (error) {
+      if (!error.retryable) throw error; // Integrity/channel/rejection failures must not be hidden as propagation.
+      pending = error;
+      log(JSON.stringify({ verification: error.code, attempt: attempt + 1, publicPayloadVerified: error.publicPayloadVerified === true, message: error.message, uploadRepeated: false }));
+    }
   }
-  throw new Error('Publication outcome remains unverified; reconcile this version and payload before any further upload');
+  throw new ReconciliationError(`Marketplace verification is still pending after ${attempts} reads: ${pending?.message || 'public read unavailable'}. Reconcile this original build; do not upload the version again.`, pending?.code || 'pending-public-visibility', true);
+}
+function validateReconcileRequest(targetBuildId, context = process.env) {
+  assert(typeof targetBuildId === 'string' && /^[1-9]\d*$/.test(targetBuildId), 'Reconciliation requires a numeric original build ID');
+  assert(context.BUILD_SOURCEBRANCH === BRANCH && context.BUILD_REASON === 'Manual', 'Reconciliation requires a manual public-pre-release branch run');
+  assert(context.SYSTEM_DEFINITIONID === '12', 'Reconciliation must run in the original public pre-release pipeline 12');
+  return targetBuildId;
+}
+async function verifyOriginalBuild(artifact, targetBuildId, get = azureGet, context = process.env) {
+  validateReconcileRequest(targetBuildId, context);
+  const build = await get(`build/builds/${targetBuildId}?api-version=7.1`);
+  assert(build.id === Number(targetBuildId) && build.definition?.id === Number(context.SYSTEM_DEFINITIONID), 'Original artifact belongs to another pipeline or build');
+  assert(build.project?.id === context.SYSTEM_TEAMPROJECTID, 'Original artifact belongs to another project');
+  assert(build.repository?.type === 'GitHub' && (build.repository.id || build.repository.name) === 'Mr-GraphnStaff/Skill-builder', 'Original artifact belongs to another repository');
+  assert(build.status === 'completed', 'Original publication build has not completed');
+  assert(build.sourceBranch === BRANCH && artifact.receipt.sourceBranch === BRANCH, 'Original artifact is not from the public pre-release branch');
+  assert(build.sourceVersion === artifact.receipt.sourceRevision && artifact.receipt.buildId === targetBuildId, 'Original Azure build source or receipt binding differs');
+  const timeline = await get(`build/builds/${targetBuildId}/timeline?api-version=7.1`);
+  assert((timeline.records || []).some(record => record.type === 'Stage' && record.name === 'Build' && record.result === 'succeeded'), 'Original artifact build stage did not pass');
+  return { originalBuildId: targetBuildId, sourceRevision: build.sourceVersion, originalBuildResult: build.result };
 }
 async function main() {
   const command = process.argv[2];
@@ -147,20 +189,27 @@ async function main() {
   } else if (command === 'verify') console.log(JSON.stringify(verifyArtifact(directory).receipt, null, 2));
   else if (command === 'check-gate') { await verifyGate(); console.log('Public pre-release approval configuration is readable and enabled; approver identity is an administrative check.'); }
   else if (command === 'verify-public') console.log(JSON.stringify(await verifyPublic(verifyArtifact(directory)), null, 2));
+  else if (command === 'check-reconcile-request') { validateReconcileRequest(required('RECONCILE_PUBLISHED_BUILD_ID')); console.log('Read-only reconciliation target is valid; no upload is enabled.'); }
+  else if (command === 'reconcile-public') {
+    const artifact = verifyArtifact(directory);
+    const original = await verifyOriginalBuild(artifact, required('RECONCILE_PUBLISHED_BUILD_ID'));
+    const verification = await reconcilePublication(artifact);
+    console.log(JSON.stringify({ ...original, identity: ID, version: artifact.receipt.version, preRelease: true, uploadAttempted: false, ...verification }));
+  }
   else if (command === 'publish') {
     assert(required('BUILD_SOURCEBRANCH') === BRANCH && required('BUILD_REASON') === 'Manual', 'Public pre-release publishing requires a manual dedicated-branch build');
     const artifact = verifyArtifact(directory, { sourceRevision: required('BUILD_SOURCEVERSION'), sourceBranch: BRANCH, buildId: required('BUILD_BUILDID') });
     required('VSCE_PAT'); await verifyGate();
     const metadata = JSON.parse(runVsce(['show', ID, '--json'], true));
     if (marketplaceVersions(metadata).includes(artifact.receipt.version)) {
-      console.log(JSON.stringify({ alreadyPublished: true, ...await verifyPublic(artifact) })); return;
+      console.log(JSON.stringify({ alreadyPublished: true, ...await reconcilePublication(artifact) })); return;
     }
     let uploadCommandSucceeded = false;
     try { runVsce(['publish', '--packagePath', artifact.packagePath, '--pre-release']); uploadCommandSucceeded = true; }
     catch { console.log('Upload command did not confirm success; reconciling public state without another upload.'); }
     const verification = await reconcilePublication(artifact);
     console.log(JSON.stringify({ identity: ID, version: artifact.receipt.version, preRelease: true, uploadCommandSucceeded, ...verification }));
-  } else throw new Error('Expected prepare, verify, check-gate, verify-public or publish');
+  } else throw new Error('Expected prepare, verify, check-gate, verify-public, check-reconcile-request, reconcile-public or publish');
 }
-module.exports = { inspectPrerelease, payloadInventory, verifyArtifact, publicVersion, verifyPublicPayload };
+module.exports = { inspectPrerelease, payloadInventory, verifyArtifact, publicVersion, verifyPublicPayload, ReconciliationError, reconcilePublication, validateReconcileRequest, verifyOriginalBuild };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

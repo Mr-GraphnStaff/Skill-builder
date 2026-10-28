@@ -32,8 +32,31 @@ as pre-release. The public VSIX download is inspected and every installed
 `package.json.__metadata` is ignored when comparing manifest data. Other files use
 exact byte hashes. The output records the public SHA-256 and whether complete ZIP
 bytes match; service signing metadata outside the installed payload may differ.
-Index/asset propagation receives four bounded read attempts. If still unverified,
-stop and reconcile before another run.
+Index/validation/asset propagation receives eleven bounded reads, thirty seconds
+apart (up to five minutes of waiting). Pending visibility is logged separately
+from integrity, channel or reported validation failures; the latter stop at once.
+If still pending, reconcile the original build instead of uploading again.
+
+## Read-only reconciliation
+
+Run pipeline 12 manually on `codex/public-prerelease` with
+`reconcilePublishedBuildId` set to the original publication build ID (for example
+`905`) and leave `publishMarketplace=false`. Reconciliation skips both Build and
+Publish. It tests the current verification helper, downloads the original
+`skilljetty-prerelease-vsix` artifact from this same pipeline, and checks its
+receipt against the original Azure build's project, repository, source branch,
+commit and successful Build stage. A failed original publication-verification
+result remains recorded as failed; it is not rewritten or treated as successful
+validation. The original package is never rebuilt or uploaded during this run.
+
+The read-only job maps only its Azure system token for build provenance reads;
+it maps no publisher credential and uses no publication approval/environment.
+It then verifies the public catalog/channel and original public package payload.
+An available exact package download alone is not proof that Marketplace
+validation has completed or consumers can discover the pre-release in VS Code.
+The initial 905 upload demonstrated this distinction: its upload completed and
+public package bytes matched while the catalog still excluded the unvalidated
+version; the former 35-second verification window expired before validation.
 
 This pipeline does not install over the protected local production instance.
 Marketplace visibility, package verification, native operation and human UAT are
