@@ -1,0 +1,75 @@
+trigger:
+  branches:
+    include: [main]
+pr:
+  branches:
+    include: [main]
+
+parameters:
+- name: publishMarketplace
+  displayName: Publish reviewed production VSIX to Marketplace
+  type: boolean
+  default: false
+
+pool:
+  vmImage: ubuntu-latest
+
+stages:
+- stage: Build
+  jobs:
+  - job: ValidateAndPackage
+    timeoutInMinutes: 25
+    steps:
+    - checkout: self
+      persistCredentials: false
+      clean: true
+    - task: NodeTool@0
+      inputs:
+        versionSpec: 22.x
+    - script: npm ci
+      displayName: Install locked dependencies
+    - script: node scripts/ci/release.cjs check-gate
+      displayName: Verify pipeline can read the production approval configuration
+      condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'), ne(variables['Build.Reason'], 'PullRequest'))
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    - script: npm test
+      displayName: Compile and test
+    - script: npm audit --omit=dev
+      displayName: Audit production dependencies
+    - script: npm audit --audit-level=high
+      displayName: Audit build and publishing tools
+    - script: npm run ci:package
+      displayName: Package VSIX and record provenance
+    - publish: dist/marketplace
+      artifact: skilljetty-vsix
+      displayName: Retain reviewed VSIX and receipt
+
+- stage: Publish
+  dependsOn: Build
+  condition: and(succeeded(), ${{ eq(parameters.publishMarketplace, true) }}, eq(variables['Build.SourceBranch'], 'refs/heads/main'), eq(variables['Build.Reason'], 'Manual'))
+  jobs:
+  - deployment: MarketplaceProduction
+    environment: skilljetty-marketplace-production
+    timeoutInMinutes: 15
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: none
+          - checkout: self
+            persistCredentials: false
+            clean: true
+          - task: NodeTool@0
+            inputs:
+              versionSpec: 22.x
+          - script: npm ci --ignore-scripts
+            displayName: Install verifier and pinned publisher
+          - download: current
+            artifact: skilljetty-vsix
+          - script: node scripts/ci/release.cjs publish
+            displayName: Verify approval, artifact, identity and unused version; publish
+            env:
+              RELEASE_ARTIFACT_DIR: $(Pipeline.Workspace)/skilljetty-vsix
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              VSCE_PAT: $(VSCE_PAT)
