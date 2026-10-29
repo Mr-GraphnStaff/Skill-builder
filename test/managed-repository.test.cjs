@@ -27,6 +27,8 @@ test('Git pull is available for a registered repository before a skill is opened
   assert.match(html, /data-action="pullRepository"[^>]*>Git pull<\/button>/);
   assert.match(html, /data-action="openRepositorySkill"/);
   assert.match(html, /Optional before starting skill work/);
+  assert.match(html, /id="pull-repository"/);
+  assert.match(html, /id="open-repository-skill"/);
   assert.doesNotMatch(renderGuidedWorkbench({ ...state, connection: undefined }, 'managedRepositoryNonce123'), /data-action="pullRepository"/);
 });
 test('managed Git pull downloads latest skills before work, then fast-forwards and protects local edits', async t => {
@@ -51,4 +53,18 @@ test('managed Git pull downloads latest skills before work, then fast-forwards a
   fs.appendFileSync(path.join(checkout, 'notes/SKILL.md'), 'Keep local edit.\n');
   await assert.rejects(pullManagedRepository(f.root, f.remote), /local changes/);
   assert.match(fs.readFileSync(path.join(checkout, 'notes/SKILL.md'), 'utf8'), /Keep local edit/);
+});
+
+
+test('cancel opening a pulled skill keeps the current create screen', async t => {
+  const f = fixture(t);
+  await connectWorkspaceRepository(f.root, f.remote);
+  const checkout = managedRepositoryPath(f.root, f.remote);
+  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  const controller = new GuidedWorkbenchController(f.root, { pickFolder: async () => undefined });
+  await controller.dispatch({ action: 'showCreate' });
+  await controller.dispatch({ action: 'openRepositorySkill' });
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.form.mode, 'create');
+  assert.match(controller.state.notice, /canceled/);
 });

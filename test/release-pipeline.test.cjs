@@ -53,3 +53,18 @@ test('publication requires enabled configured approval and usable registry metad
   assert.throws(() => marketplaceVersions({ versions: [null] }), /invalid/);
   assert.deepEqual(marketplaceVersions({ versions: [{ version: '0.9.0' }] }), ['0.9.0']);
 });
+
+
+test('Marketplace verification tolerates propagation delay using reads only', async () => {
+  const { waitForPublishedVersion } = require('../scripts/ci/release.cjs');
+  let reads = 0, pauses = 0;
+  await waitForPublishedVersion('0.9.2', async () => ({ versions: ++reads < 3 ? ['0.9.1'] : ['0.9.2', '0.9.1'] }), async () => { pauses++; });
+  assert.equal(reads, 3); assert.equal(pauses, 2);
+});
+
+test('unconfirmed Marketplace propagation is bounded and never authorizes a repeat publication', async () => {
+  const { waitForPublishedVersion } = require('../scripts/ci/release.cjs');
+  let reads = 0;
+  await assert.rejects(waitForPublishedVersion('0.9.2', async () => { reads++; return { versions: ['0.9.1'] }; }, async () => {}), /do not republish/);
+  assert.equal(reads, 12);
+});
