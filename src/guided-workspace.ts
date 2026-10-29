@@ -203,20 +203,25 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
   let release: WorkbenchRelease;
   if (previous) {
     release = verifySkillRelease(previous.directory);
-    if (!sameFiles(validation.files, release.manifest.files)) throw new Error(`Version ${version} is already prepared with different files. Choose a new version for the current changes.`);
-    if (fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim()) throw new Error(`Version ${version} is already prepared with different change notes. Choose a new version to keep these notes, or use the prepared version's existing notes.`);
+    const changed = !sameFiles(validation.files, release.manifest.files)
+      || fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim();
+    if (changed) release = prepareSkillRelease(root, skill.id, version, changelog, true);
     const receipt = listLibraryReleases(root, skill.name).find(item => item.directory === release.directory && item.status === 'uploaded');
-    if (receipt?.commit && receipt.branch && receipt.repository) {
-      if (!sameRepository(receipt.repository, connection.repository)) throw new Error(`Version ${version} was already uploaded to another repository. Choose a new version to publish to this workspace's repository.`);
-      onProgress?.('Checking the previously uploaded version; it will not be uploaded again.');
-      if (!await verifyRepositoryBranchCommit(receipt.repository, receipt.branch, receipt.commit)) throw new Error(`The recorded upload branch for version ${version} has changed or was removed. Open its receipt to review repository state; no upload was repeated.`);
-      let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
-      try { if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory); }
-      catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
-      return { release, publication: { repository: receipt.repository, branch: receipt.branch, commit: receipt.commit }, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
+    if (!changed && receipt?.commit && receipt.branch && receipt.repository) {
+      onProgress?.('Checking the previously uploaded version.');
+      if (sameRepository(receipt.repository, connection.repository)
+          && await verifyRepositoryBranchCommit(receipt.repository, receipt.branch, receipt.commit)) {
+        let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
+        try { if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory); }
+        catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
+        return { release, publication: { repository: receipt.repository, branch: receipt.branch, commit: receipt.commit }, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
+      }
+      // A removed/replaced branch or a different selected repository is a
+      // fresh upload of the user's chosen version, with prior receipts retained.
+      release = prepareSkillRelease(root, skill.id, version, changelog, true);
     }
   } else release = prepareSkillRelease(root, skill.id, version, changelog);
-  const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress);
+  const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress, true);
   try {
     const publication = await pushPreparedRelease(preview, onProgress);
     let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;

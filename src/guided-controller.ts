@@ -1,3 +1,4 @@
+import { managedRepositoryPath, pullManagedRepository } from './managed-repository.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { importSkillPackage, registerSkillFolder, listWorkbenchSkills, validateWorkbenchSkill, WorkbenchSkill } from './skill-workbench.js';
@@ -11,7 +12,7 @@ import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export type GuidedHooks = {
   pickPackage?(): Promise<string | undefined>;
-  pickFolder?(): Promise<string | undefined>;
+  pickFolder?(initialPath?: string): Promise<string | undefined>;
   pickFile?(): Promise<string | undefined>;
   chooseWorkspace?(): Promise<string | undefined>;
   openLink?(url: string): Promise<void>;
@@ -140,6 +141,26 @@ export class GuidedWorkbenchController {
           const root = await this.hooks.chooseWorkspace?.(); if (root) { this.progress('Opening your selected work folder…'); await new Promise<void>(resolve => setImmediate(resolve)); this.root = root; this.refresh(); }
           break;
         }
+        case 'pullRepository': {
+          this.state.connection = getWorkspaceConnection(this.workspace());
+          const connection = this.state.connection;
+          if (!connection) throw new Error('Connect a repository before Git pull.');
+          this.state.repositoryCheckout = await pullManagedRepository(this.workspace(), connection.repository, message => this.progress(message));
+          this.state.notice = 'Git pull complete. Open a skill folder from the managed checkout to begin working.';
+          break;
+        }
+        case 'openRepositorySkill': {
+          this.state.connection = getWorkspaceConnection(this.workspace());
+          const connection = this.state.connection;
+          if (!connection) throw new Error('Connect a repository before opening its skills.');
+          const checkout = managedRepositoryPath(this.workspace(), connection.repository);
+          if (!fs.existsSync(path.join(checkout, '.git'))) throw new Error('Use Git pull to download the registered repository first.');
+          const folder = await this.hooks.pickFolder?.(checkout);
+          if (folder) {
+            this.select(registerSkillFolder(this.workspace(), folder, true));
+          }
+          break;
+        }
         case 'discoverRepositories':
           this.state.busy = true; this.progress('Finding repositories you can connect…');
           this.state.repositories = await listRepositoryChoices(this.workspace()); break;
@@ -163,10 +184,10 @@ export class GuidedWorkbenchController {
           this.select(skill); break;
         }
         case 'openPackage': {
-          const file = await this.hooks.pickPackage?.(); if (file) { this.progress('Opening and checking the selected skill package…'); await new Promise<void>(resolve => setImmediate(resolve)); this.select(importSkillPackage(file, this.workspace())); } break;
+          const file = await this.hooks.pickPackage?.(); if (file) { this.progress('Opening and checking the selected skill package…'); await new Promise<void>(resolve => setImmediate(resolve)); this.select(importSkillPackage(file, this.workspace(), true)); } break;
         }
         case 'openFolder': {
-          const folder = await this.hooks.pickFolder?.(); if (folder) { this.progress('Copying the selected skill folder…'); await new Promise<void>(resolve => setImmediate(resolve)); this.select(registerSkillFolder(this.workspace(), folder)); } break;
+          const folder = await this.hooks.pickFolder?.(); if (folder) { this.progress('Copying the selected skill folder…'); await new Promise<void>(resolve => setImmediate(resolve)); this.select(registerSkillFolder(this.workspace(), folder, true)); } break;
         }
         case 'resume': {
           const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === string('id'));

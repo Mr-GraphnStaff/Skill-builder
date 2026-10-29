@@ -186,19 +186,19 @@ test('guided legacy publish reaches review after association and preparation but
   assert.equal(core.listWorkbenchSkills(f.root).length, 1, 'cancelled publish retains the active skill');
 });
 
-test('.skill publish import preserves original bytes and never overwrites a colliding working draft', async t => {
+test('.skill publish import replaces a colliding draft with the selected package and keeps recovery', async t => {
   const f = fixture(t);
   const archive = path.join(f.root, 'incoming.skill');
   const zip = new AdmZip();
-  zip.addFile('sample/SKILL.md', Buffer.from(f.manifest)); zip.writeZip(archive);
+  zip.addFile('sample/SKILL.md', Buffer.from(f.manifest + '\nSelected incoming version.\n')); zip.writeZip(archive);
   const original = fs.readFileSync(archive);
   core.registerSkillFolder(f.root, f.source);
   await f.commands.get('skillBuilder.workbenchPublishSource')(archive);
-  assert.match(f.errors.join('\n'), /No existing draft was replaced/);
-  assert.match(f.errors.join('\n'), /Open SkillJetty/);
+  assert.deepEqual(f.errors, []);
   assert.deepEqual(fs.readFileSync(archive), original);
-  assert.equal(fs.readFileSync(f.skill.manifestPath, 'utf8'), f.manifest);
-  assert.equal(f.counters.repositories, 0); assert.equal(f.counters.push, 0);
+  assert.match(fs.readFileSync(f.skill.manifestPath, 'utf8'), /Selected incoming version/);
+  assert.ok(fs.existsSync(path.join(f.root, '.skill-workbench/replaced')));
+  assert.equal(f.counters.repositories, 1); assert.equal(f.counters.push, 0);
 });
 
 test('a standalone .skill publish selection imports reversibly before the repository chooser and cancels without external effects', async t => {

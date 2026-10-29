@@ -159,6 +159,7 @@ function sourceFiles(source: string): Payload[] {
   function visit(directory: string): void {
     if (fs.lstatSync(directory).isSymbolicLink()) throw new Error('Source links are not allowed.');
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name.toLowerCase() === '.git') continue;
       if (++count > LIMITS.entries) throw new Error('Source entries exceed packaging limits.');
       const full = path.join(directory, entry.name);
       const relative = path.relative(source, full).split(path.sep).join('/');
@@ -183,22 +184,25 @@ function writeFiles(target: string, files: Payload[]): void {
   fs.mkdirSync(target, { recursive: true });
   for (const file of files) { const destination = path.join(target, ...file.relative.split('/')); if (file.directory) fs.mkdirSync(destination, { recursive: true }); else { fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.writeFileSync(destination, file.bytes, { flag: 'wx' }); } }
 }
-function insertSkill(root: string, files: Payload[], original?: Buffer): WorkbenchSkill {
+function insertSkill(root: string, files: Payload[], original?: Buffer, replaceExisting = false): WorkbenchSkill {
   const manifest = files.find(file => file.relative === 'SKILL.md');
   if (!manifest) throw new Error('No canonical SKILL.md found.');
   const name = metadata(manifest.bytes).name;
   const catalog = readCatalog(root);
   const sourcePath = path.join(path.resolve(root), 'skills', name);
   guarded(root, sourcePath);
-  if (catalog.some(record => record.id === name) || fs.existsSync(sourcePath)) throw new Error(`Skill already exists: ${name}. Existing files were preserved.`);
+  const existing = catalog.find(record => record.id === name);
+  if (!replaceExisting && (existing || fs.existsSync(sourcePath))) throw new Error(`Skill already exists: ${name}. Existing files were preserved.`);
   const state = control(root); guarded(root, state); fs.mkdirSync(state, { recursive: true });
   const staging = fs.mkdtempSync(path.join(state, 'import-'));
   let sourceMoved = false;
+  let backup: string | undefined;
   let importedInventory: FileDigest[] = [];
   try {
     writeFiles(path.join(staging, name), files);
     importedInventory = digests(sourceFiles(path.join(staging, name)));
-    const record: WorkbenchSkill = { id: name, name, sourcePath };
+    const record: WorkbenchSkill = { ...existing, id: name, name, sourcePath };
+    delete record.originalPackagePath;
     if (original) {
       const originalPath = path.join(state, name, 'originals', `${hash(original)}.skill`);
       guarded(root, originalPath); fs.mkdirSync(path.dirname(originalPath), { recursive: true });
@@ -207,9 +211,15 @@ function insertSkill(root: string, files: Payload[], original?: Buffer): Workben
       record.originalPackagePath = originalPath;
     }
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+    if (fs.existsSync(sourcePath)) {
+      backup = path.join(state, 'replaced', randomUUID(), 'skills', name);
+      guarded(root, backup); fs.mkdirSync(path.dirname(backup), { recursive: true });
+      fs.writeFileSync(path.join(path.dirname(backup), 'catalog-record.json'), JSON.stringify(existing ?? null));
+      renameWithRetry(sourcePath, backup);
+    }
     renameWithRetry(path.join(staging, name), sourcePath);
     sourceMoved = true;
-    saveCatalog(root, [...catalog, record]);
+    saveCatalog(root, [...catalog.filter(item => item.id !== name), record]);
     return record;
   } catch (error) {
     if (sourceMoved) {
@@ -222,23 +232,24 @@ function insertSkill(root: string, files: Payload[], original?: Buffer): Workben
         throw new Error(`Import registration failed. The extracted copy was retained at ${sourcePath}; use Manage Skill Folder to recover it. Original input was preserved. Rollback: ${String(rollbackError)}. Initial failure: ${String(error)}`);
       }
     }
+    if (backup) renameWithRetry(backup, sourcePath);
     throw error;
   } finally { fs.rmSync(staging, { recursive: true, force: true }); }
 }
-export function importSkillPackage(packagePath: string, workspaceRoot: string): WorkbenchSkill {
+export function importSkillPackage(packagePath: string, workspaceRoot: string, replaceExisting = false): WorkbenchSkill {
   if (path.extname(packagePath).toLowerCase() !== '.skill') throw new Error('Select a .skill package.');
   if (fs.statSync(packagePath).size > LIMITS.archive) throw new Error('Archive exceeds the compressed-size limit.');
   const bytes = fs.readFileSync(packagePath);
-  return insertSkill(workspaceRoot, readArchive(bytes), bytes);
+  return insertSkill(workspaceRoot, readArchive(bytes), bytes, replaceExisting);
 }
-export function registerSkillFolder(workspaceRoot: string, sourcePath: string): WorkbenchSkill {
+export function registerSkillFolder(workspaceRoot: string, sourcePath: string, replaceExisting = false): WorkbenchSkill {
   sourcePath = path.resolve(sourcePath);
   const files = sourceFiles(sourcePath);
   const manifest = files.find(file => file.relative === 'SKILL.md');
   if (!manifest) throw new Error('Folder must contain SKILL.md.');
   const name = metadata(manifest.bytes).name;
   const canonical = path.join(path.resolve(workspaceRoot), 'skills', name);
-  if (path.relative(canonical, sourcePath) !== '') return insertSkill(workspaceRoot, files);
+  if (path.relative(canonical, sourcePath) !== '') return insertSkill(workspaceRoot, files, undefined, replaceExisting);
   guarded(workspaceRoot, sourcePath);
   const catalog = readCatalog(workspaceRoot);
   const existing = catalog.find(record => record.id === name);
@@ -297,7 +308,7 @@ function validateOriginalArchive(original: Buffer, name: string): void {
   const blocking = analysis.findings.filter(finding => finding.severity === 'error');
   if (blocking.length) throw new Error(`Original package validation failed: ${blocking.map(finding => `${finding.file ?? 'SKILL.md'}: ${finding.message}`).join('; ')}`);
 }
-export function prepareSkillRelease(workspaceRoot: string, id: string, version: string, changelog: string): WorkbenchRelease {
+export function prepareSkillRelease(workspaceRoot: string, id: string, version: string, changelog: string, replaceExisting = false): WorkbenchRelease {
   checkVersion(version);
   if (!changelog.trim()) throw new Error('A per-version changelog is required.');
   const record = readCatalog(workspaceRoot).find(item => item.id === id);
@@ -309,7 +320,26 @@ export function prepareSkillRelease(workspaceRoot: string, id: string, version: 
   if (JSON.stringify(digests(files)) !== JSON.stringify(validation.files)) throw new Error('Source changed during validation. Save your files and prepare the release again.');
   const directory = path.join(path.resolve(workspaceRoot), 'releases', record.name, version);
   guarded(workspaceRoot, directory);
-  if (fs.existsSync(directory)) throw new Error(`Version ${version} already exists. Past releases are immutable.`);
+  if (fs.existsSync(directory)) {
+    if (!replaceExisting) throw new Error(`Version ${version} already exists. Past releases are immutable.`);
+    const backup = path.join(control(workspaceRoot), 'replaced', randomUUID(), record.name, version);
+    guarded(workspaceRoot, backup); fs.mkdirSync(path.dirname(backup), { recursive: true });
+    const moved: Array<[string, string]> = [];
+    try {
+      for (const [source, target] of [
+        [directory, backup],
+        ...['publications', 'pull-requests'].map(kind => [path.join(control(workspaceRoot), kind, record.name, `${version}.json`), path.join(path.dirname(backup), `${version}-${kind}.json`)]),
+        [path.join(control(workspaceRoot), 'completed', record.name, version), path.join(path.dirname(backup), `${version}-completed`)]
+      ]) {
+        guarded(workspaceRoot, source); guarded(workspaceRoot, target);
+        if (fs.existsSync(source)) { renameWithRetry(source, target); moved.push([source, target]); }
+      }
+      return prepareSkillRelease(workspaceRoot, id, version, changelog);
+    } catch (error) {
+      for (const [source, target] of moved.reverse()) renameWithRetry(target, source);
+      throw error;
+    }
+  }
   const parent = path.dirname(directory); fs.mkdirSync(parent, { recursive: true });
   const staging = fs.mkdtempSync(path.join(parent, '.preparing-'));
   try {
@@ -409,6 +439,7 @@ export function completeWorkbenchSkill(workspaceRoot: string, id: string, releas
   const sessionPath = path.join(path.resolve(workspaceRoot), 'workbench', record.id); guarded(workspaceRoot, sessionPath);
   const staging = fs.mkdtempSync(path.join(parent, '.completing-'));
   let sourceMoved = false;
+  let backup: string | undefined;
   let sessionMoved = false;
   let archiveMoved = false;
   try {

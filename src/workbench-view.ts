@@ -192,7 +192,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       title: 'Import an Agent Skill package', canSelectMany: false, filters: { 'Agent Skill packages': ['skill'] }
     }))?.[0];
     if (!selected) return;
-    const skill = importSkillPackage(selected.fsPath, root);
+    const skill = importSkillPackage(selected.fsPath, root, true);
     await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
     void vscode.window.showInformationMessage(`Imported ${skill.name}. Your original package is preserved; edit the files under ${skill.sourcePath}.`);
   });
@@ -201,7 +201,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     const selected = (await vscode.window.showOpenDialog({ title: 'Choose a folder containing SKILL.md', canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
     if (!selected) return;
     if (!await saveDocumentsUnder(selected.fsPath)) return;
-    const skill = registerSkillFolder(root, selected.fsPath);
+    const skill = registerSkillFolder(root, selected.fsPath, true);
     await vscode.window.showTextDocument(vscode.Uri.file(path.join(skill.sourcePath, 'SKILL.md')));
   });
   command('skillBuilder.newManagedSkill', async () => {
@@ -223,12 +223,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     if (sourceStat.isSymbolicLink()) throw new Error('Select a regular skill package, SKILL.md, or skill folder, not a symbolic link.');
     let skill: ManagedSkill;
     if (sourceStat.isFile() && path.extname(source).toLowerCase() === '.skill') {
-      try { skill = importSkillPackage(source, root); }
-      catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (/Skill already exists:/.test(message)) throw new Error(`${message} Open SkillJetty and choose Publish Skill Version for the existing skill, or select its source folder. No existing draft was replaced.`);
-        throw error;
-      }
+      skill = importSkillPackage(source, root, true);
     } else {
       if (!sourceStat.isDirectory() && (!sourceStat.isFile() || path.basename(source).toLowerCase() !== 'skill.md')) {
         throw new Error('Select a .skill package, the SKILL.md manifest, or the folder containing SKILL.md.');
@@ -236,7 +231,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       const folder = sourceStat.isDirectory() ? source : path.dirname(source);
       if (!await saveDocumentsUnder(folder)) return;
       skill = listWorkbenchSkills(root).find(record => path.relative(path.resolve(record.sourcePath), folder) === '')
-        ?? registerSkillFolder(root, folder);
+        ?? registerSkillFolder(root, folder, true);
     }
     await vscode.commands.executeCommand('skillBuilder.workbenchPublishRelease', { skill });
   });
@@ -332,7 +327,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     if (!version) return;
     const changelog = await vscode.window.showInputBox({ title: 'Release changes', prompt: 'Describe what changed and why. Required for the release record.', validateInput: value => value.trim() ? undefined : 'Describe the changes.' });
     if (!changelog) return;
-    const release = prepareSkillRelease(root, skill.id, version, changelog.trim());
+    const release = prepareSkillRelease(root, skill.id, version, changelog.trim(), true);
     void vscode.window.showInformationMessage(`Prepared ${skill.name} ${release.version}. Review the package and manifest before publishing.`, 'Reveal Release')
       .then(result => result ? vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(release.directory)) : undefined);
     return release;
@@ -368,7 +363,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
     const selectedRelease = release;
     await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Publish ${skill.name} ${selectedRelease.version}`, cancellable: false }, async progress => {
       const report = (message: string) => progress?.report({ message });
-      const preview = await prepareRepositoryPublish(selectedRelease.directory, skill.repository!, skill.baseBranch!, report);
+      const preview = await prepareRepositoryPublish(selectedRelease.directory, skill.repository!, skill.baseBranch!, report, true);
       try {
         await showPublishPreview(preview, selectedRelease, skill.baseBranch!);
         const confirmed = await vscode.window.showWarningMessage(

@@ -19,6 +19,7 @@ export type GuidedState = {
   notice?: string;
   hasWorkspace: boolean;
   connection?: { repository: string; baseBranch: string };
+  repositoryCheckout?: { path: string; branch?: string; commit?: string };
   repositories: { label: string; repository: string }[];
   drafts: { id: string; name: string }[];
   library: { skillName: string; version: string; directory: string; status: string; pr?: PullRequestRecord }[];
@@ -40,7 +41,7 @@ export type GuidedState = {
 };
 
 export type GuidedAction = 'ready' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
-  | 'showCreate' | 'createSkill' | 'openPackage' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
+  | 'pullRepository' | 'openRepositorySkill' | 'showCreate' | 'createSkill' | 'openPackage' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
   | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub';
 export type GuidedMessage = { action: GuidedAction; payload?: Record<string, unknown>; editorSkillId?: string; editorPath?: string; editorContent?: string };

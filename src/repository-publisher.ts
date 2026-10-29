@@ -97,7 +97,7 @@ export async function verifyRepositoryBranchCommit(repository: string, branch: s
 }
 export type PublishPreview = {
   checkoutPath: string; repository: string; branch: string; relativePath: string;
-  files: string[]; skillName: string; version: string;
+  files: string[]; changedFiles?: string[]; skillName: string; version: string;
 };
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -219,7 +219,7 @@ async function verifyGitBlobs(preview: PublishPreview, committed = false): Promi
 
 /** Prepare a reviewable commit in the destination repository's own history. */
 export async function prepareRepositoryPublish(
-  releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress
+  releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false
 ): Promise<PublishPreview> {
   report(onProgress, 'Validating the prepared release.');
   validateRepository(repository);
@@ -242,7 +242,7 @@ export async function prepareRepositoryPublish(
     await fs.mkdir(emptyTemplate); await fs.mkdir(emptyHooks);
     await git(temp, ['check-ref-format', '--branch', baseBranch]);
     report(onProgress, 'Downloading the destination repository; this operation has a 120-second deadline.');
-    await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--depth', '1', '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
+    await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
     report(onProgress, 'Preparing the destination checkout.');
     // Prevent user/repository filters and line-ending conversions from running or
     // altering a release. info/attributes takes precedence over tracked attributes.
@@ -252,9 +252,19 @@ export async function prepareRepositoryPublish(
     await git(checkoutPath, ['reset', '--hard', 'HEAD']);
     const branch = `skills/${manifest.skillName}/${manifest.version}`;
     const relativePath = `${manifest.skillName}/${manifest.version}`;
+    if (replaceExisting) {
+      report(onProgress, 'Fetching the latest registered repository branches.');
+      const advertised = await git(checkoutPath, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]);
+      if (advertised.trim()) {
+        await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/skilljetty-upload`]);
+        await git(checkoutPath, ['switch', '-c', branch, 'refs/remotes/origin/skilljetty-upload']);
+        // Pull the latest base into an existing review branch before replacing
+        // the selected version. A conflict stops before any remote write.
+        await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`]);
+        await git(checkoutPath, ['-c', 'merge.autostash=false', 'merge', '--no-edit', 'FETCH_HEAD']);
+      } else await git(checkoutPath, ['switch', '-c', branch]);
+    } else await git(checkoutPath, ['switch', '-c', branch]);
     const destination = path.join(checkoutPath, relativePath);
-    try { await fs.lstat(destination); throw new Error(`Version ${manifest.version} already exists in this repository.`); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     // The target path must not traverse a symlink already present in the target repository.
     for (const part of [manifest.skillName]) {
       try {
@@ -262,7 +272,12 @@ export async function prepareRepositoryPublish(
         if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe repository destination: ${part}`);
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
-    await git(checkoutPath, ['switch', '-c', branch]);
+    try {
+      const stat = await fs.lstat(destination);
+      if (!replaceExisting) throw new Error(`Version ${manifest.version} already exists in this repository.`);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Unsafe repository version destination.');
+      await fs.rm(destination, { recursive: true });
+    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     report(onProgress, 'Copying and checking the complete release.');
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.cp(root, destination, { recursive: true, errorOnExist: true, force: false });
@@ -271,8 +286,8 @@ export async function prepareRepositoryPublish(
     await git(checkoutPath, ['add', '-f', '--', relativePath]);
     const files = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
     const expected = [...copied.keys()].map(file => `${relativePath}/${file}`).sort();
-    if (JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
-    const preview: PublishPreview = { checkoutPath, repository, branch, relativePath, files,
+    if (replaceExisting ? files.some(file => !file.startsWith(`${relativePath}/`)) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
+    const preview: PublishPreview = { checkoutPath, repository, branch, relativePath, files: expected, changedFiles: files,
       skillName: manifest.skillName, version: manifest.version };
     await verifyGitBlobs(preview);
     previews.set(checkoutPath, copied);
@@ -300,7 +315,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   const staged = (await git(preview.checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
   // Retrying an unsuccessful push reuses the existing commit instead of duplicating it.
   if (staged.length > 0) {
-    if (JSON.stringify(staged) !== JSON.stringify(preview.files)) throw new Error('Unexpected staged files; publication stopped.');
+    if (JSON.stringify(staged) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Unexpected staged files; publication stopped.');
     await verifyGitBlobs(preview);
     const emptyHooks = path.join(path.dirname(preview.checkoutPath), 'empty-hooks');
     await fs.mkdir(emptyHooks, { recursive: true });
@@ -309,7 +324,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   }
   const commit = (await git(preview.checkoutPath, ['rev-parse', 'HEAD'])).trim();
   const actual = (await git(preview.checkoutPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', commit])).split('\0').filter(Boolean).sort();
-  if (JSON.stringify(actual) !== JSON.stringify(preview.files)) throw new Error('Commit contents differ from the reviewed release.');
+  if (preview.changedFiles?.length !== 0 && JSON.stringify(actual) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Commit contents differ from the reviewed release.');
   await verifyGitBlobs(preview, true);
   report(onProgress, 'Pushing the release branch to the selected repository.');
   await git(preview.checkoutPath, ['push', '--porcelain', 'origin', `HEAD:refs/heads/${preview.branch}`]);
@@ -335,3 +350,6 @@ export async function disposePublishPreview(preview: PublishPreview, onProgress?
     console.warn(message);
   }
 }
+
+// Shared process boundary for the explicit managed repository pull action.
+export { git as repositoryGit };
