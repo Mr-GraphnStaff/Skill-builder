@@ -24,8 +24,9 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
   context.subscriptions.push(activityLog);
   const nonce = () => randomBytes(24).toString('base64');
   const render = () => { if (panel && controller) panel.webview.html = renderGuidedWorkbench(controller.state, nonce(), brand); };
-  const pick = async (kind: 'package' | 'folder' | 'file') => (await vscode.window.showOpenDialog({
+  const pick = async (kind: 'package' | 'folder' | 'file', initialPath?: string) => (await vscode.window.showOpenDialog({
     title: kind === 'package' ? 'Open a .skill package' : kind === 'folder' ? 'Open a skill folder' : 'Add a supporting file',
+    ...(initialPath ? { defaultUri: vscode.Uri.file(initialPath) } : {}),
     canSelectMany: false, canSelectFiles: kind !== 'folder', canSelectFolders: kind === 'folder',
     ...(kind === 'package' ? { filters: { 'Skill packages': ['skill'] } } : {})
   }))?.[0]?.fsPath;
@@ -33,8 +34,11 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
   const saveExternalEdits = async () => {
     const root = await hooks.getRoot(); if (!root) return;
     for (const document of vscode.workspace.textDocuments) {
-      const relative = path.relative(path.join(root, 'skills'), document.uri.fsPath);
-      if (document.isDirty && document.uri.scheme === 'file' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+      const managedDocument = ['skills', path.join('.skill-workbench', 'repositories')].some(folder => {
+        const relative = path.relative(path.join(root, folder), document.uri.fsPath);
+        return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+      });
+      if (document.isDirty && document.uri.scheme === 'file' && managedDocument) {
         if (!await document.save()) throw new Error('A skill file could not be saved. Keep your editor open and save it before continuing.');
       }
     }
@@ -59,7 +63,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         // Deliver feedback before synchronous local work can occupy this host.
         await new Promise<void>(resolve => setImmediate(resolve));
       }
-      if (['check', 'preparePublish', 'publish', 'savePackage', 'openFolder', 'openPackage', 'openPackagePath'].includes(message.action)) await saveExternalEdits();
+      if (['pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPackage', 'openPackagePath'].includes(message.action)) await saveExternalEdits();
       if (panel !== activePanel || controller !== activeController) return;
       await activeController.dispatch(message);
     } catch (error) { activeController.state.error = error instanceof Error ? error.message : String(error); }
@@ -103,7 +107,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
           const session = await vscode.authentication.getSession('github', ['repo'], { forceNewSession: { detail: 'Choose the GitHub account with access to your connected skill repository. This account is managed by VS Code.' }, clearSessionPreference: true });
           return session.account.label;
         },
-        pickPackage: () => pick('package'), pickFolder: () => pick('folder'), pickFile: () => pick('file'),
+        pickPackage: () => pick('package'), pickFolder: initialPath => pick('folder', initialPath), pickFile: () => pick('file'),
         chooseWorkspace: async () => {
           const folder = (await vscode.window.showOpenDialog({ title: 'Choose your local skill work folder', canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
           if (folder) {

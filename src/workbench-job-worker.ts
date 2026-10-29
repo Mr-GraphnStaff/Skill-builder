@@ -10,9 +10,9 @@ function perform(job: WorkbenchJob): unknown {
     case 'library': return listLibraryReleases(job.root, job.skillName);
     case 'reviews': return connectedReviewReleases(job.root);
     case 'validate': return validateWorkbenchSkill(job.skill);
-    case 'importPackage': return importSkillPackage(job.file, job.root);
-    case 'registerFolder': return registerSkillFolder(job.root, job.folder);
-    case 'prepareRelease': return prepareSkillRelease(job.root, job.id, job.version, job.changelog);
+    case 'importPackage': return importSkillPackage(job.file, job.root, job.replaceExisting);
+    case 'registerFolder': return registerSkillFolder(job.root, job.folder, job.replaceExisting);
+    case 'prepareRelease': return prepareSkillRelease(job.root, job.id, job.version, job.changelog, job.replaceExisting);
     case 'restoreRelease': return restoreLibraryRelease(job.root, job.directory);
     case 'verifyRelease': return verifySkillRelease(job.directory);
     case 'snapshot': {

@@ -41,7 +41,7 @@ test('a submitted skill identifies itself, generates notes and saves a usable pa
   assert.deepEqual(f.revealed, [release.packagePath]);
 });
 
-test('changed work gets a new release automatically; identical work reuses its immutable saved package', async t => {
+test('changed work keeps the declared version and retains earlier packages in recovery', async t => {
   const f = await fixture(t), c = f.controller;
   await c.dispatch({ action: 'preparePublish' }); await c.dispatch({ action: 'savePackage' });
   const first = c.state.receipt, bytes = fs.readFileSync(first.packagePath), id = c.state.active.id;
@@ -52,12 +52,14 @@ test('changed work gets a new release automatically; identical work reuses its i
   await c.dispatch({ action: 'resume', payload: { id } });
   await c.dispatch({ action: 'save', editorSkillId: id, editorPath: 'SKILL.md', editorContent: f.original + '\nUse concise sentences.\n' });
   await c.dispatch({ action: 'preparePublish' });
-  assert.equal(c.state.publish.version, '2.13.1');
+  assert.equal(c.state.publish.version, '2.13.0');
   assert.deepEqual(c.state.publish.changeSummary.changed, ['SKILL.md']);
-  assert.match(c.state.publish.versionSource, /skill itself declares 2.13.0/);
+  assert.match(c.state.publish.versionSource, /SKILL.md/);
   await c.dispatch({ action: 'savePackage', payload: { version: '', changelog: '' } });
-  assert.equal(c.state.error, undefined); assert.equal(c.state.receipt.version, '2.13.1');
-  assert.deepEqual(fs.readFileSync(first.packagePath), bytes);
+  assert.equal(c.state.error, undefined); assert.equal(c.state.receipt.version, '2.13.0');
+  const backups = path.join(f.root, '.skill-workbench/replaced');
+  const saved = fs.readdirSync(backups, { recursive: true }).filter(file => file.endsWith('useful-notes-2.13.0.skill'));
+  assert.ok(saved.some(file => fs.readFileSync(path.join(backups, file)).equals(bytes)));
 });
 
 test('earlier edits restore locally and preserve the replaced content; stale paths and forged records cannot write elsewhere', async t => {
@@ -92,17 +94,16 @@ test('no-op saves do not make history; changed files invalidate a stale sharing 
   assert.equal(c.state.receipt.local, true);
 });
 
-test('new notes for preserved content receive a new managed release after reviewing the updated summary', async t => {
+test('new notes keep the chosen version and replace the saved notes', async t => {
   const f = await fixture(t), c = f.controller;
   await c.dispatch({ action: 'preparePublish' }); await c.dispatch({ action: 'savePackage' });
   await c.dispatch({ action: 'resume', payload: { id: c.state.active.id } });
   await c.dispatch({ action: 'preparePublish' });
   const payload = { changelog: 'Verified manually with a fresh example.' };
   await c.dispatch({ action: 'savePackage', payload });
-  assert.match(c.state.error, /summary has been updated/);
-  assert.equal(c.state.publish.version, '2.13.1');
-  await c.dispatch({ action: 'savePackage', payload });
-  assert.equal(c.state.error, undefined); assert.equal(c.state.receipt.version, '2.13.1');
+  assert.equal(c.state.error, undefined);
+  assert.equal(c.state.publish.version, '2.13.0');
+  assert.equal(c.state.error, undefined); assert.equal(c.state.receipt.version, '2.13.0');
   assert.equal(fs.readFileSync(path.join(c.state.receipt.directory, 'CHANGELOG.md'), 'utf8').trim(), payload.changelog);
 });
 
@@ -114,4 +115,16 @@ test('an invalid advanced number keeps the sharing form available and preserves 
   assert.equal(c.state.active.name, 'useful-notes');
   await c.dispatch({ action: 'savePackage', payload: { version: '' } });
   assert.equal(c.state.error, undefined); assert.equal(c.state.receipt.version, '2.13.0');
+});
+
+
+test('opening another package with the same skill name selects the incoming copy', async t => {
+  const f = await fixture(t), c = f.controller;
+  const zip = new AdmZip();
+  zip.addFile('useful-notes/SKILL.md', Buffer.from(f.original + '\nIncoming selected copy.\n'));
+  zip.writeZip(f.input);
+  await c.dispatch({ action: 'openPackage' });
+  assert.equal(c.state.error, undefined);
+  assert.equal(c.state.active.version, '2.13.0');
+  assert.match(fs.readFileSync(path.join(f.root, 'skills/useful-notes/SKILL.md'), 'utf8'), /Incoming selected copy/);
 });

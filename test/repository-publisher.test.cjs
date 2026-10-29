@@ -162,3 +162,36 @@ test('temporary checkout cleanup cannot turn verified local push into failure', 
     fs.rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+
+test('overwrites the same Git version on the latest registered branches and preserves unrelated files and history', async () => {
+  const f = fixture(); let first, next;
+  try {
+    first = await prepareRepositoryPublish(f.release, f.remote);
+    git(first.checkoutPath, 'config', 'user.name', 'Workbench Test');
+    git(first.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const original = await pushPreparedRelease(first);
+    fs.writeFileSync(path.join(f.target, 'LATEST.txt'), 'Fetched base change');
+    git(f.target, 'add', '.'); git(f.target, 'commit', '-m', 'Latest base'); git(f.target, 'push', f.remote, 'main');
+    const core = require('../out/skill-workbench.js');
+    const skill = core.listWorkbenchSkills(f.caller)[0];
+    fs.unlinkSync(path.join(skill.sourcePath, 'assets/example.bin'));
+    fs.writeFileSync(path.join(skill.sourcePath, 'new.txt'), 'Selected replacement');
+    const updated = core.prepareSkillRelease(f.caller, skill.id, '1.0.0', 'Replace same version', true);
+    next = await prepareRepositoryPublish(updated.directory, f.remote, 'main', undefined, true);
+    git(next.checkoutPath, 'config', 'user.name', 'Workbench Test');
+    git(next.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const replaced = await pushPreparedRelease(next);
+    assert.equal(replaced.branch, original.branch);
+    const tree = git(f.remote, 'ls-tree', '-r', '--name-only', replaced.commit);
+    assert.match(tree, /LATEST.txt/);
+    assert.match(tree, /source\/sample\/new.txt/);
+    assert.doesNotMatch(tree, /example.bin/);
+    git(f.remote, 'merge-base', '--is-ancestor', original.commit, replaced.commit);
+    assert.equal(git(f.remote, 'show', `${replaced.commit}:sample/1.0.0/source/sample/new.txt`), 'Selected replacement');
+  } finally {
+    if (first) await disposePublishPreview(first);
+    if (next) await disposePublishPreview(next);
+    fs.rmSync(f.root, { recursive: true, force: true });
+  }
+});

@@ -135,5 +135,5 @@ test('saved releases invite improving the skill while preserving earlier release
   assert.match(html, /Saved releases/);
   assert.match(html, /Earlier releases stay unchanged/);
   assert.match(html, /Improve sample from 2\.13\.0/);
-  assert.match(html, /SkillJetty handles the next release number/);
+  assert.match(html, /You control the next release number/);
 });

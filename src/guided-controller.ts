@@ -1,3 +1,4 @@
+import { managedRepositoryPath, pullManagedRepository } from './managed-repository.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
@@ -14,7 +15,7 @@ import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export type GuidedHooks = {
   pickPackage?(): Promise<string | undefined>;
-  pickFolder?(): Promise<string | undefined>;
+  pickFolder?(initialPath?: string): Promise<string | undefined>;
   pickFile?(): Promise<string | undefined>;
   chooseWorkspace?(): Promise<string | undefined>;
   openLink?(url: string): Promise<void>;
@@ -133,7 +134,7 @@ export class GuidedWorkbenchController {
     const notes = [summary.baselineVersion ? `File changes since saved release ${summary.baselineVersion}.` : `First saved release of ${skill.name}.`,
       section('Added', summary.added), section('Updated', summary.changed), section('Removed', summary.removed),
       !summary.hasChanges ? 'No skill file changes.' : '', 'Generated from file comparisons; skill behavior has not been tested.'].filter(Boolean).join('\n');
-    const version = matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version));
+    const version = identity.declaredVersion ?? matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version));
     return { details: { version, changelog: matching ? fs.readFileSync(path.join(matching.directory, 'CHANGELOG.md'), 'utf8').trim() : '',
       repository: this.state.connection?.repository, fileCount: inventory.length,
       reviewSupported: !!githubRepository(this.state.connection?.repository ?? ''),
@@ -201,6 +202,26 @@ export class GuidedWorkbenchController {
           else this.state.notice = 'Folder selection canceled. Your saved work is still available.';
           break;
         }
+        case 'pullRepository': {
+          this.refreshConnection();
+          const connection = this.state.connection;
+          if (!connection) throw new Error('Connect a repository before Git pull.');
+          this.state.repositoryCheckout = await pullManagedRepository(this.workspace(), connection.repository, message => this.progress(message));
+          this.state.notice = 'Git pull complete. Open a skill folder from the managed checkout to begin working.';
+          break;
+        }
+        case 'openRepositorySkill': {
+          this.refreshConnection();
+          const connection = this.state.connection;
+          if (!connection) throw new Error('Connect a repository before opening its skills.');
+          const checkout = managedRepositoryPath(this.workspace(), connection.repository);
+          if (!fs.existsSync(path.join(checkout, '.git'))) throw new Error('Use Git pull to download the registered repository first.');
+          const folder = await this.hooks.pickFolder?.(checkout);
+          if (folder) {
+            this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }));
+          }
+          break;
+        }
         case 'discoverRepositories':
           this.state.busy = true; this.progress('Finding repositories you can connect…');
           this.state.repositories = await listRepositoryChoices(this.workspace()); break;
@@ -225,18 +246,18 @@ export class GuidedWorkbenchController {
         }
         case 'openPackage': {
           const file = await this.hooks.pickPackage?.();
-          if (file) { this.progress('Opening and checking the selected skill package…'); this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file })); }
+          if (file) { this.progress('Opening and checking the selected skill package…'); this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file, replaceExisting: true })); }
           else this.state.notice = 'Opening canceled. No package was imported.';
           break;
         }
         case 'openPackagePath': {
           const file = string('path').trim();
           if (!file || !path.isAbsolute(file) || path.extname(file).toLowerCase() !== '.skill') throw new Error('Enter the full path to a .skill package.');
-          this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file })); break;
+          this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file, replaceExisting: true })); break;
         }
         case 'openFolder': {
           const folder = await this.hooks.pickFolder?.();
-          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder })); }
+          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true })); }
           else this.state.notice = 'Opening canceled. No folder was imported.';
           break;
         }
@@ -325,12 +346,11 @@ export class GuidedWorkbenchController {
             this.state.step = 'publish';
             const skill = this.active();
             const existing = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: skill.name })).find(item => item.version === version);
-            let release;
-            if (existing) {
-              release = await runWorkbenchJob({ kind: 'verifyRelease', directory: existing.directory });
-              if (JSON.stringify(release.manifest.files) !== currentInventory) throw new Error('This release number already preserves different files. Leave the advanced number blank to let SkillJetty choose the next one.');
-              if (fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim()) throw new Error('This saved release has different notes. It is preserved unchanged; choose a new release number to save different notes.');
-            } else release = await runWorkbenchJob({ kind: 'prepareRelease', root: this.workspace(), id: skill.id, version, changelog });
+            let release = existing ? await runWorkbenchJob({ kind: 'verifyRelease', directory: existing.directory }) : undefined;
+            if (!release || JSON.stringify(release.manifest.files) !== currentInventory
+                || fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim()) {
+              release = await runWorkbenchJob({ kind: 'prepareRelease', root: this.workspace(), id: skill.id, version, changelog, replaceExisting: true });
+            }
             if (JSON.stringify(release.manifest.files) !== currentInventory) throw new Error('The draft changed while the local package was being prepared. The prepared package is preserved, but it has not been accepted as the reviewed release. Check the draft and review a fresh summary. Nothing was uploaded.');
             this.state.receipt = { name: skill.name, version, directory: release.directory, packagePath: release.packagePath, local: true,
               note: 'Package saved on this computer. No repository was contacted and nothing was uploaded. Your editable draft and earlier edits are retained.' };
@@ -425,7 +445,7 @@ export class GuidedWorkbenchController {
     } finally {
       if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
       this.state.busy = false; this.state.progress = undefined; this.state.waitingForInput = false;
-      if (this.state.skillsLoaded && ['createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action)) this.state.skillsStale = true;
+      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action)) this.state.skillsStale = true;
     }
     return this.state;
   }

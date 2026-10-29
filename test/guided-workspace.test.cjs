@@ -121,14 +121,19 @@ test('changed remote HEAD fails before publication without deleting draft, sourc
   assert.equal(git(f.remote, 'for-each-ref', '--format=%(refname)', 'refs/heads/skills/').trim(), '');
 });
 
-test('prepared version conflicts retain immutable snapshot and never silently publish new files or ignore edited notes', async t => {
+test('chosen version replaces prepared files and notes and can overwrite its uploaded Git folder', async t => {
   const f = fixture(t);
   await guided.connectWorkspaceRepository(f.root, f.remote);
-  const prepared = core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Initial version.');
-  await assert.rejects(guided.publishGuidedSkill(f.root, f.skill.id, '1.0.0', 'Different notes.'), /different change notes/);
-  guided.writeGuidedFile(f.skill, 'SKILL.md', guided.readGuidedFile(f.skill, 'SKILL.md') + '\nNew unpublished detail.\n');
-  await assert.rejects(guided.publishGuidedSkill(f.root, f.skill.id, '1.0.0', 'Initial version.'), /different files/);
-  assert.ok(fs.existsSync(f.skill.sourcePath)); core.verifySkillRelease(prepared.directory);
+  core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Initial version.');
+  const first = await guided.publishGuidedSkill(f.root, f.skill.id, '1.0.0', 'Different notes.', undefined, { deferCleanup: true });
+  assert.equal(fs.readFileSync(path.join(first.release.directory, 'CHANGELOG.md'), 'utf8').trim(), 'Different notes.');
+  guided.writeGuidedFile(f.skill, 'SKILL.md', guided.readGuidedFile(f.skill, 'SKILL.md') + '\nReplacement detail.\n');
+  const second = await guided.publishGuidedSkill(f.root, f.skill.id, '1.0.0', 'Replace same version.', undefined, { deferCleanup: true });
+  assert.equal(second.release.version, '1.0.0');
+  assert.notEqual(second.publication.commit, first.publication.commit);
+  assert.equal(library.listLibraryReleases(f.root)[0].commit, second.publication.commit);
+  assert.match(git(f.remote, 'show', `${second.publication.commit}:meeting-notes/1.0.0/source/meeting-notes/SKILL.md`), /Replacement detail/);
+  assert.ok(fs.existsSync(f.skill.sourcePath));
 });
 
 test('retry after a recorded upload verifies remote commit and finishes local completion without another push', async t => {

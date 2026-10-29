@@ -8,9 +8,9 @@ export type WorkbenchJob =
   | { kind: 'library'; root: string; skillName?: string }
   | { kind: 'reviews'; root: string }
   | { kind: 'validate'; skill: WorkbenchSkill }
-  | { kind: 'importPackage'; root: string; file: string }
-  | { kind: 'registerFolder'; root: string; folder: string }
-  | { kind: 'prepareRelease'; root: string; id: string; version: string; changelog: string }
+  | { kind: 'importPackage'; root: string; file: string; replaceExisting?: boolean }
+  | { kind: 'registerFolder'; root: string; folder: string; replaceExisting?: boolean }
+  | { kind: 'prepareRelease'; root: string; id: string; version: string; changelog: string; replaceExisting?: boolean }
   | { kind: 'restoreRelease'; root: string; directory: string }
   | { kind: 'verifyRelease'; directory: string }
   | { kind: 'snapshot'; root: string; skill: WorkbenchSkill };

@@ -306,3 +306,45 @@ test('folded description validates trimmed 1024 characters while preserving exac
   assert.throws(() => wb.importSkillPackage(input(temp, tooLong), rejectedWorkspace), /at most 1024/);
   assert.equal(fs.existsSync(path.join(rejectedWorkspace, 'skills')), false);
 });
+
+
+test('explicit replacement keeps the selected version, removes obsolete files and preserves recovery copies', t => {
+  const { temp, workspace } = fixture(t);
+  const file = input(temp, archive({ 'nested-tool/old.txt': 'old' }));
+  const first = wb.importSkillPackage(file, workspace);
+  const original = fs.readFileSync(first.originalPackagePath);
+  wb.updateSkillRepository(workspace, first.id, 'https://github.com/example/skills.git', 'main');
+  const old = wb.prepareSkillRelease(workspace, first.id, '2.0.0', 'Old release');
+  const oldPackage = fs.readFileSync(old.packagePath);
+  input(temp, archive({ 'nested-tool/new.bin': Buffer.from([0, 255]) }));
+  const second = wb.importSkillPackage(file, workspace, true);
+  assert.equal(second.repository, 'https://github.com/example/skills.git');
+  assert.equal(fs.existsSync(path.join(second.sourcePath, 'old.txt')), false);
+  assert.deepEqual(fs.readFileSync(path.join(second.sourcePath, 'new.bin')), Buffer.from([0, 255]));
+  assert.deepEqual(fs.readFileSync(first.originalPackagePath), original);
+  const updated = wb.prepareSkillRelease(workspace, second.id, '2.0.0', 'Replacement', true);
+  assert.equal(updated.version, '2.0.0');
+  assert.equal(wb.listSkillReleases(workspace, second.id).length, 1);
+  const backups = path.join(workspace, '.skill-workbench/replaced');
+  const saved = fs.readdirSync(backups, { recursive: true }).map(file => path.join(backups, file));
+  assert.ok(saved.some(file => file.endsWith('old.txt')));
+  assert.ok(saved.some(file => file.endsWith('nested-tool-2.0.0.skill') && fs.readFileSync(file).equals(oldPackage)));
+});
+
+
+test('failed replacement registration restores the prior draft and catalog', t => {
+  const { temp, workspace } = fixture(t);
+  const file = input(temp, archive({ 'nested-tool/old.txt': 'recover me' }));
+  const first = wb.importSkillPackage(file, workspace);
+  input(temp, archive({ 'nested-tool/new.txt': 'replacement' }));
+  const rename = fs.renameSync;
+  fs.renameSync = function (from, to) {
+    if (path.basename(to) === 'catalog.json') throw new Error('Catalog failure');
+    return rename.apply(this, arguments);
+  };
+  try { assert.throws(() => wb.importSkillPackage(file, workspace, true), /Catalog failure/); }
+  finally { fs.renameSync = rename; }
+  assert.deepEqual(wb.listWorkbenchSkills(workspace), [first]);
+  assert.equal(fs.readFileSync(path.join(first.sourcePath, 'old.txt'), 'utf8'), 'recover me');
+  assert.equal(fs.existsSync(path.join(first.sourcePath, 'new.txt')), false);
+});
