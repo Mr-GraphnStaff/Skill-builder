@@ -133,7 +133,7 @@ test('an empty history explains how to reveal edits saved without leaving the ed
 test('saved releases invite improving the skill while preserving earlier releases', () => {
   const html = renderGuidedWorkbench(state({ step: 'start', skillsLoaded: true, library: [{ skillName: 'sample', version: '2.13.0', directory: 'releases/sample/2.13.0', status: 'uploaded' }] }), nonce);
   assert.match(html, /Saved releases/);
-  assert.match(html, /Earlier releases stay unchanged/);
+  assert.match(html, /recovery copies preserve earlier contents/);
   assert.match(html, /Improve sample from 2\.13\.0/);
   assert.match(html, /You control the next release number/);
 });
