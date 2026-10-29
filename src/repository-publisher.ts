@@ -102,7 +102,7 @@ export type PublishPreview = {
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', ...args], {
+    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', ...args], {
       cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
     return result.stdout;
