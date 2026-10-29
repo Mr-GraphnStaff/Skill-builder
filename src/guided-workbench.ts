@@ -48,6 +48,11 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     const activeController = controller;
     const started = Date.now();
     const memoryBefore = process.memoryUsage();
+    const heartbeat = message.action === 'save' ? undefined : setInterval(() => {
+      if (panel === activePanel && controller === activeController) {
+        void activePanel.webview.postMessage({ type: 'heartbeat' }).then(() => undefined, () => undefined);
+      }
+    }, 2000);
     try {
       if (message.action !== 'save') {
         await activePanel.webview.postMessage({ type: 'progress', message: activityForAction(message.action), waitingForInput: actionNeedsInput(message.action) });
@@ -58,6 +63,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       if (panel !== activePanel || controller !== activeController) return;
       await activeController.dispatch(message);
     } catch (error) { activeController.state.error = error instanceof Error ? error.message : String(error); }
+    finally { clearInterval(heartbeat); }
     const elapsed = Date.now() - started;
     // No skill names, contents, file paths, repository URLs or credentials.
     const memoryAfter = process.memoryUsage();
@@ -66,7 +72,9 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     if (message.action === 'save') {
       await activePanel.webview.postMessage({ type: 'saved', notice: activeController.state.notice, error: activeController.state.error });
     } else {
-      await activePanel.webview.postMessage({ type: 'operationComplete', error: activeController.state.error });
+      const completion = activeController.state.error ? 'Needs attention. See the details below.' : `Finished in ${(elapsed / 1000).toFixed(1)} seconds.`;
+      activeController.state.progress = completion;
+      await activePanel.webview.postMessage({ type: 'operationComplete', error: activeController.state.error, message: completion });
       render();
     }
   };

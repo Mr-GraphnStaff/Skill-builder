@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.5 (public pre-release)
+
+- Show immediate action feedback, the current operation stage and elapsed time in the workbench.
+- Monitor extension responses and explain when an operation may be stalled without claiming task completion or allowing duplicate submissions.
+- Retain completion timing and actionable errors; distinguish waiting for a VS Code dialog from processing.
+- Record action timings without skill contents, paths or credentials.
+
 ## 0.11.4 (public pre-release preparation)
 
 - Prepare the existing `DavidFarris.skill-builder` Marketplace identity with production command, setting and view names, preserving the established listing and icon.

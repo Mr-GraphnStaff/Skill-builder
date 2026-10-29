@@ -103,6 +103,20 @@ test('autosave receives only its acknowledgement and keeps the rendered editor i
   assert.equal(panel.messages[0].notice, 'Saved locally.');
 });
 
+test('host sends real responses during pending work and stops after completion', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const f = fixture(), panel = await f.open(), entered = deferred(), release = deferred();
+  f.dispatchHooks.set('check', async () => { entered.resolve(); await release.promise; });
+  const operation = panel.receive({ action: 'check' }); await entered.promise;
+  t.mock.timers.tick(2000);
+  assert(panel.messages.some(message => message.type === 'heartbeat'));
+  release.resolve(); await operation;
+  const count = panel.messages.length;
+  t.mock.timers.tick(4000);
+  assert.equal(panel.messages.length, count);
+  assert.match(panel.html, /Finished in [\d.]+ seconds/);
+});
+
 test('host separates waiting for input from processing and records bounded memory diagnostics', async () => {
   const f = fixture(), panel = await f.open();
   panel.messages.length = 0;

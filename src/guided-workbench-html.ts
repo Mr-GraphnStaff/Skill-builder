@@ -292,6 +292,10 @@ const script = `
   let actionPending = main.dataset.busy === 'true';
   let activityTimer;
   let activityMessage = '';
+  let activityStarted;
+  let lastHostResponse;
+  let activityTick;
+  const activityDetails = document.getElementById('activity-details');
   const activityStatus = document.getElementById('operation-status');
   const activityIndicator = document.getElementById('operation-indicator');
   const activityOutput = document.getElementById('progress-message');
@@ -383,6 +387,19 @@ const script = `
     clearTimeout(activityTimer);
     activityTimer = undefined;
     activityMessage = message;
+    if (activityStarted === undefined) activityStarted = Date.now();
+    clearTimeout(activityTick);
+    function tick() {
+      const elapsed = Math.floor((Date.now() - activityStarted) / 1000);
+      const age = lastHostResponse === undefined ? elapsed : Math.floor((Date.now() - lastHostResponse) / 1000);
+      const response = age >= 10 ? 'No extension response for ' + age + 's. The operation may be stalled; completion is unconfirmed. Do not resubmit.'
+        : lastHostResponse === undefined ? 'Waiting for the extension to respond.' : 'Extension responding. Task completion is still pending.';
+      if (activityDetails) activityDetails.textContent = elapsed + 's elapsed · ' + (waitingForInput ? 'Waiting for your selection in VS Code.' : response);
+      activityTick = setTimeout(tick, 1000);
+    }
+    // Human dialogs do not need a processing timer or a stale-response warning.
+    if (waitingForInput) { if (activityDetails) activityDetails.textContent = 'Waiting for your selection in VS Code.'; }
+    else tick();
     if (activityOutput) activityOutput.textContent = message;
     if (activityStatus) { activityStatus.dataset.working = String(!waitingForInput); activityStatus.dataset.waitingForInput = String(waitingForInput); }
     if (activityIndicator) activityIndicator.hidden = waitingForInput;
@@ -392,6 +409,10 @@ const script = `
     }, 8000);
   }
   function finishActivity(message = 'Ready.') {
+    clearTimeout(activityTick);
+    activityStarted = undefined;
+    lastHostResponse = undefined;
+    if (activityDetails) activityDetails.textContent = '';
     clearTimeout(activityTimer);
     activityTimer = undefined;
     activityMessage = '';
@@ -478,8 +499,10 @@ const script = `
   window.addEventListener('message', event => {
     const message = event.data || {};
     if (message.type === 'progress') {
+      lastHostResponse = Date.now();
       if (message.message) beginActivity(String(message.message), message.waitingForInput === true);
     }
+    if (message.type === 'heartbeat' && actionPending) lastHostResponse = Date.now();
     if (message.type === 'operationComplete') {
       lockActions(false);
       finishActivity(message.error ? 'Needs attention. Your work is kept on this screen.' : String(message.message || 'Ready.'));
@@ -525,7 +548,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
   const primary = screen.primary;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>${escape(screen.title)} | ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}</style></head><body>
     <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell"><header>${brandHeader(brand)}${gitHubAccount(state)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
-    <div id="operation-status" class="activity-status" role="status" aria-live="polite" aria-atomic="true" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><span id="progress-message">${escape(state.progress ?? '')}</span></div>
+    <div id="operation-status" class="activity-status" role="status" aria-live="polite" aria-atomic="true" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div>
     <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-waiting-for-input="${!!state.waitingForInput}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>
       <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="client-error" class="error-message" hidden></p></div>

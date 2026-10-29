@@ -17,7 +17,7 @@ function harness(overrides = {}) {
   }
   const main = element('main-content', { dataset: { step: 'edit', activeId: 'sample', busy: String(!!state.busy), waitingForInput: String(!!state.waitingForInput) } });
   const editor = element('editorContent', { dataset: { editorPath: 'SKILL.md' }, readOnly: false });
-  element('operation-status'); element('operation-indicator', { hidden: true }); element('progress-message');
+  element('operation-status'); element('operation-indicator', { hidden: true }); element('progress-message'); element('activity-details');
   for (const id of ['client-error', 'save-status', 'retry-save', 'reload-file', 'stepHeading', 'feedback']) element(id);
   const buttons = [element('check-button'), element('permanently-unavailable', { dataset: { unavailable: 'true' }, disabled: true })];
   const input = element('optional-note'), unavailable = element('unavailable-input', { disabled: true });
@@ -27,10 +27,12 @@ function harness(overrides = {}) {
     addEventListener: (name, handler) => { if (name === 'submit') formSubmit = handler; } };
   const handlers = new Map(), windowHandlers = new Map(), timers = new Map(), posted = [];
   let timerId = 0;
+  let now = 0;
   const document = { activeElement: editor, getElementById: id => elements.get(id) ?? null,
     querySelectorAll: selector => selector === 'button' ? buttons : selector === 'input,select,textarea' ? [editor, input, unavailable] : selector === 'form[data-form-action]' ? [pathForm] : [], querySelector: () => null,
     addEventListener: (name, handler) => handlers.set(name, handler) };
   const context = { document, window: { addEventListener: (name, handler) => windowHandlers.set(name, handler) },
+    Date: { now: () => now },
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
     clearTimeout: id => timers.delete(id), acquireVsCodeApi: () => ({ getState: () => ({ step: 'edit', activeId: 'sample' }), setState() {},
       postMessage(message) { posted.push({ message, label: elements.get('progress-message').textContent, spinning: !elements.get('operation-indicator').hidden }); } }) };
@@ -38,7 +40,7 @@ function harness(overrides = {}) {
   const click = action => handlers.get('click')({ preventDefault() {}, target: { closest: () => ({ dataset: { action } }) } });
   const receive = message => windowHandlers.get('message')({ data: message });
   const fire = delay => { const entry = [...timers].find(([, timer]) => timer.delay === delay); assert(entry, `missing ${delay}ms timer`); timers.delete(entry[0]); entry[1].callback(); };
-  return { html, main, editor, elements, buttons, posted, timers, click, receive, fire, submitPath: () => formSubmit({ preventDefault() {} }) };
+  return { html, main, editor, elements, buttons, posted, timers, click, receive, fire, advance: ms => { now += ms; }, submitPath: () => formSubmit({ preventDefault() {} }) };
 }
 
 test('startup sends no automatic skill load and explicit load shows immediate activity', () => {
@@ -112,7 +114,7 @@ test('selected input starts the processing indicator and slow timer only after t
 
 test('an explicit human-input phase stops an already-running processing delay without interpreting copy', () => {
   const h = harness(); h.click('check');
-  assert.equal(h.timers.size, 1);
+  assert.equal(h.timers.size, 2);
   h.receive({ type: 'progress', message: 'A decision is needed.', waitingForInput: true });
   assert.equal(h.elements.get('operation-indicator').hidden, true);
   assert.equal(h.timers.size, 0);
@@ -179,4 +181,20 @@ test('activity status sits outside the busy region and supports reduced motion a
   assert.doesNotMatch(status, /<progress[^>]*\bvalue=/);
   assert.match(h.html, /prefers-reduced-motion: reduce\) \{ \.activity-indicator \{ animation: none/);
   assert.match(h.html, /forced-colors: active\) \{ \.activity-status/);
+});
+
+test('elapsed time survives stage updates and host silence is distinguished from task progress', () => {
+  const h = harness(); h.click('check');
+  h.advance(4000); h.receive({ type: 'progress', message: 'Checking compatibility…' });
+  h.advance(2000); h.receive({ type: 'heartbeat' }); h.fire(1000);
+  assert.match(h.elements.get('activity-details').textContent, /6s elapsed.*Extension responding/);
+  h.advance(11000); h.fire(1000);
+  assert.match(h.elements.get('activity-details').textContent, /17s elapsed.*No extension response for 11s.*may be stalled/);
+  assert.equal(h.buttons[0].disabled, true, 'silence must not unlock a duplicate write');
+  h.receive({ type: 'heartbeat' }); h.fire(1000);
+  assert.match(h.elements.get('activity-details').textContent, /Extension responding.*completion is still pending/);
+  h.receive({ type: 'operationComplete', message: 'Finished in 17.0 seconds.' });
+  assert.equal(h.elements.get('progress-message').textContent, 'Finished in 17.0 seconds.');
+  assert.equal(h.elements.get('activity-details').textContent, '');
+  assert.equal(h.timers.size, 0);
 });
