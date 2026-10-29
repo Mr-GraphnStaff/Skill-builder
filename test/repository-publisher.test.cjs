@@ -166,6 +166,9 @@ test('temporary checkout cleanup cannot turn verified local push into failure', 
 
 test('overwrites the same Git version on the latest registered branches and preserves unrelated files and history', async () => {
   const f = fixture(); let first, next;
+  const identityKeys = ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'];
+  const oldIdentity = Object.fromEntries(identityKeys.map(key => [key, process.env[key]]));
+  for (const key of identityKeys) process.env[key] = key.endsWith('EMAIL') ? 'qa@example.invalid' : 'SkillJetty Local QA';
   try {
     first = await prepareRepositoryPublish(f.release, f.remote);
     git(first.checkoutPath, 'config', 'user.name', 'Workbench Test');
@@ -190,6 +193,7 @@ test('overwrites the same Git version on the latest registered branches and pres
     git(f.remote, 'merge-base', '--is-ancestor', original.commit, replaced.commit);
     assert.equal(git(f.remote, 'show', `${replaced.commit}:sample/1.0.0/source/sample/new.txt`), 'Selected replacement');
   } finally {
+    for (const key of identityKeys) { if (oldIdentity[key] === undefined) delete process.env[key]; else process.env[key] = oldIdentity[key]; }
     if (first) await disposePublishPreview(first);
     if (next) await disposePublishPreview(next);
     fs.rmSync(f.root, { recursive: true, force: true });
