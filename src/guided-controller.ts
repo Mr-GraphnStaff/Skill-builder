@@ -7,6 +7,7 @@ import { connectWorkspaceRepository, getWorkspaceConnection, migrateAssociation,
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
 import { checkSkillCompatibility } from './skill-compatibility.js';
 import { GuidedState, GuidedMessage, SkillTarget } from './guided-contract.js';
+import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export type GuidedHooks = {
   pickPackage?(): Promise<string | undefined>;
@@ -103,7 +104,7 @@ export class GuidedWorkbenchController {
     this.state.step = 'check';
     return result.valid;
   }
-  private progress(message: string) { this.state.progress = message; this.hooks.onState?.(this.state); }
+  private progress(message: string, waitingForInput = false) { this.state.progress = message; this.state.waitingForInput = waitingForInput; this.hooks.onState?.(this.state); }
   dispatch(message: GuidedMessage): Promise<GuidedState> {
     // Pickers and network calls can yield while another message arrives. Keep
     // their complete transitions ordered instead of changing the active skill
@@ -119,6 +120,11 @@ export class GuidedWorkbenchController {
     const string = (key: string, fallback = '') => typeof payload[key] === 'string' ? payload[key] as string : fallback;
     this.state.error = undefined; this.state.notice = undefined;
     try {
+      if (message.action !== 'save' && message.action !== 'ready') {
+        this.state.busy = true;
+        this.progress(activityForAction(message.action), actionNeedsInput(message.action));
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
       if (message.action !== 'reloadFile') this.buffer(message);
       this.state.form = Object.fromEntries(Object.entries(payload).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
       switch (message.action) {
@@ -131,7 +137,7 @@ export class GuidedWorkbenchController {
           break;
         }
         case 'chooseWorkspace': {
-          const root = await this.hooks.chooseWorkspace?.(); if (root) { this.root = root; this.refresh(); }
+          const root = await this.hooks.chooseWorkspace?.(); if (root) { this.progress('Opening your selected work folder…'); await new Promise<void>(resolve => setImmediate(resolve)); this.root = root; this.refresh(); }
           break;
         }
         case 'discoverRepositories':
@@ -157,10 +163,10 @@ export class GuidedWorkbenchController {
           this.select(skill); break;
         }
         case 'openPackage': {
-          const file = await this.hooks.pickPackage?.(); if (file) this.select(importSkillPackage(file, this.workspace())); break;
+          const file = await this.hooks.pickPackage?.(); if (file) { this.progress('Opening and checking the selected skill package…'); await new Promise<void>(resolve => setImmediate(resolve)); this.select(importSkillPackage(file, this.workspace())); } break;
         }
         case 'openFolder': {
-          const folder = await this.hooks.pickFolder?.(); if (folder) this.select(registerSkillFolder(this.workspace(), folder)); break;
+          const folder = await this.hooks.pickFolder?.(); if (folder) { this.progress('Copying the selected skill folder…'); await new Promise<void>(resolve => setImmediate(resolve)); this.select(registerSkillFolder(this.workspace(), folder)); } break;
         }
         case 'resume': {
           const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === string('id'));
@@ -183,6 +189,7 @@ export class GuidedWorkbenchController {
         }
         case 'addFile': {
           const file = await this.hooks.pickFile?.(); if (!file) break;
+          this.progress('Adding the selected supporting file…'); await new Promise<void>(resolve => setImmediate(resolve));
           const relative = string('path', `references/${path.basename(file)}`);
           const skill = this.active();
           copyGuidedFile(skill, relative, file);
@@ -257,7 +264,7 @@ export class GuidedWorkbenchController {
           break;
         }
         case 'connectGitHub': {
-          this.state.busy = true; this.progress('Choose your GitHub account in VS Code. Cancelling keeps your draft unchanged.');
+          this.state.busy = true; this.progress('Choose your GitHub account in VS Code. Cancelling keeps your draft unchanged.', true);
           this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
           const account = await this.hooks.connectGitHub?.();
           if (!account) throw new Error('GitHub sign-in was cancelled. No upload or review request was made.');
@@ -305,7 +312,7 @@ export class GuidedWorkbenchController {
       this.state.error = friendlyError(detail);
     } finally {
       if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
-      this.state.busy = false; this.state.progress = undefined;
+      this.state.busy = false; this.state.progress = undefined; this.state.waitingForInput = false;
       try { this.refresh(); } catch { this.state.error ??= 'Saved work could not be listed. Keep the workspace and try reopening the workbench.'; }
     }
     return this.state;

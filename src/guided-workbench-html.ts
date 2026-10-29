@@ -216,6 +216,7 @@ function done(state: GuidedState): { title: string; hint: string; html: string; 
 }
 
 const styles = `
+  .activity-status { position: sticky; inset-block-start: 0; z-index: 3; display: flex; align-items: center; gap: .7rem; min-block-size: 3rem; padding: .6rem .8rem; margin-block: -.5rem 1rem; border: 1px solid transparent; border-radius: .35rem; background: var(--vscode-editor-background, Canvas); overflow-wrap: anywhere; } .activity-status[data-working="true"] { border-color: var(--vscode-focusBorder, Highlight); } .activity-indicator { flex: none; appearance: none; inline-size: 1.15rem; block-size: 1.15rem; border: .16rem solid var(--vscode-panel-border, GrayText); border-block-start-color: var(--vscode-focusBorder, Highlight); border-radius: 50%; background: transparent; animation: activity-spin 1s linear infinite; } .activity-indicator::-webkit-progress-bar { display: none; } .activity-indicator::-webkit-progress-value { display: none; } .activity-indicator::-moz-progress-bar { display: none; } @keyframes activity-spin { to { transform: rotate(1turn); } } @media (prefers-reduced-motion: reduce) { .activity-indicator { animation: none; border-style: dotted; } } @media (forced-colors: active) { .activity-status[data-working="true"] { border-color: Highlight; } .activity-indicator { border-color: CanvasText; border-block-start-color: Highlight; } }
   html { scroll-padding-block-end: 7rem; } :where(button, a, input, select, textarea, summary) { scroll-margin-block: 1rem 7rem; }
   :root { color-scheme: light dark; font-family: var(--vscode-font-family, system-ui, sans-serif); color: var(--vscode-editor-foreground, CanvasText); background: var(--vscode-editor-background, Canvas); font-size: var(--vscode-font-size, 14px); line-height: 1.55; }
   * { box-sizing: border-box; } body { margin: 0; } button, input, select, textarea { font: inherit; } button, input, select { min-block-size: 2.6rem; } button { cursor: pointer; border: 1px solid var(--vscode-contrastBorder, var(--vscode-button-border, transparent)); border-radius: .35rem; padding: .6rem .95rem; } button:disabled { cursor: wait; opacity: .65; } input, select, textarea { inline-size: 100%; padding: .65rem .75rem; color: var(--vscode-input-foreground, CanvasText); background: var(--vscode-input-background, Canvas); border: 1px solid var(--vscode-input-border, var(--vscode-panel-border, GrayText)); border-radius: .25rem; } textarea { resize: vertical; min-block-size: 6rem; } :where(button, a, input, select, textarea, summary):focus-visible { outline: 3px solid var(--vscode-focusBorder, Highlight); outline-offset: 3px; } input:user-invalid, textarea:user-invalid { border-color: var(--vscode-inputValidation-errorBorder, #be3f3f); } a { color: var(--vscode-textLink-foreground, LinkText); } a:hover { color: var(--vscode-textLink-activeForeground, LinkText); } h1 { font-size: clamp(1.6rem, 3vw, 2.15rem); line-height: 1.2; margin: .4rem 0 .75rem; font-weight: 650; letter-spacing: -.025em; } h2 { font-size: 1.12rem; line-height: 1.35; margin: 0 0 .75rem; } h3 { font-size: 1rem; margin-block: 1.2rem .6rem; } p { margin-block: .45rem .9rem; } [hidden] { display: none !important; }
@@ -248,6 +249,16 @@ const script = `
   let queuedAction;
   let lastSavedContent = '';
   let actionPending = main.dataset.busy === 'true';
+  let activityTimer;
+  let activityMessage = '';
+  let activityStarted;
+  let lastHostResponse;
+  let activityTick;
+  const activityDetails = document.getElementById('activity-details');
+  const activityStatus = document.getElementById('operation-status');
+  const activityIndicator = document.getElementById('operation-indicator');
+  const activityOutput = document.getElementById('progress-message');
+  const lockedControls = new Map();
   const editor = document.getElementById('editorContent');
   const hiddenBuffer = document.getElementById('bufferContent');
   // Assign source data before capturing the baseline; HTML parsing may have
@@ -303,18 +314,83 @@ const script = `
   function lockActions(locked) {
     actionPending = locked;
     document.querySelectorAll('button').forEach(button => { button.disabled = locked || button.dataset.unavailable === 'true'; });
+    if (locked) {
+      document.querySelectorAll('input,select,textarea').forEach(control => {
+        if (!lockedControls.has(control)) lockedControls.set(control, { disabled: control.disabled, readOnly: control.readOnly });
+        if (control === editor) control.readOnly = true;
+        else control.disabled = true;
+      });
+    } else {
+      lockedControls.forEach((original, control) => { control.disabled = original.disabled; if (original.readOnly !== undefined) control.readOnly = original.readOnly; });
+      lockedControls.clear();
+    }
     main.setAttribute('aria-busy', String(locked));
+  }
+  function actionMessage(action) {
+    return ({ ready: 'Opening your workbench…', refresh: 'Refreshing your saved work…', loadSkills: 'Loading and checking saved skills…', unloadSkills: 'Clearing the loaded skills list…', openPackagePath: 'Opening and checking the selected skill package…', chooseWorkspace: 'Choose a folder for your local work…',
+      openPackage: 'Choose a skill package to open…', openFolder: 'Choose a skill folder to open…', createSkill: 'Creating your draft…',
+      resume: 'Opening your draft…', restoreVersion: 'Preparing a draft from the saved release…', openFile: 'Opening the selected file…',
+      addFile: 'Choose a supporting file to add…', createFile: 'Creating the new file…', reloadFile: 'Loading the saved file…',
+      refreshHistory: 'Loading earlier edits…', restoreEdit: 'Restoring the selected edit…', check: 'Checking your skill files…',
+      preparePublish: 'Comparing files and preparing your sharing summary…', savePackage: 'Checking and saving your local package…',
+      publish: 'Preparing your submission…', revealPackage: 'Showing your saved package…', discoverRepositories: 'Finding your repositories…',
+      connectRepository: 'Checking the repository connection…', createRepository: 'Creating your repository…',
+      loadReviewers: 'Finding eligible reviewers…', connectGitHub: 'Waiting for your GitHub account selection in VS Code…',
+      checkPullRequests: 'Checking recorded pull requests…', checkPullRequest: 'Checking this pull request…',
+      createPullRequest: 'Finding or creating the pull request…', requestReviewer: 'Requesting the selected reviewer…',
+      openPullRequest: 'Opening the recorded pull request…', openLink: 'Opening the selected link…', setTarget: 'Updating compatibility guidance…',
+      showCreate: 'Opening a new skill draft…', edit: 'Returning to your draft…', back: 'Returning to the previous step…',
+      startAnother: 'Opening the start screen…' })[action] || 'Working on your request…';
+  }
+  function beginActivity(message, waitingForInput = false) {
+    clearTimeout(activityTimer);
+    activityTimer = undefined;
+    activityMessage = message;
+    if (activityStarted === undefined) activityStarted = Date.now();
+    clearTimeout(activityTick);
+    function tick() {
+      const elapsed = Math.floor((Date.now() - activityStarted) / 1000);
+      const age = lastHostResponse === undefined ? elapsed : Math.floor((Date.now() - lastHostResponse) / 1000);
+      const response = age >= 10 ? 'No extension response for ' + age + 's. The operation may be stalled; completion is unconfirmed. Do not resubmit.'
+        : lastHostResponse === undefined ? 'Waiting for the extension to respond.' : 'Extension responding. Task completion is still pending.';
+      if (activityDetails) activityDetails.textContent = elapsed + 's elapsed · ' + (waitingForInput ? 'Waiting for your selection in VS Code.' : response);
+      activityTick = setTimeout(tick, 1000);
+    }
+    // Human dialogs do not need a processing timer or a stale-response warning.
+    if (waitingForInput) { if (activityDetails) activityDetails.textContent = 'Waiting for your selection in VS Code.'; }
+    else tick();
+    if (activityOutput) activityOutput.textContent = message;
+    if (activityStatus) { activityStatus.dataset.working = String(!waitingForInput); activityStatus.dataset.waitingForInput = String(waitingForInput); }
+    if (activityIndicator) activityIndicator.hidden = waitingForInput;
+    if (waitingForInput) return;
+    activityTimer = setTimeout(() => {
+      if (activityOutput) activityOutput.textContent = activityMessage + ' Still waiting for this operation to finish. You do not need to click again.';
+    }, 8000);
+  }
+  function finishActivity(message = 'Ready.') {
+    clearTimeout(activityTick);
+    activityStarted = undefined;
+    lastHostResponse = undefined;
+    if (activityDetails) activityDetails.textContent = '';
+    clearTimeout(activityTimer);
+    activityTimer = undefined;
+    activityMessage = '';
+    if (activityOutput) activityOutput.textContent = message;
+    if (activityIndicator) activityIndicator.hidden = true;
+    if (activityStatus) activityStatus.dataset.working = 'false';
+    if (activityStatus) activityStatus.dataset.waitingForInput = 'false';
   }
   function post(action, payload = {}) {
     if (actionPending) return;
     persist();
+    const messageBuffer = action === 'reloadFile' ? {} : buffer();
     if (action === 'connectGitHub') {
       document.querySelectorAll('select[name="reviewer"]').forEach(element => { element.value = ''; });
       for (const key of Object.keys(saved.fields || {})) if (key.endsWith(':reviewer')) delete saved.fields[key];
       vscode.setState(saved);
     }
     clearTimeout(saveTimer);
-    if (action !== 'save' && savePending) { queuedAction = { action, payload }; lockActions(true); return; }
+    if (action !== 'save' && savePending) { queuedAction = { action, payload }; lockActions(true); beginActivity('Saving your current edit before continuing…'); return; }
     if (action === 'save') {
       if (!editor || editor.readOnly || savePending) return;
       savePending = true;
@@ -322,10 +398,11 @@ const script = `
       document.getElementById('save-status').textContent = 'Saving locally…';
     } else {
       lockActions(true);
+      beginActivity(actionMessage(action), ['chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action));
       if (action === 'startAnother') { saved = {}; vscode.setState(saved); }
     }
     if (action === 'reloadFile') { delete saved.editor; vscode.setState(saved); }
-    vscode.postMessage(Object.assign({ action, payload }, action === 'reloadFile' ? {} : buffer()));
+    vscode.postMessage(Object.assign({ action, payload }, messageBuffer));
   }
   function scheduleSave() {
     if (!editor || editor.readOnly || actionPending) return;
@@ -378,13 +455,25 @@ const script = `
   if (target) target.addEventListener('change', () => post('setTarget', { target: target.value }));
   window.addEventListener('message', event => {
     const message = event.data || {};
-    if (message.type === 'progress') { const output = document.getElementById('progress-message'); output.textContent = String(message.message || ''); output.hidden = !message.message; }
+    if (message.type === 'progress') {
+      lastHostResponse = Date.now();
+      if (message.message) beginActivity(String(message.message), message.waitingForInput === true);
+    }
+    if (message.type === 'heartbeat' && actionPending) lastHostResponse = Date.now();
+    if (message.type === 'operationComplete') {
+      lockActions(false);
+      finishActivity(message.error ? 'Needs attention. Your work is kept on this screen.' : String(message.message || 'Ready.'));
+      if (message.error) clientError(String(message.error));
+    }
     if (message.type === 'saved') {
       savePending = false;
       const status = document.getElementById('save-status');
       const retry = document.getElementById('retry-save');
       const reload = document.getElementById('reload-file');
-      if (message.error) { clientError(String(message.error)); if (status) status.textContent = 'Save failed — changes kept on this screen'; if (retry) retry.hidden = false; if (reload) reload.hidden = false; }
+      if (message.error) {
+        clientError(String(message.error)); if (status) status.textContent = 'Save failed — changes kept on this screen'; if (retry) retry.hidden = false; if (reload) reload.hidden = false;
+        queuedAction = undefined; lockActions(false); finishActivity('Save needs attention. Retry saving before continuing.');
+      }
       else {
         const current = editor ? editor.value : '';
         if (status) status.textContent = current === lastSavedContent ? 'Saved locally' : 'Unsaved changes';
@@ -393,11 +482,11 @@ const script = `
         if (current !== lastSavedContent) scheduleSave();
       }
       persist();
-      if (queuedAction) { const next = queuedAction; queuedAction = undefined; lockActions(false); post(next.action, next.payload); }
+      if (queuedAction && !message.error) { const next = queuedAction; queuedAction = undefined; lockActions(false); finishActivity(); post(next.action, next.payload); }
     }
   });
   updateRepositoryCreateLabel();
-  if (actionPending) { lockActions(true); document.querySelectorAll('input,select,textarea').forEach(element => { element.disabled = true; }); }
+  if (actionPending) { lockActions(true); beginActivity(activityOutput?.textContent || 'Working on your request…', main.dataset.waitingForInput === 'true'); }
   const previousStep = saved.step;
   const previousActive = saved.activeId;
   if (main.dataset.hasError === 'true') document.getElementById('feedback').focus();
@@ -416,9 +505,10 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
   const primary = screen.primary;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>${escape(screen.title)} | ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}</style></head><body>
     <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell"><header>${brandHeader(brand)}${gitHubAccount(state)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
+    <div id="operation-status" class="activity-status" role="status" aria-live="polite" aria-atomic="true" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div>
     <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>
-      <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="progress-message" ${!state.progress ? 'hidden' : ''}>${escape(state.progress ?? '')}</p><p id="client-error" class="error-message" hidden></p></div>
+      <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="client-error" class="error-message" hidden></p></div>
       ${screen.html}
       ${state.step !== 'edit' && state.editor ? `<textarea id="bufferContent" hidden data-editor-path="${escape(state.editor.path)}" ${state.editor.readOnly ? 'readonly data-read-only="true"' : ''}>${escape(state.editor.content)}</textarea>` : ''}
       ${primary ? `<footer class="action-bar"><button type="button" class="secondary" data-action="back" ${backDisabled ? 'disabled data-unavailable="true"' : ''}>← Back</button><button id="primary-action" class="primary" type="${primary.form ? 'submit' : 'button'}" ${primary.form ? `form="${primary.form}"` : `data-action="${primary.action}"`} ${state.busy || primary.disabled ? 'disabled' : ''} ${primary.disabled ? 'data-unavailable="true"' : ''}>${state.busy ? 'Working…' : escape(primary.label)} <span aria-hidden="true">→</span></button></footer>` : ''}

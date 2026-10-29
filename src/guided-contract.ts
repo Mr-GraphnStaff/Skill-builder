@@ -13,6 +13,7 @@ export type GuidedReviewItem = { directory: string; skillName: string; version: 
 export type GuidedState = {
   step: GuidedStep;
   busy?: boolean;
+  waitingForInput?: boolean;
   progress?: string;
   error?: string;
   notice?: string;

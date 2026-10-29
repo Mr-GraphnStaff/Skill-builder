@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.1
+
+- Show immediate action feedback, the current operation stage and elapsed time in the workbench.
+- Monitor extension responses and explain when an operation may be stalled without claiming task completion or allowing duplicate submissions.
+- Retain completion timing and actionable errors; distinguish waiting for a VS Code dialog from processing.
+- Record action timings without skill contents, paths or credentials.
+
 ## 0.9.0
 
 - Extend GitHub.com submission from branch upload to pull request creation, with recovery that reuses matching PRs instead of creating duplicates.
