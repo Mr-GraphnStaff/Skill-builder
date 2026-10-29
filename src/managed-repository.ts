@@ -36,7 +36,7 @@ export async function pullManagedRepository(root: string, repository: string, pr
     try {
       await git(parent, ['clone', '--no-checkout', '--no-hardlinks', `--template=${template}`, '--single-branch', '--branch', branch, '--', repository, staging]);
       await fs.mkdir(path.join(staging, '.git', 'info'), { recursive: true });
-      await fs.writeFile(path.join(staging, '.git', 'info', 'attributes'), '* -text -filter -ident -working-tree-encoding\n');
+      await fs.writeFile(path.join(staging, '.git', 'info', 'attributes'), '* merge -text -filter -ident -working-tree-encoding\n');
       await git(staging, ['reset', '--hard', 'HEAD']);
       await fs.rename(staging, checkout);
     } catch (error) {
@@ -50,7 +50,7 @@ export async function pullManagedRepository(root: string, repository: string, pr
   if (path.relative(checkout, (await git(checkout, ['rev-parse', '--show-toplevel'])).trim()) !== '') throw new Error('The managed repository identity changed.');
   if ((await git(checkout, ['remote', 'get-url', 'origin'])).trim() !== repository) throw new Error('The managed checkout points to a different repository. Reconnect the intended repository.');
   if ((await git(checkout, ['branch', '--show-current'])).trim() !== branch) throw new Error('The managed checkout is on a different branch. Preserve your changes and switch to the repository default branch before pulling.');
-  if ((await git(checkout, ['status', '--porcelain', '--untracked-files=all'])).trim()) throw new Error('The managed checkout has local changes. Save or commit them before Git pull; your files were kept.');
+  if ((await git(checkout, ['status', '--porcelain', '--untracked-files=all', '--ignored'])).trim()) throw new Error('The managed checkout has local changes or ignored files. Preserve, commit or move them before Git pull; your files were kept.');
   progress?.('Pulling the latest registered repository changes…');
   await git(checkout, ['pull', '--ff-only', '--no-tags', 'origin', branch]);
   return { path: checkout, branch, commit: (await git(checkout, ['rev-parse', 'HEAD'])).trim() };

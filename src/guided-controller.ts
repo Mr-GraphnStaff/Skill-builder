@@ -170,6 +170,7 @@ export class GuidedWorkbenchController {
   private async execute(message: GuidedMessage): Promise<GuidedState> {
     if (this.state.busy) return this.state;
     const payload = message.payload ?? {};
+    const previousForm = this.state.form;
     const reviewMode = this.state.form?.mode === 'reviews';
     const string = (key: string, fallback = '') => typeof payload[key] === 'string' ? payload[key] as string : fallback;
     this.state.error = undefined; this.state.notice = undefined;
@@ -219,7 +220,7 @@ export class GuidedWorkbenchController {
           const folder = await this.hooks.pickFolder?.(checkout);
           if (folder) {
             this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }));
-          }
+          } else { this.state.form = previousForm; this.state.notice = 'Opening canceled. Your current work is retained.'; }
           break;
         }
         case 'discoverRepositories':

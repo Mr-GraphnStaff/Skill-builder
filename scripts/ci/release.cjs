@@ -99,6 +99,15 @@ function marketplaceVersions(metadata) {
   assert(versions.every(version => typeof version === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)), 'Marketplace version response contains invalid versions');
   return versions;
 }
+/** Read-only polling for Marketplace propagation; publication is never retried. */
+async function waitForPublishedVersion(version, read = () => JSON.parse(runVsce(['show', ID, '--json'], true)), pause = () => new Promise(resolve => setTimeout(resolve, 10000))) {
+  for (let attempt = 0; attempt < 12; attempt++) {
+    try { if (marketplaceVersions(await read()).includes(version)) return; }
+    catch { /* A transient read failure does not repeat the publication. */ }
+    if (attempt < 11) await pause();
+  }
+  throw new Error('Publication was submitted, but the version is not verified publicly yet. Check Marketplace before any further publication; do not republish this version.');
+}
 async function main() {
   const command = process.argv[2];
   const directory = process.env.RELEASE_ARTIFACT_DIR || path.join(root, 'dist/marketplace');
@@ -129,10 +138,9 @@ async function main() {
     const metadata = JSON.parse(runVsce(['show', ID, '--json'], true));
     assert(!marketplaceVersions(metadata).includes(artifact.receipt.version), 'Version is already public; select a new reviewed release version');
     runVsce(['publish', '--packagePath', artifact.packagePath]);
-    const after = JSON.parse(runVsce(['show', ID, '--json'], true));
-    assert(marketplaceVersions(after).includes(artifact.receipt.version), 'Publication command completed but version is not verified publicly');
+    await waitForPublishedVersion(artifact.receipt.version);
     console.log(`Marketplace reports ${ID}@${artifact.receipt.version}. Native critical-action UAT remains a separate acceptance check.`);
   } else throw new Error('Expected prepare, verify, check-gate or publish');
 }
-module.exports = { sha256, inspectVsix, verifyArtifact, hasApproval, marketplaceVersions };
+module.exports = { sha256, inspectVsix, verifyArtifact, hasApproval, marketplaceVersions, waitForPublishedVersion };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

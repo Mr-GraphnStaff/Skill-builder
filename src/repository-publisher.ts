@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { verifySkillRelease } from './skill-workbench.js';
 
 const execute = promisify(execFile);
-const previews = new Map<string, Map<string, string>>();
+const previews = new Map<string, { inventory: Map<string, string>; indexTree: string }>();
 type Progress = (message: string) => void;
 function report(progress: Progress | undefined, message: string): void { try { progress?.(message); } catch { /* A display callback cannot change a publication outcome. */ } }
 
@@ -102,7 +102,7 @@ export type PublishPreview = {
 
 async function git(cwd: string, args: string[]): Promise<string> {
   try {
-    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', ...args], {
+    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', ...args], {
       cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
     return result.stdout;
@@ -247,11 +247,12 @@ export async function prepareRepositoryPublish(
     // Prevent user/repository filters and line-ending conversions from running or
     // altering a release. info/attributes takes precedence over tracked attributes.
     await fs.mkdir(path.join(checkoutPath, '.git', 'info'), { recursive: true });
-    await fs.writeFile(path.join(checkoutPath, '.git', 'info', 'attributes'), '* -text -filter -ident -working-tree-encoding\n');
+    await fs.writeFile(path.join(checkoutPath, '.git', 'info', 'attributes'), '* merge -text -filter -ident -working-tree-encoding\n');
     await git(checkoutPath, ['config', '--local', 'core.hooksPath', emptyHooks]);
     await git(checkoutPath, ['reset', '--hard', 'HEAD']);
     const branch = `skills/${manifest.skillName}/${manifest.version}`;
     const relativePath = `${manifest.skillName}/${manifest.version}`;
+    let pulledPaths: string[] = [];
     if (replaceExisting) {
       report(onProgress, 'Fetching the latest registered repository branches.');
       const advertised = await git(checkoutPath, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]);
@@ -261,7 +262,15 @@ export async function prepareRepositoryPublish(
         // Pull the latest base into an existing review branch before replacing
         // the selected version. A conflict stops before any remote write.
         await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`]);
-        await git(checkoutPath, ['-c', 'merge.autostash=false', 'merge', '--no-edit', 'FETCH_HEAD']);
+        try {
+          await git(checkoutPath, ['-c', 'merge.autostash=false', '-c', 'merge.renormalize=false', 'merge', '--no-commit', '--no-ff', 'FETCH_HEAD']);
+        } catch (error) {
+          const conflicts = (await git(checkoutPath, ['diff', '--name-only', '--diff-filter=U', '-z'])).split('\0').filter(Boolean);
+          if (!conflicts.length || conflicts.some(file => !file.startsWith(`${relativePath}/`))) throw error;
+          // The user selected this whole version for replacement. Only its
+          // conflicts are resolved by the incoming copy; other conflicts stop.
+        }
+        pulledPaths = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(file => file && !file.startsWith(`${relativePath}/`)).sort();
       } else await git(checkoutPath, ['switch', '-c', branch]);
     } else await git(checkoutPath, ['switch', '-c', branch]);
     const destination = path.join(checkoutPath, relativePath);
@@ -286,11 +295,12 @@ export async function prepareRepositoryPublish(
     await git(checkoutPath, ['add', '-f', '--', relativePath]);
     const files = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
     const expected = [...copied.keys()].map(file => `${relativePath}/${file}`).sort();
-    if (replaceExisting ? files.some(file => !file.startsWith(`${relativePath}/`)) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
+    const outside = files.filter(file => !file.startsWith(`${relativePath}/`));
+    if (replaceExisting ? JSON.stringify(outside) !== JSON.stringify(pulledPaths) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
     const preview: PublishPreview = { checkoutPath, repository, branch, relativePath, files: expected, changedFiles: files,
       skillName: manifest.skillName, version: manifest.version };
     await verifyGitBlobs(preview);
-    previews.set(checkoutPath, copied);
+    previews.set(checkoutPath, { inventory: copied, indexTree: (await git(checkoutPath, ['write-tree'])).trim() });
     report(onProgress, 'Publication preview is ready for review.');
     return preview;
   } catch (error) {
@@ -311,7 +321,8 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   const expected = previews.get(preview.checkoutPath);
   if (!expected) throw new Error('Publication preview expired; prepare it again.');
   const current = await inventory(path.join(preview.checkoutPath, preview.relativePath));
-  if (!equalInventory(expected, current)) throw new Error('Prepared files changed; review a new publication preview.');
+  if (!equalInventory(expected.inventory, current)) throw new Error('Prepared files changed; review a new publication preview.');
+  if ((await git(preview.checkoutPath, ['write-tree'])).trim() !== expected.indexTree) throw new Error('Unexpected staged files or changed Git index; publication stopped.');
   const staged = (await git(preview.checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
   // Retrying an unsuccessful push reuses the existing commit instead of duplicating it.
   if (staged.length > 0) {
@@ -323,7 +334,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
     await git(preview.checkoutPath, ['-c', `core.hooksPath=${emptyHooks}`, 'commit', '-m', `Release ${preview.skillName} ${preview.version}`]);
   }
   const commit = (await git(preview.checkoutPath, ['rev-parse', 'HEAD'])).trim();
-  const actual = (await git(preview.checkoutPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', commit])).split('\0').filter(Boolean).sort();
+  const actual = preview.changedFiles?.length === 0 ? [] : (await git(preview.checkoutPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', `${commit}^`, commit])).split('\0').filter(Boolean).sort();
   if (preview.changedFiles?.length !== 0 && JSON.stringify(actual) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Commit contents differ from the reviewed release.');
   await verifyGitBlobs(preview, true);
   report(onProgress, 'Pushing the release branch to the selected repository.');

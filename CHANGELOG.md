@@ -4,6 +4,7 @@
 
 - Let users import a duplicate skill and publish their chosen version over the existing Git version folder. Preserve previous local drafts, packages and receipts in recovery copies and keep prior remote contents in Git history.
 - Add a separate Git pull action for the registered repository before skill work. SkillJetty manages the checkout, fast-forwards it when possible and lets users open a pulled skill folder.
+- Preserve ignored local files during pulls, prevent custom merge-driver/filesystem-monitor execution, and keep repeated same-version sessions recoverable.
 
 
 ## 0.11.5 (public pre-release)

@@ -42,7 +42,7 @@ function gitHubAccount(state: GuidedState): string {
 }
 function repositoryTools(state: GuidedState): string {
   if (!state.hasWorkspace || !state.connection) return '';
-  return `<section class="card" aria-labelledby="registered-repository-heading"><h2 id="registered-repository-heading">Registered repository</h2><p>${escape(state.connection.repository)}</p><div class="button-row">${secondary('pullRepository', 'Git pull', 'aria-describedby="pull-repository-help"')}${secondary('openRepositorySkill', 'Open pulled skill folder…')}</div><p class="hint" id="pull-repository-help">Optional before starting skill work. Downloads or updates SkillJetty’s managed local checkout from the registered repository. Local changes or divergent history stop the pull so you can keep your work.</p></section>`;
+  return `<section class="card" aria-labelledby="registered-repository-heading"><h2 id="registered-repository-heading">Registered repository</h2><p>${escape(state.connection.repository)}</p><div class="button-row">${secondary('pullRepository', 'Git pull', 'id="pull-repository" aria-describedby="pull-repository-help"')}${secondary('openRepositorySkill', 'Open pulled skill folder…', 'id="open-repository-skill"')}</div><p class="hint" id="pull-repository-help">Optional before starting skill work. Downloads or updates SkillJetty’s managed local checkout from the registered repository. Local changes or divergent history stop the pull so you can keep your work.</p></section>`;
 }
 function reviewLabel(pr?: PullRequestRecord): string {
   if (!pr) return 'Uploaded — PR not checked';

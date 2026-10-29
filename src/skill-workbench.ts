@@ -434,7 +434,7 @@ export function completeWorkbenchSkill(workspaceRoot: string, id: string, releas
   const sourceRetained = path.relative(canonicalSource, path.resolve(record.sourcePath)) !== '';
   const archivedPath = path.join(control(workspaceRoot), 'completed', record.id, version);
   guarded(workspaceRoot, archivedPath);
-  if (fs.existsSync(archivedPath)) throw new Error('Completed session archive already exists; active work was retained.');
+  // Repeated use of a chosen version creates another recoverable session.
   const parent = path.dirname(archivedPath); fs.mkdirSync(parent, { recursive: true });
   const sessionPath = path.join(path.resolve(workspaceRoot), 'workbench', record.id); guarded(workspaceRoot, sessionPath);
   const staging = fs.mkdtempSync(path.join(parent, '.completing-'));
@@ -447,6 +447,11 @@ export function completeWorkbenchSkill(workspaceRoot: string, id: string, releas
     fs.writeFileSync(path.join(staging, 'release.json'), `${JSON.stringify(manifest, null, 2)}\n`, { flag: 'wx' });
     if (fs.existsSync(sessionPath)) { renameWithRetry(sessionPath, path.join(staging, 'session')); sessionMoved = true; }
     if (!sourceRetained) { renameWithRetry(record.sourcePath, path.join(staging, 'source')); sourceMoved = true; }
+    if (fs.existsSync(archivedPath)) {
+      backup = path.join(control(workspaceRoot), 'replaced', randomUUID(), 'completed', record.id, version);
+      guarded(workspaceRoot, backup); fs.mkdirSync(path.dirname(backup), { recursive: true });
+      renameWithRetry(archivedPath, backup);
+    }
     renameWithRetry(staging, archivedPath); archiveMoved = true;
     // Catalog removal is the final mutation; any earlier failure leaves the
     // session discoverable, and a failed catalog write restores moved source.
@@ -459,6 +464,7 @@ export function completeWorkbenchSkill(workspaceRoot: string, id: string, releas
       if (sessionMoved) { renameWithRetry(path.join(archiveRoot, 'session'), sessionPath); sessionMoved = false; }
     } catch (restoreError) { throw new Error(`Completion failed; the active catalog was retained. Work is recoverable at ${archiveRoot}. Restore failed: ${String(restoreError)}. Original error: ${String(error)}`); }
     if (fs.existsSync(archiveRoot)) { guarded(workspaceRoot, archiveRoot); fs.rmSync(archiveRoot, { recursive: true, force: true }); }
+    if (backup && fs.existsSync(backup)) renameWithRetry(backup, archivedPath);
     throw error;
   } finally {
     if (!sourceMoved && !sessionMoved && fs.existsSync(staging)) { guarded(workspaceRoot, staging); fs.rmSync(staging, { recursive: true, force: true }); }
