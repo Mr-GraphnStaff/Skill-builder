@@ -2,6 +2,8 @@
 
 Open **SkillJetty** using its left sidebar icon or the single **SkillJetty: Open Workbench** command. Stay in the workbench and follow the highlighted Next step button.
 
+The status at the top stays visible while you scroll. It distinguishes processing from a VS Code file picker or account selection waiting for you. Open **Help with this step** for the current actions. **Repository & GitHub settings** groups optional sharing setup and shows the latest connection state even while collapsed. Local drafting does not require a repository connection.
+
 ## Start
 
 Open a local folder for your drafts and version history. You can create, open, edit and check skills locally before connecting a repository. Connect the publication destination when you are ready to publish: use **Find my repositories**, enter a repository URL, or create a new repository using the inline form. Creation requires an explicit name and visibility choice; private is the default. No skill is uploaded during connection.
@@ -30,7 +32,7 @@ Checking is local and does not upload your skill. A static check does not establ
 
 ## Submit
 
-Connect a repository if needed, then review the destination, suggested version and contents. Enter change notes, including for `1.0.0`. If an identical unpublished release was already prepared, its version and immutable notes can be reused; changed source or notes require a new version.
+Review the managed version, file changes and generated release notes, including for `1.0.0`. You can add optional context. **Save package on this computer** prepares a local package without a repository. Connect a repository when you want to upload for review. Advanced options let you choose a release number explicitly. You can reuse an identical prepared release or explicitly replace the same version; previous local contents are preserved in recovery copies and earlier uploaded contents remain in Git history. Review the changes carefully before reusing a version that others may already have consumed.
 
 For GitHub.com, choose **Connect GitHub account** (or **Switch GitHub account** after selecting one) if you need to select the account used for PRs. VS Code handles sign-in and permission consent. This account must have access to the destination; existing Git push access alone does not prove API access. Repository discovery and creation still use GitHub CLI sign-in, which can be a different account. You can enter an existing repository URL instead of using discovery.
 
@@ -68,8 +70,8 @@ The integrated review flow currently supports GitHub.com. Other Git destinations
 | PR exists but reviewer request failed | Open the PR or retry the explicit review request. The uploaded version and PR remain intact. |
 | Status could not refresh | Check connectivity/account access, then check again. The last verified result remains visible. |
 | Old saved branch is invalid | Reconnect; the workbench detects the default branch automatically. |
-| Git timed out | Draft and prepared release remain safe. Check connectivity and retry. |
-| Version is already prepared with different contents or notes | Choose a new version. Old release bytes remain unchanged. |
+| Git timed out | Keep the draft and receipt. Check the remote result before retrying an upload or merge; a timeout does not prove the remote write failed. |
+| Version is already prepared with different contents or notes | Choose a new version, or review an explicit same-version replacement. Earlier local contents are preserved in recovery copies. |
 | Upload succeeded but local completion failed | Use the receipt. Retrying the same recorded version rechecks the remote commit before attempting only local completion. |
 | Another editor changed the file | Both versions are preserved; inspect the recovery record, then reload the saved file. |
 | Historical version is corrupt | Drafts remain available. Recover that version from a known good copy before restoring it. |
