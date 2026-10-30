@@ -198,3 +198,14 @@ test('elapsed time survives stage updates and host silence is distinguished from
   assert.equal(h.elements.get('activity-details').textContent, '');
   assert.equal(h.timers.size, 0);
 });
+
+
+test('elapsed processing time excludes time spent choosing a package', () => {
+  const h = harness(); h.click('openPackage');
+  h.receive({ type: 'progress', message: 'Choose a package.', waitingForInput: true });
+  h.advance(65000);
+  h.receive({ type: 'progress', message: 'Opening the selected package.', waitingForInput: false });
+  assert.match(h.elements.get('activity-details').textContent, /^0s elapsed/);
+  h.advance(2000); h.fire(1000);
+  assert.match(h.elements.get('activity-details').textContent, /^2s elapsed/);
+});

@@ -1,19 +1,25 @@
-import { managedRepositoryPath, pullManagedRepository } from './managed-repository.js';
+import { performance } from 'node:perf_hooks';
+import { emitWorkbenchMetric, type WorkbenchMetricSink } from './workbench-metrics.js';
+import type { OpenedSkillPackage } from './skill-workbench.js';
+import { verifyProjectRepository, pullProjectRepository } from './managed-repository.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
 import { suggestReleaseVersion } from './workbench-library.js';
 import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
-import { connectWorkspaceRepository, getWorkspaceConnection, migrateAssociation, createGuidedSkill, listGuidedFiles, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
+import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
 import { checkSkillCompatibility } from './skill-compatibility.js';
-import { GuidedState, GuidedMessage, SkillTarget } from './guided-contract.js';
-import { runWorkbenchJob } from './workbench-jobs.js';
+import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState } from './guided-contract.js';
+import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
 import type { ValidationReport } from './skill-workbench.js';
 import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export type GuidedHooks = {
+  onMetric?: WorkbenchMetricSink;
+  chooseRepositoryFolder?(currentPath?: string): Promise<string | undefined>;
+  onRepositoryVerification?(state: RepositoryCheckState): void;
   pickPackage?(): Promise<string | undefined>;
   pickFolder?(initialPath?: string): Promise<string | undefined>;
   pickFile?(): Promise<string | undefined>;
@@ -30,6 +36,24 @@ export class GuidedWorkbenchController {
   private previewInventory?: string;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
   constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; }
+  private runJob<J extends WorkbenchJob>(job: J) { return runWorkbenchJob(job, { onMetric: this.hooks.onMetric }); }
+  private verificationSequence = 0;
+  async verifyRepository(): Promise<void> {
+    const sequence = ++this.verificationSequence, root = this.root;
+    let connection: ReturnType<typeof getWorkspaceConnection>;
+    try { connection = root ? getWorkspaceConnection(root) : undefined; }
+    catch { this.state.repositoryVerification = { status: 'setupRequired', message: 'Reconnect the remote repository and choose its local skills project folder.' }; this.hooks.onRepositoryVerification?.(this.state.repositoryVerification); return; }
+    const identity = JSON.stringify([root, connection?.repository, connection?.localPath]);
+    const update = (state: RepositoryCheckState) => {
+      if (sequence !== this.verificationSequence || root !== this.root
+          || identity !== JSON.stringify([this.root, this.state.connection?.repository, this.state.connection?.localPath])) return;
+      this.state.repositoryVerification = state; this.hooks.onRepositoryVerification?.(state);
+    };
+    if (!connection) { update({ status: 'setupRequired', message: 'Register a remote skills repository and select its actual local project folder.' }); return; }
+    update({ status: 'checking', message: 'Verifying the local project folder, Git origin, branch and remote commit…', repository: connection.repository, localPath: connection.localPath });
+    try { update(await verifyProjectRepository(connection.repository, connection.localPath)); }
+    catch (error) { update({ status: 'error', message: error instanceof Error ? error.message : String(error), repository: connection.repository, localPath: connection.localPath }); }
+  }
   private workspace(): string { if (!this.root) throw new Error('Choose a local folder for your skill work before continuing.'); return this.root; }
   private active(): WorkbenchSkill {
     const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === this.state.active?.id);
@@ -38,16 +62,20 @@ export class GuidedWorkbenchController {
   }
   private refreshConnection() {
     if (!this.root) return;
+    const previousConnection = JSON.stringify(this.state.connection);
     this.state.hasWorkspace = true;
     try { this.state.connection = getWorkspaceConnection(this.root); }
     catch { this.state.connection = undefined; this.state.notice = 'Your repository connection needs reconnecting. Saved drafts are still available.'; }
+    if (previousConnection !== JSON.stringify(this.state.connection)) {
+      ++this.verificationSequence; this.state.repositoryVerification = undefined; this.state.repositoryCheckout = undefined;
+    }
   }
   private async loadSkills() {
     if (!this.root) return;
     this.refreshConnection();
     this.state.drafts = listWorkbenchSkills(this.root).map(({ id, name }) => ({ id, name }));
     try {
-      const releases = await runWorkbenchJob({ kind: 'library', root: this.root });
+      const releases = await this.runJob({ kind: 'library', root: this.root });
       if (!this.state.connection) this.state.connection = await migrateAssociation(this.root, releases);
       this.state.library = releases.map(({ skillName, version, directory, status, pr }) => ({ skillName, version, directory, status, ...(pr ? { pr } : {}) }));
       if (this.state.reviewQueue !== undefined) await this.refreshReviews();
@@ -57,21 +85,24 @@ export class GuidedWorkbenchController {
     this.state.skillsStale = false;
   }
   private async refreshReviews() {
-    this.state.reviewQueue = (await runWorkbenchJob({ kind: 'reviews', root: this.workspace() })).map(({ directory, skillName, version, repository, pr }) => ({ directory, skillName, version, repository, ...(pr ? { pr } : {}) }));
+    this.state.reviewQueue = (await this.runJob({ kind: 'reviews', root: this.workspace() })).map(({ directory, skillName, version, repository, pr }) => ({ directory, skillName, version, repository, ...(pr ? { pr } : {}) }));
     if (this.state.receipt?.directory) {
       const current = this.state.reviewQueue.find(item => item.directory === this.state.receipt!.directory);
       if (current?.pr) this.state.receipt.pr = current.pr;
     }
   }
-  private select(skill: WorkbenchSkill) {
-    const identity = readSkillIdentity(readGuidedFile(skill, 'SKILL.md'));
+  private select(skill: WorkbenchSkill, opening?: OpenedSkillPackage) {
+    const editorStarted = performance.now();
+    const manifestContent = opening?.manifestContent ?? readGuidedFile(skill, 'SKILL.md');
+    const identity = readSkillIdentity(manifestContent);
     this.state.active = { id: skill.id, name: skill.name, version: identity.declaredVersion,
       versionNote: identity.warnings.join(' ') || (identity.declaredVersion ? `Declared in SKILL.md → ${identity.versionSource}.` : 'No version declared. SkillJetty will manage the release number when you share.') };
-    this.state.files = listGuidedFiles(skill);
-    this.state.editor = { path: 'SKILL.md', content: readGuidedFile(skill, 'SKILL.md') };
+    this.state.files = opening?.files ?? listGuidedFiles(skill);
+    this.state.editor = { path: 'SKILL.md', content: manifestContent };
     this.state.history = listGuidedHistory(this.workspace(), skill, 'SKILL.md');
     this.previewInventory = undefined;
     this.state.step = 'edit'; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined; this.state.form = undefined;
+    emitWorkbenchMetric(this.hooks.onMetric, { stage: 'editorPreparation', durationMs: performance.now() - editorStarted, fileCount: this.state.files.length, outcome: 'ok' });
   }
   private buffer(message: GuidedMessage) {
     if (message.editorContent === undefined && message.editorPath === undefined) return;
@@ -119,7 +150,7 @@ export class GuidedWorkbenchController {
   }
   private async publicationDetails(suppliedNotes?: string): Promise<{ details: NonNullable<GuidedState['publish']>; inventory: ValidationReport['files'] }> {
     const skill = this.active();
-    const snapshot = await runWorkbenchJob({ kind: 'snapshot', root: this.workspace(), skill });
+    const snapshot = await this.runJob({ kind: 'snapshot', root: this.workspace(), skill });
     if (!snapshot.validation.valid) throw new Error(snapshot.validation.errors.join('\n'));
     const versions = snapshot.releases;
     const inventory = snapshot.validation.files;
@@ -146,7 +177,7 @@ export class GuidedWorkbenchController {
   }
   private async check() {
     const skill = this.active();
-    const result = await runWorkbenchJob({ kind: 'validate', skill });
+    const result = await this.runJob({ kind: 'validate', skill });
     const fileFinding = (message: string) => {
       const file = this.state.files.find(entry => message.startsWith(`${entry.path}:`))?.path;
       return { message, ...(file ? { file } : {}) };
@@ -198,28 +229,41 @@ export class GuidedWorkbenchController {
             this.state.active = undefined; this.state.editor = undefined; this.state.files = []; this.state.history = undefined;
             this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined;
             this.state.libraryError = undefined; this.state.reviewQueueError = undefined; this.state.step = 'start';
-            this.refreshConnection();
+            this.refreshConnection(); void this.verifyRepository();
           }
           else this.state.notice = 'Folder selection canceled. Your saved work is still available.';
           break;
         }
+        case 'verifyRepository': await this.verifyRepository(); break;
+        case 'setRepositoryFolder': {
+          this.refreshConnection();
+          const connection = this.state.connection;
+          if (!connection) throw new Error('Register the remote skills repository first.');
+          const folder = await this.hooks.chooseRepositoryFolder?.(connection.localPath);
+          if (!folder) { this.state.form = previousForm; this.state.notice = 'Local folder selection canceled. The existing location is retained.'; break; }
+          this.state.connection = setWorkspaceRepositoryFolder(this.workspace(), folder);
+          this.state.repositoryCheckout = undefined;
+          this.state.notice = 'Local skills project folder saved. Verifying it against the registered remote.';
+          this.progress('Verifying the selected local skills project folder…');
+          await this.verifyRepository(); break;
+        }
         case 'pullRepository': {
           this.refreshConnection();
           const connection = this.state.connection;
-          if (!connection) throw new Error('Connect a repository before Git pull.');
-          this.state.repositoryCheckout = await pullManagedRepository(this.workspace(), connection.repository, message => this.progress(message));
-          this.state.notice = 'Git pull complete. Open a skill folder from the managed checkout to begin working.';
+          if (!connection?.localPath) throw new Error('Choose the actual local skills project folder before Git pull.');
+          this.state.repositoryCheckout = await pullProjectRepository(this.workspace(), connection.repository, connection.localPath, message => this.progress(message));
+          await this.verifyRepository();
+          this.state.notice = 'Git pull complete in the selected local skills project folder.';
           break;
         }
         case 'openRepositorySkill': {
           this.refreshConnection();
           const connection = this.state.connection;
-          if (!connection) throw new Error('Connect a repository before opening its skills.');
-          const checkout = managedRepositoryPath(this.workspace(), connection.repository);
-          if (!fs.existsSync(path.join(checkout, '.git'))) throw new Error('Use Git pull to download the registered repository first.');
-          const folder = await this.hooks.pickFolder?.(checkout);
+          if (!connection?.localPath) throw new Error('Choose the actual local skills project folder first.');
+          const folder = await this.hooks.pickFolder?.(connection.localPath);
           if (folder) {
-            this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }));
+            this.progress('Opening the selected skill folder…');
+            this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }));
           } else { this.state.form = previousForm; this.state.notice = 'Opening canceled. Your current work is retained.'; }
           break;
         }
@@ -230,14 +274,14 @@ export class GuidedWorkbenchController {
           this.state.busy = true; this.progress('Connecting and checking the repository’s default branch…');
           this.state.connection = await connectWorkspaceRepository(this.workspace(), string('repository'));
           this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
-          this.state.notice = 'Repository connected. Future versions will use this destination automatically.'; break;
+          this.state.notice = 'Repository connected. Select or verify its local skills project folder.'; void this.verifyRepository(); break;
         case 'createRepository': {
           if (payload.confirmed !== true) throw new Error('Confirm the repository name and visibility before creating it.');
           const visibility = payload.visibility === 'public' ? 'public' : 'private';
           this.state.busy = true; this.progress('Creating your repository…');
           const created = await createGitHubRepository(this.workspace(), string('name'), visibility);
           this.state.connection = await connectWorkspaceRepository(this.workspace(), created.repository);
-          this.state.notice = 'Repository created and connected. No skill has been uploaded yet.'; break;
+          this.state.notice = 'Repository created and connected. Select its local skills project folder.'; void this.verifyRepository(); break;
         }
         case 'showCreate': this.workspace(); this.state.step = 'start'; this.state.form = { mode: 'create' }; break;
         case 'createSkill': {
@@ -247,18 +291,18 @@ export class GuidedWorkbenchController {
         }
         case 'openPackage': {
           const file = await this.hooks.pickPackage?.();
-          if (file) { this.progress('Opening and checking the selected skill package…'); this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file, replaceExisting: true })); }
+          if (file) { this.progress('Opening and checking the selected skill package…'); const opening = await this.runJob({ kind: 'openPackage', root: this.workspace(), file, replaceExisting: true }); this.select(opening.skill, opening); }
           else this.state.notice = 'Opening canceled. No package was imported.';
           break;
         }
         case 'openPackagePath': {
           const file = string('path').trim();
           if (!file || !path.isAbsolute(file) || path.extname(file).toLowerCase() !== '.skill') throw new Error('Enter the full path to a .skill package.');
-          this.select(await runWorkbenchJob({ kind: 'importPackage', root: this.workspace(), file, replaceExisting: true })); break;
+          const opening = await this.runJob({ kind: 'openPackage', root: this.workspace(), file, replaceExisting: true }); this.select(opening.skill, opening); break;
         }
         case 'openFolder': {
           const folder = await this.hooks.pickFolder?.();
-          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await runWorkbenchJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true })); }
+          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true })); }
           else this.state.notice = 'Opening canceled. No folder was imported.';
           break;
         }
@@ -267,12 +311,12 @@ export class GuidedWorkbenchController {
           if (!skill) throw new Error('That draft is no longer active. Refresh to see saved drafts.');
           this.select(skill); break;
         }
-        case 'restoreVersion': this.select(await runWorkbenchJob({ kind: 'restoreRelease', root: this.workspace(), directory: string('directory') })); break;
+        case 'restoreVersion': this.select(await this.runJob({ kind: 'restoreRelease', root: this.workspace(), directory: string('directory') })); break;
         case 'openFile': {
           const skill = this.active(); const relative = string('path');
-          const file = listGuidedFiles(skill).find(item => item.path === relative);
-          if (!file) throw new Error('Choose a file belonging to this skill.');
-          this.state.editor = { path: relative, content: file.text ? readGuidedFile(skill, relative) : 'This binary file is preserved in full. Use your normal desktop application to edit it.', readOnly: !file.text };
+          if (!this.state.files.some(item => item.path === relative)) throw new Error('Choose a file belonging to this skill.');
+          const file = openGuidedFile(skill, relative);
+          this.state.editor = { path: relative, content: file.text ? file.content! : 'This binary file is preserved in full. Use your normal desktop application to edit it.', readOnly: !file.text };
           this.state.history = file.text ? listGuidedHistory(this.workspace(), skill, relative) : [];
           this.state.step = 'edit'; break;
         }
@@ -346,11 +390,11 @@ export class GuidedWorkbenchController {
           if (message.action === 'savePackage') {
             this.state.step = 'publish';
             const skill = this.active();
-            const existing = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: skill.name })).find(item => item.version === version);
-            let release = existing ? await runWorkbenchJob({ kind: 'verifyRelease', directory: existing.directory }) : undefined;
+            const existing = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: skill.name })).find(item => item.version === version);
+            let release = existing ? await this.runJob({ kind: 'verifyRelease', directory: existing.directory }) : undefined;
             if (!release || JSON.stringify(release.manifest.files) !== currentInventory
                 || fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim()) {
-              release = await runWorkbenchJob({ kind: 'prepareRelease', root: this.workspace(), id: skill.id, version, changelog, replaceExisting: true });
+              release = await this.runJob({ kind: 'prepareRelease', root: this.workspace(), id: skill.id, version, changelog, replaceExisting: true });
             }
             if (JSON.stringify(release.manifest.files) !== currentInventory) throw new Error('The draft changed while the local package was being prepared. The prepared package is preserved, but it has not been accepted as the reviewed release. Check the draft and review a fresh summary. Nothing was uploaded.');
             this.state.receipt = { name: skill.name, version, directory: release.directory, packagePath: release.packagePath, local: true,
@@ -361,7 +405,7 @@ export class GuidedWorkbenchController {
           this.state.step = 'publish';
           this.state.busy = true; this.progress('Checking and packaging this version…');
           const supported = !!githubRepository(this.state.connection.repository);
-          const priorUpload = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: this.active().name })).find(item => item.version === version && item.status === 'uploaded');
+          const priorUpload = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: this.active().name })).find(item => item.version === version && item.status === 'uploaded');
           if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(this.state.connection.repository); }
           const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, message => this.progress(message), { deferCleanup: supported, expectedFiles: preview.inventory });
           this.state.receipt = receiptFor(result);
@@ -380,9 +424,9 @@ export class GuidedWorkbenchController {
         }
         case 'revealPackage': {
           const receipt = this.state.receipt;
-          const saved = (await runWorkbenchJob({ kind: 'library', root: this.workspace(), skillName: receipt?.name })).find(item => item.directory === receipt?.directory && item.version === receipt?.version);
+          const saved = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: receipt?.name })).find(item => item.directory === receipt?.directory && item.version === receipt?.version);
           if (!receipt?.local || !saved) throw new Error('Save a local package first.');
-          const release = await runWorkbenchJob({ kind: 'verifyRelease', directory: saved.directory });
+          const release = await this.runJob({ kind: 'verifyRelease', directory: saved.directory });
           await this.hooks.revealFile?.(release.packagePath); break;
         }
         case 'loadReviewers': {
@@ -407,7 +451,7 @@ export class GuidedWorkbenchController {
         case 'checkPullRequests': {
           this.state.step = 'start'; this.state.form = { mode: 'reviews' }; this.state.busy = true; this.state.reviewQueueError = undefined;
           this.progress('Checking PRs for recorded uploads in the connected repository…');
-          const items = await runWorkbenchJob({ kind: 'reviews', root: this.workspace() });
+          const items = await this.runJob({ kind: 'reviews', root: this.workspace() });
           for (const item of items.slice(0, 50)) {
             try { await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github); }
             catch { this.state.reviewQueueError = 'Some saved upload metadata could not be checked. Inspect the affected version and reconnect its recorded repository; known statuses are retained.'; }

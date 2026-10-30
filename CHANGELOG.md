@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.7 — 2026-10-29
+
+- Add pre-release-only privacy-safe phase diagnostics and an always-available performance log action.
+- Reuse validated import bytes for the editor, create each extraction directory once, and read only the selected editor file.
+- Separate file-picker waiting time from processing time.
+- Require an explicit local skills repository folder and verify local/remote identity and sync status at startup without blocking local editing.
+
+
 ## 0.11.6 — 2026-10-29
 
 - Let users import a duplicate skill and publish their chosen version over the existing Git version folder. Preserve previous local drafts, packages and receipts in recovery copies and keep prior remote contents in Git history.

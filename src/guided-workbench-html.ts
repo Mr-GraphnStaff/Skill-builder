@@ -42,7 +42,15 @@ function gitHubAccount(state: GuidedState): string {
 }
 function repositoryTools(state: GuidedState): string {
   if (!state.hasWorkspace || !state.connection) return '';
-  return `<section class="card" aria-labelledby="registered-repository-heading"><h2 id="registered-repository-heading">Registered repository</h2><p>${escape(state.connection.repository)}</p><div class="button-row">${secondary('pullRepository', 'Git pull', 'id="pull-repository" aria-describedby="pull-repository-help"')}${secondary('openRepositorySkill', 'Open pulled skill folder…', 'id="open-repository-skill"')}</div><p class="hint" id="pull-repository-help">Optional before starting skill work. Downloads or updates SkillJetty’s managed local checkout from the registered repository. Local changes or divergent history stop the pull so you can keep your work.</p></section>`;
+  const local = state.connection.localPath;
+  const unavailable = local ? '' : 'disabled data-unavailable="true"';
+  const verification = state.repositoryVerification;
+  return `<section class="card" aria-labelledby="registered-repository-heading"><h2 id="registered-repository-heading">Skills repository</h2>
+    <p><strong>Local project:</strong> <span id="local-repository-path">${escape(local ?? 'Choose the local skills project folder')}</span></p>
+    <p><strong>Registered remote:</strong> ${escape(state.connection.repository)}</p>
+    <p id="repository-verification" role="status" aria-live="polite" data-status="${escape(verification?.status ?? 'setupRequired')}">${escape(verification?.message ?? 'Local and remote repository verification has not completed yet.')}</p>
+    <div class="button-row">${secondary('setRepositoryFolder', local ? 'Change local folder…' : 'Choose local project folder…', 'id="set-repository-folder"')}${secondary('verifyRepository', 'Verify local and remote', 'id="verify-repository"')}${secondary('pullRepository', 'Git pull', `id="pull-repository" aria-describedby="pull-repository-help" ${unavailable}`)}${secondary('openRepositorySkill', 'Open skill from project…', `id="open-repository-skill" ${unavailable}`)}</div>
+    <p class="hint" id="pull-repository-help">Optional before starting skill work. Git pull uses the local project folder shown above. Verify checks its Git origin, branch, local changes and remote commit. Setup and trust problems are reported separately; local editing remains available.</p></section>`;
 }
 function reviewLabel(pr?: PullRequestRecord): string {
   if (!pr) return 'Uploaded — PR not checked';
@@ -358,7 +366,7 @@ const script = `
   document.addEventListener('blur', event => syncValidity(event.target), true);
   function lockActions(locked) {
     actionPending = locked;
-    document.querySelectorAll('button').forEach(button => { button.disabled = locked || button.dataset.unavailable === 'true'; });
+    document.querySelectorAll('button').forEach(button => { if (button.dataset.diagnostics === 'true') return; button.disabled = locked || button.dataset.unavailable === 'true'; });
     if (locked) {
       document.querySelectorAll('input,select,textarea').forEach(control => {
         if (!lockedControls.has(control)) lockedControls.set(control, { disabled: control.disabled, readOnly: control.readOnly });
@@ -391,7 +399,8 @@ const script = `
     clearTimeout(activityTimer);
     activityTimer = undefined;
     activityMessage = message;
-    if (activityStarted === undefined) activityStarted = Date.now();
+    if (waitingForInput) activityStarted = undefined;
+    else if (activityStarted === undefined) activityStarted = Date.now();
     clearTimeout(activityTick);
     function tick() {
       const elapsed = Math.floor((Date.now() - activityStarted) / 1000);
@@ -426,6 +435,7 @@ const script = `
     if (activityStatus) activityStatus.dataset.waitingForInput = 'false';
   }
   function post(action, payload = {}) {
+    if (action === 'openPerformanceLog') { vscode.postMessage({ action }); return; }
     if (actionPending) return;
     persist();
     const messageBuffer = action === 'reloadFile' ? {} : buffer();
@@ -443,7 +453,7 @@ const script = `
       document.getElementById('save-status').textContent = 'Saving locally…';
     } else {
       lockActions(true);
-      beginActivity(actionMessage(action), ['chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action));
+      beginActivity(actionMessage(action), ['setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action));
       if (action === 'startAnother') { saved = {}; vscode.setState(saved); }
     }
     if (action === 'reloadFile') { delete saved.editor; vscode.setState(saved); }
@@ -506,6 +516,14 @@ const script = `
       lastHostResponse = Date.now();
       if (message.message) beginActivity(String(message.message), message.waitingForInput === true);
     }
+    if (message.type === 'repositoryVerification') {
+      const status = document.getElementById('repository-verification');
+      const verification = message.verification;
+      if (status && verification && typeof verification.message === 'string') {
+        status.textContent = verification.message;
+        status.dataset.status = String(verification.status || 'error');
+      }
+    }
     if (message.type === 'heartbeat' && actionPending) lastHostResponse = Date.now();
     if (message.type === 'operationComplete') {
       lockActions(false);
@@ -551,7 +569,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
   const backDisabled = state.step === 'start' && !state.form?.mode;
   const primary = screen.primary;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>${escape(screen.title)} | ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}</style></head><body>
-    <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell"><header>${brandHeader(brand)}${gitHubAccount(state)}${repositoryTools(state)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
+    <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell"><header>${brandHeader(brand)}${gitHubAccount(state)}<div class="button-row">${secondary('openPerformanceLog', 'Open performance log', 'id="open-performance-log" data-diagnostics="true"')}</div>${repositoryTools(state)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
     <div id="operation-status" class="activity-status" role="status" aria-live="polite" aria-atomic="true" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div>
     <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-waiting-for-input="${!!state.waitingForInput}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>

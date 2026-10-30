@@ -1,8 +1,11 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import { importSkillPackage, registerSkillFolder, validateWorkbenchSkill, prepareSkillRelease, verifySkillRelease } from './skill-workbench.js';
+import { openSkillPackage, importSkillPackage, registerSkillFolder, validateWorkbenchSkill, prepareSkillRelease, verifySkillRelease } from './skill-workbench.js';
 import { listLibraryReleases, summarizeFileChanges, restoreLibraryRelease } from './workbench-library.js';
 import { connectedReviewReleases } from './guided-workspace.js';
 import type { WorkbenchJob, WorkbenchSnapshot } from './workbench-jobs.js';
+import { emitWorkbenchMetric, type WorkbenchMetric } from './workbench-metrics.js';
+
+const onMetric = (metric: WorkbenchMetric) => emitWorkbenchMetric(value => parentPort?.postMessage({ type: 'metric', metric: value }), metric);
 
 function perform(job: WorkbenchJob): unknown {
   if (!job || typeof job !== 'object') throw new Error('Choose a supported local operation.');
@@ -10,6 +13,7 @@ function perform(job: WorkbenchJob): unknown {
     case 'library': return listLibraryReleases(job.root, job.skillName);
     case 'reviews': return connectedReviewReleases(job.root);
     case 'validate': return validateWorkbenchSkill(job.skill);
+    case 'openPackage': return openSkillPackage(job.file, job.root, job.replaceExisting, onMetric);
     case 'importPackage': return importSkillPackage(job.file, job.root, job.replaceExisting);
     case 'registerFolder': return registerSkillFolder(job.root, job.folder, job.replaceExisting);
     case 'prepareRelease': return prepareSkillRelease(job.root, job.id, job.version, job.changelog, job.replaceExisting);
@@ -29,6 +33,7 @@ function perform(job: WorkbenchJob): unknown {
 }
 
 if (parentPort) {
-  try { parentPort.postMessage({ ok: true, result: perform(workerData) }); }
-  catch (error) { parentPort.postMessage({ ok: false, error: (error instanceof Error ? error.message : String(error)).slice(0, 1800) }); }
+  parentPort.postMessage({ type: 'ready' });
+  try { parentPort.postMessage({ type: 'result', ok: true, result: perform(workerData) }); }
+  catch (error) { parentPort.postMessage({ type: 'result', ok: false, error: (error instanceof Error ? error.message : String(error)).slice(0, 1800) }); }
 }

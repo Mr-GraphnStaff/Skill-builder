@@ -18,6 +18,7 @@ function fixture() {
       this.state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
       controllers.push(this);
     }
+    async verifyRepository() { events.push({ type: 'repository-check', controller: this }); }
     async dispatch(message) {
       events.push({ type: 'dispatch', action: message.action, controller: this });
       return dispatchHooks.has(message.action) ? dispatchHooks.get(message.action)(this, message) : this.state;
@@ -28,7 +29,7 @@ function fixture() {
     commands: { registerCommand(id, handler) { commands.set(id, handler); return disposable(); }, async executeCommand() {} },
     workspace: { textDocuments: [], workspaceFolders: [], onDidSaveTextDocument: disposable },
     window: {
-      createOutputChannel() { return { appendLine: line => events.push({ type: 'log', line }), dispose() {} }; },
+      createOutputChannel() { return { appendLine: line => events.push({ type: 'log', line }), show() { events.push({ type: 'log-opened' }); }, dispose() {} }; },
       registerWebviewViewProvider: disposable,
       createWebviewPanel() {
         const panel = { htmlWrites: 0, messages: [], reveal() {}, onDidDispose(handler) { this.closed = handler; return disposable(); },
@@ -153,4 +154,37 @@ test('a host-side action failure sends a terminal error and renders the recovera
   assert.equal(panel.messages.at(-1).error, 'The selected file changed.');
   assert.equal(panel.htmlWrites, baselineRenders + 1);
   assert.match(panel.html, /The selected file changed\./);
+});
+
+
+test('diagnostics can open immediately while a serialized task is pending', async () => {
+  const f = fixture(), panel = await f.open(), entered = deferred(), release = deferred();
+  f.dispatchHooks.set('check', async () => { entered.resolve(); await release.promise; });
+  const operation = panel.receive({ action: 'check' }); await entered.promise;
+  await panel.receive({ action: 'openPerformanceLog' });
+  assert(f.events.some(event => event.type === 'log-opened'));
+  assert.equal(panel.messages.some(message => message.type === 'operationComplete'), false);
+  assert.equal(f.events.some(event => event.type === 'dispatch' && event.action === 'openPerformanceLog'), false);
+  release.resolve(); await operation;
+  const metrics = f.events.filter(event => event.type === 'log' && event.line.startsWith('{')).map(event => JSON.parse(event.line));
+  const total = metrics.find(metric => metric.stage === 'operationTotal');
+  assert(total && /^[a-f0-9-]{36}$/.test(total.operationId));
+  assert(metrics.some(metric => metric.stage === 'pickerWait' && metric.operationId === total.operationId));
+  assert(f.commands.has('skillBuilder.showPerformanceLog'));
+});
+
+
+test('reopened panel starts a separate diagnostics context while an old task finishes', async () => {
+  const f = fixture(), first = await f.open(), entered = deferred(), release = deferred();
+  f.dispatchHooks.set('check', async controller => { entered.resolve(); await release.promise; controller.hooks.onMetric({ stage: 'editorPreparation', durationMs: 1 }); });
+  const operation = first.receive({ action: 'check' }); await entered.promise;
+  first.close(); const replacement = await f.open();
+  const metrics = () => f.events.filter(event => event.type === 'log' && event.line.startsWith('{')).map(event => JSON.parse(event.line));
+  const startup = metrics().filter(metric => metric.stage === 'webviewRender').at(-1);
+  assert.equal(startup.action, 'startup');
+  release.resolve(); await operation;
+  const old = metrics().find(metric => metric.stage === 'operationTotal');
+  assert.notEqual(startup.operationId, old.operationId);
+  assert.equal(metrics().find(metric => metric.stage === 'editorPreparation').operationId, old.operationId);
+  assert.equal(replacement.htmlWrites, 1);
 });

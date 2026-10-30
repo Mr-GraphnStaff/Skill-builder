@@ -15,7 +15,7 @@ import { resolveRepositoryDefaultBranch, verifyRepositoryBranchCommit, prepareRe
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
 const MAX_TEXT = 16 * 1024 * 1024;
-export type WorkspaceConnection = { repository: string; baseBranch: string };
+export type WorkspaceConnection = { repository: string; baseBranch: string; localPath?: string };
 export type GuidedFile = { path: string; size: number; text: boolean };
 export type GuidedPublication = {
   release: WorkbenchRelease;
@@ -57,7 +57,9 @@ export function getWorkspaceConnection(root: string): WorkspaceConnection | unde
   if (value.format !== 1 || typeof value.repository !== 'string' || typeof value.baseBranch !== 'string'
     || !value.baseBranch || /[\s~^:?*\[\\\0]/.test(value.baseBranch) || value.baseBranch.startsWith('-')
     || value.baseBranch.includes('..') || value.baseBranch.includes('@{')) throw new Error('The saved repository connection needs reconnecting.');
-  return { repository: validateRepository(value.repository), baseBranch: value.baseBranch };
+  if (value.localPath !== undefined && (typeof value.localPath !== 'string' || !path.isAbsolute(value.localPath) || /[\r\n\0]/.test(value.localPath))) throw new Error('Choose an absolute local skills project folder.');
+  return { repository: validateRepository(value.repository), baseBranch: value.baseBranch,
+    ...(value.localPath ? { localPath: path.resolve(value.localPath) } : {}) };
 }
 
 /** Preserve conflicting webview edits outside distributable skill contents. */
@@ -118,22 +120,37 @@ export function restoreGuidedEdit(root: string, skill: WorkbenchSkill, relative:
   writeGuidedFile(active, relative, saved.content);
 }
 
-export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
-  repository = validateRepository(repository);
-  const baseBranch = await resolveRepositoryDefaultBranch(repository);
+function saveWorkspaceConnection(root: string, connection: WorkspaceConnection): void {
   const file = connectionPath(root);
   fs.mkdirSync(path.dirname(file), { recursive: true }); ensureSafe(root, file);
   const temporary = `${file}.${randomUUID()}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify({ format: 1, repository, baseBranch }, null, 2) + '\n', { flag: 'wx' });
+  fs.writeFileSync(temporary, JSON.stringify({ format: 1, ...connection }, null, 2) + '\n', { flag: 'wx' });
   try { fs.renameSync(temporary, file); }
   finally { if (fs.existsSync(temporary)) { ensureSafe(root, temporary); fs.unlinkSync(temporary); } }
+}
+export function setWorkspaceRepositoryFolder(root: string, localPath: string): WorkspaceConnection {
+  const connection = getWorkspaceConnection(root);
+  if (!connection) throw new Error('Register the remote skills repository before choosing its local folder.');
+  if (typeof localPath !== 'string' || !path.isAbsolute(localPath) || /[\r\n\0]/.test(localPath)
+      || localPath.split(/[\\/]/).some(part => part.toLowerCase() === '.codex')) throw new Error('Choose the actual local skills project folder, outside Codex internal directories.');
+  const updated = { ...connection, localPath: path.resolve(localPath) };
+  saveWorkspaceConnection(root, updated); return updated;
+}
+export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
+  repository = validateRepository(repository);
+  const baseBranch = await resolveRepositoryDefaultBranch(repository);
+  let previous: WorkspaceConnection | undefined;
+  try { previous = getWorkspaceConnection(root); } catch { /* Reconnection can repair damaged metadata. */ }
+  const connection: WorkspaceConnection = { repository, baseBranch,
+    ...(previous?.localPath && sameRepository(previous.repository, repository) ? { localPath: previous.localPath } : {}) };
+  saveWorkspaceConnection(root, connection);
   // Repair matching old per-skill branch selections such as "makeitfire".
   // Other associated destinations are left alone until that draft is published
   // through this workspace's explicitly selected single repository.
   for (const skill of listWorkbenchSkills(root)) {
     if (skill.repository && sameRepository(skill.repository, repository)) updateSkillRepository(root, skill.id, repository, baseBranch);
   }
-  return { repository, baseBranch };
+  return connection;
 }
 
 export async function migrateAssociation(root: string, verifiedReleases?: LibraryRelease[]): Promise<WorkspaceConnection | undefined> {
@@ -189,6 +206,16 @@ export function listGuidedFiles(skill: WorkbenchSkill): GuidedFile[] {
   };
   visit(skill.sourcePath, '');
   return output.sort((a, b) => (a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path)));
+}
+/** Inspect only the file selected in the editor, without rereading sibling assets. */
+export function openGuidedFile(skill: WorkbenchSkill, relative: string): GuidedFile & { content?: string } {
+  if (typeof relative !== 'string' || relative.includes('\\') || relative.split('/').some(part => part === 'node_modules')) throw new Error('Choose a file belonging to this skill.');
+  const target = fileTarget(skill, relative);
+  const stat = fs.lstatSync(target);
+  if (!stat.isFile()) throw new Error('Choose a regular file belonging to this skill.');
+  const bytes = stat.size <= MAX_TEXT ? fs.readFileSync(target) : undefined;
+  const text = !!bytes && isUtf8(bytes) && !bytes.includes(0);
+  return { path: relative, size: stat.size, text, ...(text ? { content: bytes!.toString('utf8') } : {}) };
 }
 export function readGuidedFile(skill: WorkbenchSkill, relative: string): string {
   const target = fileTarget(skill, relative); const stat = fs.lstatSync(target);

@@ -5,6 +5,7 @@ import { inflateRawSync } from 'node:zlib';
 import AdmZip from 'adm-zip';
 import { isUtf8 } from 'node:buffer';
 import { analyzeSkill } from './skill-analysis.js';
+import { measureWorkbenchPhase, type WorkbenchMetricSink } from './workbench-metrics.js';
 
 const yaml: { load(value: string): unknown } = require('js-yaml');
 const LIMITS = { entries: 4096, file: 16 * 1024 * 1024, total: 128 * 1024 * 1024, archive: 64 * 1024 * 1024 };
@@ -13,6 +14,7 @@ export type WorkbenchSkill = { id: string; name: string; sourcePath: string; ori
 export type ValidationReport = { valid: boolean; errors: string[]; warnings: string[]; files: FileDigest[] };
 export type ReleaseManifest = { version: string; skillName: string; createdAt: string; files: FileDigest[]; originalSha256?: string; packageSha256: string; changelogSha256: string };
 export type WorkbenchRelease = { directory: string; version: string; skillName: string; packagePath: string; manifest: ReleaseManifest };
+export type OpenedSkillPackage = { skill: WorkbenchSkill; manifestContent: string; files: Array<{ path: string; size: number; text: boolean }> };
 type Payload = { relative: string; bytes: Buffer; directory?: boolean };
 
 function hash(bytes: Buffer): string { return createHash('sha256').update(bytes).digest('hex'); }
@@ -110,7 +112,10 @@ function checkPaths(entries: Array<{ relative: string; directory: boolean }>): v
     }
   }
 }
-function readArchive(bytes: Buffer): Payload[] {
+function readArchive(bytes: Buffer, onMetric?: WorkbenchMetricSink): Payload[] {
+  return measureWorkbenchPhase('archiveValidation', onMetric, () => decodeArchive(bytes, onMetric), { byteCount: bytes.length });
+}
+function decodeArchive(bytes: Buffer, onMetric?: WorkbenchMetricSink): Payload[] {
   if (bytes.length > LIMITS.archive) throw new Error('Archive exceeds the compressed-size limit.');
   const zip = new AdmZip(bytes);
   const entries = zip.getEntries();
@@ -127,7 +132,7 @@ function readArchive(bytes: Buffer): Payload[] {
   }
   const files: Payload[] = [];
   let actual = 0;
-  for (const entry of entries.filter(item => !item.isDirectory)) {
+  measureWorkbenchPhase('archiveDecode', onMetric, () => { for (const entry of entries.filter(item => !item.isDirectory)) {
     if (entry.header.method !== 0 && entry.header.method !== 8) throw new Error('Only stored and deflated ZIP entries are supported.');
     const compressed = entry.getCompressedData();
     const data = entry.header.method === 0 ? compressed : inflateRawSync(compressed, { maxOutputLength: LIMITS.file });
@@ -135,7 +140,7 @@ function readArchive(bytes: Buffer): Payload[] {
     if (data.length !== entry.header.size || data.length > LIMITS.file || actual > LIMITS.total) throw new Error('Archive size does not match its manifest or exceeds limits.');
     if (crc32(data) !== (entry.header.crc >>> 0)) throw new Error(`Archive integrity check failed: ${entry.entryName}`);
     files.push({ relative: entry.entryName, bytes: data });
-  }
+  } }, { fileCount: entries.filter(item => !item.isDirectory).length });
   const rootManifest = files.find(file => file.relative === 'SKILL.md');
   let prefix = '';
   if (!rootManifest) {
@@ -180,11 +185,22 @@ function sourceFiles(source: string): Payload[] {
   return files.sort((a, b) => a.relative.localeCompare(b.relative));
 }
 function digests(files: Payload[]): FileDigest[] { return files.map(file => ({ path: file.relative, size: file.bytes.length, sha256: hash(file.bytes) })); }
-function writeFiles(target: string, files: Payload[]): void {
-  fs.mkdirSync(target, { recursive: true });
-  for (const file of files) { const destination = path.join(target, ...file.relative.split('/')); if (file.directory) fs.mkdirSync(destination, { recursive: true }); else { fs.mkdirSync(path.dirname(destination), { recursive: true }); fs.writeFileSync(destination, file.bytes, { flag: 'wx' }); } }
+function writeFiles(target: string, files: Payload[], onMetric?: WorkbenchMetricSink): void {
+  measureWorkbenchPhase('extractWrite', onMetric, () => {
+  const created = new Set<string>();
+  const directory = (folder: string) => {
+    const full = path.resolve(folder);
+    if (!created.has(full)) { fs.mkdirSync(full, { recursive: true }); created.add(full); }
+  };
+  directory(target);
+  for (const file of files) {
+    const destination = path.join(target, ...file.relative.split('/'));
+    if (file.directory) directory(destination);
+    else { directory(path.dirname(destination)); fs.writeFileSync(destination, file.bytes, { flag: 'wx' }); }
+  }
+  }, { fileCount: files.filter(file => !file.directory).length, byteCount: files.reduce((sum, file) => sum + file.bytes.length, 0) });
 }
-function insertSkill(root: string, files: Payload[], original?: Buffer, replaceExisting = false): WorkbenchSkill {
+function insertSkill(root: string, files: Payload[], original?: Buffer, replaceExisting = false, onMetric?: WorkbenchMetricSink): WorkbenchSkill {
   const manifest = files.find(file => file.relative === 'SKILL.md');
   if (!manifest) throw new Error('No canonical SKILL.md found.');
   const name = metadata(manifest.bytes).name;
@@ -199,16 +215,18 @@ function insertSkill(root: string, files: Payload[], original?: Buffer, replaceE
   let backup: string | undefined;
   let importedInventory: FileDigest[] = [];
   try {
-    writeFiles(path.join(staging, name), files);
-    importedInventory = digests(sourceFiles(path.join(staging, name)));
+    writeFiles(path.join(staging, name), files, onMetric);
+    importedInventory = measureWorkbenchPhase('extractedReadback', onMetric, () => digests(sourceFiles(path.join(staging, name))), { fileCount: files.filter(file => !file.directory).length });
     const record: WorkbenchSkill = { ...existing, id: name, name, sourcePath };
     delete record.originalPackagePath;
     if (original) {
+      measureWorkbenchPhase('originalPreservation', onMetric, () => {
       const originalPath = path.join(state, name, 'originals', `${hash(original)}.skill`);
       guarded(root, originalPath); fs.mkdirSync(path.dirname(originalPath), { recursive: true });
       if (fs.existsSync(originalPath)) { if (hash(fs.readFileSync(originalPath)) !== hash(original)) throw new Error('Stored original hash mismatch.'); }
       else fs.writeFileSync(originalPath, original, { flag: 'wx' });
       record.originalPackagePath = originalPath;
+      }, { byteCount: original.length });
     }
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
     if (fs.existsSync(sourcePath)) {
@@ -219,7 +237,7 @@ function insertSkill(root: string, files: Payload[], original?: Buffer, replaceE
     }
     renameWithRetry(path.join(staging, name), sourcePath);
     sourceMoved = true;
-    saveCatalog(root, [...catalog.filter(item => item.id !== name), record]);
+    measureWorkbenchPhase('catalogWrite', onMetric, () => saveCatalog(root, [...catalog.filter(item => item.id !== name), record]));
     return record;
   } catch (error) {
     if (sourceMoved) {
@@ -236,11 +254,25 @@ function insertSkill(root: string, files: Payload[], original?: Buffer, replaceE
     throw error;
   } finally { fs.rmSync(staging, { recursive: true, force: true }); }
 }
-export function importSkillPackage(packagePath: string, workspaceRoot: string, replaceExisting = false): WorkbenchSkill {
+function importPackageData(packagePath: string, workspaceRoot: string, replaceExisting: boolean, onMetric?: WorkbenchMetricSink): { skill: WorkbenchSkill; files: Payload[] } {
   if (path.extname(packagePath).toLowerCase() !== '.skill') throw new Error('Select a .skill package.');
-  if (fs.statSync(packagePath).size > LIMITS.archive) throw new Error('Archive exceeds the compressed-size limit.');
-  const bytes = fs.readFileSync(packagePath);
-  return insertSkill(workspaceRoot, readArchive(bytes), bytes, replaceExisting);
+  const packageSize = fs.statSync(packagePath).size;
+  if (packageSize > LIMITS.archive) throw new Error('Archive exceeds the compressed-size limit.');
+  const bytes = measureWorkbenchPhase('archiveRead', onMetric, () => fs.readFileSync(packagePath), { byteCount: packageSize });
+  const files = readArchive(bytes, onMetric);
+  return { skill: insertSkill(workspaceRoot, files, bytes, replaceExisting, onMetric), files };
+}
+export function importSkillPackage(packagePath: string, workspaceRoot: string, replaceExisting = false): WorkbenchSkill {
+  return importPackageData(packagePath, workspaceRoot, replaceExisting).skill;
+}
+/** Reuse already validated package bytes for the first editor frame only.
+ * Editing and publication still recheck the current saved source independently. */
+export function openSkillPackage(packagePath: string, workspaceRoot: string, replaceExisting = false, onMetric?: WorkbenchMetricSink): OpenedSkillPackage {
+  const { skill, files } = importPackageData(packagePath, workspaceRoot, replaceExisting, onMetric);
+  return measureWorkbenchPhase('editorPreview', onMetric, () => ({ skill, manifestContent: files.find(file => file.relative === 'SKILL.md')!.bytes.toString('utf8'),
+    files: files.filter(file => !file.directory && !file.relative.split('/').some(part => part === '.git' || part === 'node_modules'))
+      .map(file => ({ path: file.relative, size: file.bytes.length, text: isUtf8(file.bytes) && !file.bytes.includes(0) }))
+      .sort((a, b) => a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path)) }), { fileCount: files.filter(file => !file.directory).length });
 }
 export function registerSkillFolder(workspaceRoot: string, sourcePath: string, replaceExisting = false): WorkbenchSkill {
   sourcePath = path.resolve(sourcePath);

@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const { pullManagedRepository, managedRepositoryPath } = require('../out/managed-repository.js');
 const { renderGuidedWorkbench } = require('../out/guided-workbench-html.js');
 const { GuidedWorkbenchController } = require('../out/guided-controller.js');
-const { connectWorkspaceRepository } = require('../out/guided-workspace.js');
+const { connectWorkspaceRepository, setWorkspaceRepositoryFolder } = require('../out/guided-workspace.js');
 function git(cwd, ...args) { return execFileSync('git', args, { cwd, encoding: 'utf8', windowsHide: true }).trim(); }
 function fixture(t) {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'managed-repository-test-'));
@@ -34,16 +34,17 @@ test('Git pull is available for a registered repository before a skill is opened
 test('managed Git pull downloads latest skills before work, then fast-forwards and protects local edits', async t => {
   const f = fixture(t);
   await connectWorkspaceRepository(f.root, f.remote);
+  setWorkspaceRepositoryFolder(f.root, path.join(f.base, 'skills-project'));
   let initialPath;
   const controller = new GuidedWorkbenchController(f.root, { pickFolder: async initial => { initialPath = initial; return path.join(initial, 'notes'); } });
   await controller.dispatch({ action: 'pullRepository' });
   assert.equal(controller.state.error, undefined);
-  const checkout = managedRepositoryPath(f.root, f.remote);
+  const checkout = path.join(f.base, 'skills-project');
   assert.equal(controller.state.repositoryCheckout.path, checkout);
   assert.equal(controller.state.active, undefined);
   fs.appendFileSync(path.join(f.remote, 'notes/SKILL.md'), 'Remote update.\n');
   git(f.remote, 'add', '.'); git(f.remote, 'commit', '-m', 'Update skill');
-  const pulled = await pullManagedRepository(f.root, f.remote);
+  const pulled = await pullManagedRepository(f.root, f.remote, undefined, checkout);
   assert.equal(pulled.commit, git(f.remote, 'rev-parse', 'HEAD'));
   await controller.dispatch({ action: 'openRepositorySkill' });
   assert.equal(controller.state.error, undefined);
@@ -51,7 +52,7 @@ test('managed Git pull downloads latest skills before work, then fast-forwards a
   assert.equal(controller.state.active.name, 'notes');
   assert.match(fs.readFileSync(path.join(f.root, 'skills/notes/SKILL.md'), 'utf8'), /Remote update/);
   fs.appendFileSync(path.join(checkout, 'notes/SKILL.md'), 'Keep local edit.\n');
-  await assert.rejects(pullManagedRepository(f.root, f.remote), /local changes/);
+  await assert.rejects(pullManagedRepository(f.root, f.remote, undefined, checkout), /local changes/);
   assert.match(fs.readFileSync(path.join(checkout, 'notes/SKILL.md'), 'utf8'), /Keep local edit/);
 });
 
@@ -59,7 +60,8 @@ test('managed Git pull downloads latest skills before work, then fast-forwards a
 test('cancel opening a pulled skill keeps the current create screen', async t => {
   const f = fixture(t);
   await connectWorkspaceRepository(f.root, f.remote);
-  const checkout = managedRepositoryPath(f.root, f.remote);
+  setWorkspaceRepositoryFolder(f.root, path.join(f.base, 'skills-project'));
+  const checkout = path.join(f.base, 'skills-project');
   fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
   const controller = new GuidedWorkbenchController(f.root, { pickFolder: async () => undefined });
   await controller.dispatch({ action: 'showCreate' });
