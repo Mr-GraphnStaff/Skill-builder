@@ -26,7 +26,7 @@ test('Git pull is available for a registered repository before a skill is opened
   const html = renderGuidedWorkbench(state, 'managedRepositoryNonce123');
   assert.match(html, /data-action="pullRepository"[^>]*>Git pull<\/button>/);
   assert.match(html, /data-action="openRepositorySkill"/);
-  assert.match(html, /Optional before starting skill work/);
+  assert.match(html, /repository actions are optional before starting skill work/i);
   assert.match(html, /id="pull-repository"/);
   assert.match(html, /id="open-repository-skill"/);
   assert.doesNotMatch(renderGuidedWorkbench({ ...state, connection: undefined }, 'managedRepositoryNonce123'), /data-action="pullRepository"/);
