@@ -51,6 +51,8 @@ Only existing supporting folders are included. Complex nested files and binary a
 
 For GitHub.com, submission uploads a **review branch** and creates a **pull request**, reusing an existing matching PR when retried. Review and merge follow your repository's rules. Approval alone does not put the skill on the default branch; the workbench never merges automatically. It does not upload the skill into an AI application or publish this extension to the Marketplace.
 
+Choose **Merge PR and delete branch** when the submission is ready. SkillJetty verifies the exact uploaded commit and GitHub merge rules, confirms the merge, then deletes only that unchanged submission branch using a Git SHA lease. If cleanup cannot finish, the verified merge remains recorded and the branch is retained for retry.
+
 Use **Check PRs** from Start to refresh saved submissions, including uploads made with older SkillJetty versions. If an older upload has no PR, choose **Create PR**. Refreshing status never creates a PR or requests a reviewer. Status shows awaiting review, changes requested, approved, merged, or closed without merge. If GitHub cannot be reached, the workbench shows the error and last verified status rather than guessing.
 
 This review flow supports **GitHub.com**. Other Git destinations retain branch uploads; their review process must be completed in the hosting service. Additional repository services are a future discussion.

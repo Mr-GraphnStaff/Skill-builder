@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.8
+
+- Match pull requests to the current upload commit when a skill/version branch is reused; preserve historical PR receipts during repair.
+- Recover a mismatched numbered PR from Check PRs without another upload.
+- Add an explicit Merge PR and delete branch action with exact commit verification, merge checks, confirmed merge readback and protected/default branch guards.
+
 ## 0.11.7 — 2026-10-29
 
 - Add pre-release-only privacy-safe phase diagnostics and an always-available performance log action.

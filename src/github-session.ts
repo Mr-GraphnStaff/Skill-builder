@@ -6,7 +6,7 @@ import type { GitHubRunner } from './github-review.js';
 export function createGitHubSessionRunner(getToken: () => Promise<string>, requestFactory: typeof https.request = https.request, timeoutMs = 30_000): GitHubRunner {
   return async request => {
     if (!(request.endpoint === 'user' || request.endpoint.startsWith('repos/')) || request.endpoint.startsWith('/')
-      || request.endpoint.includes('://') || /[\x00-\x20#]/.test(request.endpoint) || !['GET', 'POST'].includes(request.method)) throw new Error('Invalid GitHub API endpoint.');
+      || request.endpoint.includes('://') || /[\x00-\x20#]/.test(request.endpoint) || !['GET', 'POST', 'PUT'].includes(request.method)) throw new Error('Invalid GitHub API endpoint.');
     let token: string;
     try { token = await getToken(); } catch { throw new Error('GitHub sign-in was cancelled or unavailable. Use Connect / switch GitHub; previous uploads and PRs are retained.'); }
     if (typeof token !== 'string' || !token || /[\r\n]/.test(token)) throw new Error('GitHub authentication is unavailable. Use Connect / switch GitHub.');

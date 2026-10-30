@@ -48,7 +48,7 @@ function readReview(root: string, name: string, version: string, upload: Publica
 }
 
 /** Mutable review metadata is deliberately outside immutable release bytes. */
-export function recordLibraryReview(root: string, directory: string, result: PullRequestRecord): PullRequestRecord {
+export function recordLibraryReview(root: string, directory: string, result: PullRequestRecord, options: { repairHistoricalNumber?: number } = {}): PullRequestRecord {
   const release = localRelease(root, directory);
   const receipt = receiptPath(root, release.skillName, release.version);
   if (!fs.existsSync(receipt)) throw new Error('A verified upload receipt is required before recording a PR.');
@@ -56,7 +56,18 @@ export function recordLibraryReview(root: string, directory: string, result: Pul
   let previous: PullRequestRecord | undefined;
   try { previous = readReview(root, release.skillName, release.version, upload); } catch { /* A fresh server check can repair invalid metadata. */ }
   let pr = reviewRecord(result, upload.repository);
-  if (previous?.number && pr.number && previous.number !== pr.number) throw new Error('A different PR is already recorded for this version; inspect its repository state.');
+  if (previous?.number && pr.number && previous.number !== pr.number) {
+    const repair = options.repairHistoricalNumber === previous.number
+      && ((previous.identityVerified === false && !!previous.headCommit && previous.headCommit !== upload.commit)
+        || previous.status === 'closed' || previous.status === 'merged')
+      && pr.identityVerified === true && pr.headCommit === upload.commit
+      && pr.head === upload.branch && pr.base === upload.baseBranch;
+    if (!repair) throw new Error('A different PR is already recorded for this version; inspect its repository state.');
+    const oldTarget = reviewPath(root, release.skillName, release.version);
+    const history = `${oldTarget}.superseded-${previous.number}-${randomUUID()}.json`; safe(root, history);
+    fs.copyFileSync(oldTarget, history, fs.constants.COPYFILE_EXCL);
+    previous = undefined; // Old approvals, reviewer notifications and errors belong to the old PR.
+  }
   if (previous && pr.error) pr = { ...previous, ...pr, status: pr.number && pr.identityVerified && !previous.number ? pr.status : previous.status,
     checkedAt: previous.checkedAt, number: pr.number ?? previous.number, creationUncertain: pr.creationUncertain ?? previous.creationUncertain };
   const target = reviewPath(root, release.skillName, release.version);

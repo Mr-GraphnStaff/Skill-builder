@@ -57,3 +57,14 @@ test('an absolute owned deadline stops a response that keeps sending bytes', asy
     assert.equal(f.calls[0].request.destroyed, true);
   } finally { clearTimeout(guard); for (const call of f.calls) call.request.destroy(); }
 });
+
+
+test('merge uses authenticated PUT while unleased reference DELETE is unavailable', async () => {
+  const f = transport(); let sessions = 0;
+  const run = createGitHubSessionRunner(async () => { sessions++; return 'synthetic-test-token'; }, f.factory);
+  const body = { sha: 'a'.repeat(40), merge_method: 'merge' };
+  await run({ method: 'PUT', endpoint: 'repos/fixture-owner/fixture-repository/pulls/10/merge', body });
+  assert.equal(f.calls[0].options.method, 'PUT'); assert.deepEqual(JSON.parse(f.calls[0].body), body);
+  await assert.rejects(run({ method: 'DELETE', endpoint: 'repos/fixture-owner/fixture-repository/git/refs/heads/skills/sample/1.0.0' }), /Invalid GitHub API endpoint/);
+  assert.equal(sessions, 1); assert.equal(f.calls.length, 1);
+});

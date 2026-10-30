@@ -1,7 +1,9 @@
+import { deleteBranchWithLease } from './github-branch-delete.js';
+import { mergeVerifiedPullRequest } from './github-merge.js';
 import { runPublisherProcess } from './repository-publisher.js';
 import type { PullRequestRecord, ReviewerChoice } from './guided-contract.js';
 
-export type GitHubRequest = { method: 'GET' | 'POST'; endpoint: string; body?: unknown };
+export type GitHubRequest = { method: 'GET' | 'POST' | 'PUT'; endpoint: string; body?: unknown };
 export type GitHubRunner = (request: GitHubRequest) => Promise<unknown>;
 export type ReviewContext = { repository: string; baseBranch: string; branch: string; commit: string; skillName: string; version: string };
 type Repository = { owner: string; name: string; fullName: string };
@@ -38,7 +40,7 @@ export function reviewRecord(value: unknown, repository: string): PullRequestRec
   const input = value as PullRequestRecord;
   if (!input || typeof input.supported !== 'boolean' || !statuses.has(input.status)) throw new Error('The saved pull request receipt is invalid.');
   const output: PullRequestRecord = { supported: input.supported, status: input.status };
-  for (const key of ['base', 'head', 'headCommit', 'error', 'warning', 'reviewRequestError'] as const) {
+  for (const key of ['base', 'head', 'headCommit', 'error', 'warning', 'reviewRequestError', 'mergeCommit', 'mergeError', 'branchDeleteError'] as const) {
     if (input[key] !== undefined) {
       if (typeof input[key] !== 'string' || input[key]!.length > 2000 || /\x00/.test(input[key]!)) throw new Error('The saved pull request receipt is invalid.');
       output[key] = input[key];
@@ -50,7 +52,7 @@ export function reviewRecord(value: unknown, repository: string): PullRequestRec
   }
   if (input.number !== undefined) { output.number = input.number; output.url = pullRequestUrl(repository, input.number); }
   if (input.reviewer !== undefined) { if (!loginPattern.test(input.reviewer)) throw new Error('The saved reviewer is invalid.'); output.reviewer = input.reviewer; }
-  for (const key of ['reviewerRequested', 'identityVerified', 'creationUncertain', 'reviewRequestUncertain'] as const) if (typeof input[key] === 'boolean') output[key] = input[key];
+  for (const key of ['branchDeleted', 'reviewerRequested', 'identityVerified', 'creationUncertain', 'reviewRequestUncertain'] as const) if (typeof input[key] === 'boolean') output[key] = input[key];
   return output;
 }
 
@@ -76,7 +78,7 @@ function validateContext(context: ReviewContext): Repository | undefined {
 
 export class GitHubReviewService {
   private readonly run: GitHubRunner;
-  constructor(cwd: string, runner?: GitHubRunner) {
+  constructor(private readonly cwd: string, runner?: GitHubRunner) {
     this.run = runner ?? (async request => {
       const args = ['api', '--hostname', 'github.com', '--method', request.method, request.endpoint, '--header', 'Accept: application/vnd.github+json'];
       if (request.body !== undefined) args.push('--input', '-');
@@ -139,6 +141,34 @@ export class GitHubReviewService {
     if (!Number.isSafeInteger(rows[0]?.number) || rows[0].number <= 0) throw new Error('GitHub returned an invalid pull request number.');
     return this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/pulls/${rows[0].number}` });
   }
+  /** A branch name can be reused after a PR is merged. Only its current
+   * submission may satisfy Create PR; historical mismatches are not receipts. */
+  private async findForCreation(context: ReviewContext, previous?: PullRequestRecord): Promise<any | undefined> {
+    const repo = validateContext(context)!;
+    const exact = (raw: any) => raw.base?.repo?.full_name?.toLowerCase() === repo.fullName.toLowerCase()
+      && raw.head?.repo?.full_name?.toLowerCase() === repo.fullName.toLowerCase()
+      && raw.base?.ref === context.baseBranch && raw.head?.ref === context.branch && raw.head?.sha === context.commit;
+    const terminal = (raw: any) => raw.state === 'closed' || !!raw.merged_at || raw.merged === true;
+    let savedTerminal: any;
+    if (previous?.number) {
+      const saved = await this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/pulls/${previous.number}` }) as any;
+      if (!terminal(saved)) return saved;
+      if (exact(saved)) savedTerminal = saved;
+    }
+    const rows = await this.pages(`repos/${repo.fullName}/pulls?state=all&head=${encodeURIComponent(`${repo.owner}:${context.branch}`)}`);
+    const candidates: any[] = [];
+    for (const row of rows) {
+      if (!Number.isSafeInteger(row?.number) || row.number <= 0) throw new Error('GitHub returned an invalid pull request number.');
+      const raw = row.base && row.head && typeof row.state === 'string' ? row
+        : await this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/pulls/${row.number}` });
+      if (!terminal(raw) || exact(raw)) candidates.push(raw);
+    }
+    const open = candidates.filter(raw => !terminal(raw));
+    if (open.length > 1) throw new Error('More than one open PR uses the upload branch. Inspect GitHub before retrying.');
+    if (open.length) return this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/pulls/${open[0].number}` }); // A mismatched open PR fails identity checks; never create beside it.
+    const chosen = candidates.sort((a, b) => b.number - a.number)[0] ?? savedTerminal;
+    return chosen ? this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/pulls/${chosen.number}` }) : undefined;
+  }
   private async status(context: ReviewContext, raw: any, previous?: PullRequestRecord): Promise<PullRequestRecord> {
     const output = this.identity(context, raw, previous);
     if (!output.identityVerified) return output;
@@ -172,29 +202,34 @@ export class GitHubReviewService {
   async ensure(context: ReviewContext, previous?: PullRequestRecord): Promise<PullRequestRecord> {
     const repo = validateContext(context); if (!repo) return this.check(context, previous);
     try {
-      const found = await this.find(context, previous);
-      if (found) return await this.status(context, found, previous);
+      const found = await this.findForCreation(context, previous);
+      if (found) return await this.status(context, found, previous?.number === found.number ? previous : undefined);
       if (previous?.creationUncertain) return { ...previous, lastAttemptAt: new Date().toISOString(), error: 'The earlier creation is still unconfirmed. Use Check PRs before retrying Create PR; no duplicate write was attempted.' };
+      // Historical PR identity/reviewer state must not carry into a new submission.
+      previous = { supported: true, status: 'uploaded' };
       const ref = await this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/git/ref/heads/${encodeURIComponent(context.branch)}` }) as any;
       if (ref?.ref !== `refs/heads/${context.branch}` || ref.object?.sha !== context.commit) return { ...previous, supported: true, status: 'unknown', warning: 'The upload branch no longer matches the recorded version commit. No PR was created; inspect the branch and upload receipt.' };
       // No skill text or user changelog is embedded: avoid automatic mentions
       // and issue-closing instructions from imported content.
       const prefix = `${encodeURIComponent(context.skillName)}/${encodeURIComponent(context.version)}`;
       const base = `https://github.com/${repo.fullName}/blob/${context.commit}/${prefix}`;
-      const body = `SkillJetty version ${context.version} for ${context.skillName}.\n\nVerified upload commit: ${context.commit}\n\n- [Editable source](https://github.com/${repo.fullName}/tree/${context.commit}/${prefix}/source/${encodeURIComponent(context.skillName)})\n- [Skill package](${base}/${encodeURIComponent(`${context.skillName}-${context.version}.skill`)})\n- [Version notes](${base}/CHANGELOG.md)\n\nReview and merge remain separate actions. SkillJetty does not merge this pull request.`;
+      const body = `SkillJetty version ${context.version} for ${context.skillName}.\n\nVerified upload commit: ${context.commit}\n\n- [Editable source](https://github.com/${repo.fullName}/tree/${context.commit}/${prefix}/source/${encodeURIComponent(context.skillName)})\n- [Skill package](${base}/${encodeURIComponent(`${context.skillName}-${context.version}.skill`)})\n- [Version notes](${base}/CHANGELOG.md)\n\nReview and merge remain separate actions. Use the explicit Merge action when this exact submission is ready.`;
       let created: any;
       try {
         created = await this.run({ method: 'POST', endpoint: `repos/${repo.fullName}/pulls`, body: { title: `SkillJetty: ${context.skillName} ${context.version}`, head: context.branch, base: context.baseBranch, body } });
         this.identity(context, created, previous);
       }
       catch (error) {
-        try { const reconciled = await this.find(context); if (reconciled) return await this.status(context, reconciled, previous); } catch { /* Keep the original write ambiguous, never retry POST here. */ }
+        try { const reconciled = await this.findForCreation(context); if (reconciled) return await this.status(context, reconciled, previous); } catch { /* Keep the original write ambiguous, never retry POST here. */ }
         return { ...previous, supported: true, status: previous?.status ?? 'uploaded', creationUncertain: true, lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR creation was not confirmed. ${githubError(error)}` };
       }
       const confirmed = this.identity(context, created, previous);
       // Preserve a successfully created PR even if the following reviews read fails.
       return this.check(context, confirmed);
     } catch (error) { return { ...previous, supported: true, status: previous?.status ?? 'uploaded', lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR not created or verified. ${githubError(error)}` }; }
+  }
+  async merge(context: ReviewContext, previous: PullRequestRecord): Promise<PullRequestRecord> {
+    return mergeVerifiedPullRequest(context, previous, this.run, current => deleteBranchWithLease(this.cwd, current));
   }
   async requestReviewer(context: ReviewContext, previous: PullRequestRecord, reviewer: string): Promise<PullRequestRecord> {
     const repo = validateContext(context);

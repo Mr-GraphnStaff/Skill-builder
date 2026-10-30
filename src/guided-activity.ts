@@ -19,6 +19,7 @@ export function activityForAction(action: GuidedAction): string {
     createRepository: 'Creating the repository you confirmed…', revealPackage: 'Opening the package folder…',
     loadReviewers: 'Finding eligible reviewers…', checkPullRequests: 'Checking recorded pull requests…',
     checkPullRequest: 'Checking this pull request…', createPullRequest: 'Finding or creating this pull request…',
+    mergePullRequest: 'Verifying and merging this submission, then removing its merged branch…',
     requestReviewer: 'Sending the review request you confirmed…', connectGitHub: 'Waiting for GitHub sign-in in VS Code…',
     openPullRequest: 'Opening the recorded pull request…', openLink: 'Opening the selected link…',
     edit: 'Returning to your draft…', back: 'Opening the previous step…', startAnother: 'Opening your skills…',

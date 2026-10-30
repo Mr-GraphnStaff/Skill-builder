@@ -75,3 +75,9 @@ The integrated review flow currently supports GitHub.com. Other Git destinations
 | Historical version is corrupt | Drafts remain available. Recover that version from a known good copy before restoring it. |
 
 Keep `skills/`, `releases/`, `workbench/` and `.skill-workbench/` with the local workspace. The shared repository contains version bundles; each teammate uses their own workspace and Git identity. PR metadata is stored separately from immutable release contents. The workbench does not run AI models or replace repository merge rules.
+
+### Merge a submitted skill
+
+Choose **Merge PR and delete branch** on the recorded submission when it is ready. The action verifies the PR repository, target, branch, commit and checks before requesting a merge. Only a confirmed merge permits cleanup; a Git SHA lease prevents cleanup from deleting a newer upload on the same branch. A cleanup failure is reported separately and can be retried without uploading or merging again.
+
+If an older submission is shown for a reused version branch, use **Create PR for this upload** or **Find current PR for this upload**. Historical receipts are preserved while the current submission is verified.

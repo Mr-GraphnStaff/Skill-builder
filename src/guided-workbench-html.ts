@@ -54,6 +54,7 @@ function repositoryTools(state: GuidedState): string {
 }
 function reviewLabel(pr?: PullRequestRecord): string {
   if (!pr) return 'Uploaded — PR not checked';
+  if (pr.identityVerified === false) return 'Status not verified for this upload';
   const labels: Record<PullRequestRecord['status'], string> = {
     uploaded: 'Uploaded — PR not created', awaiting_review: 'Awaiting review',
     changes_requested: 'Changes requested', approved: 'Approved — awaiting merge',
@@ -73,16 +74,19 @@ function reviewerPicker(state: GuidedState): string {
 }
 function pullRequestPanel(pr: PullRequestRecord | undefined, directory: string | undefined): string {
   const attrs = directory ? `data-directory="${escape(directory)}"` : '';
-  return `<section class="card pr-card"><h2>${pr?.number ? `Pull request #${escape(pr.number)}` : 'Pull request'}</h2>
-    <p class="result-badge ${pr?.status === 'merged' ? 'pass' : 'warning'}"><span aria-hidden="true">${pr?.status === 'merged' ? '✓' : '•'}</span> ${pr?.error && pr.status !== 'unknown' ? 'Last verified status: ' : ''}${escape(reviewLabel(pr))}</p>
-    ${pr?.checkedAt ? `<p class="hint">Last verified: <time datetime="${escape(pr.checkedAt)}">${escape(pr.checkedAt)}</time></p>` : '<p class="hint">No verified status check has been recorded yet.</p>'}
+  return `<section class="card pr-card"><h2>${pr?.number && pr.identityVerified !== false ? `Pull request #${escape(pr.number)}` : 'Pull request for this upload'}</h2>
+    <p class="result-badge ${pr?.status === 'merged' && pr.identityVerified !== false ? 'pass' : 'warning'}"><span aria-hidden="true">${pr?.status === 'merged' && pr.identityVerified !== false ? '✓' : '•'}</span> ${pr?.error && pr.status !== 'unknown' ? 'Last verified status: ' : ''}${escape(reviewLabel(pr))}</p>
+    ${pr?.checkedAt && pr.identityVerified !== false ? `<p class="hint">Last verified: <time datetime="${escape(pr.checkedAt)}">${escape(pr.checkedAt)}</time></p>` : '<p class="hint">No verified status check has been recorded yet.</p>'}
     ${pr?.lastAttemptAt && pr.lastAttemptAt !== pr.checkedAt ? `<p class="hint">Latest attempt: <time datetime="${escape(pr.lastAttemptAt)}">${escape(pr.lastAttemptAt)}</time></p>` : ''}
     ${pr?.error ? `<p class="warning"><span aria-hidden="true">!</span> The latest PR operation could not be verified: ${escape(pr.error)}. Your uploaded version remains preserved.</p>` : ''}
     ${pr?.warning ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(pr.warning)}</p>` : ''}
     ${pr?.reviewRequestError ? `<p class="warning"><span aria-hidden="true">!</span> The PR exists, but the review request was not confirmed: ${escape(pr.reviewRequestError)}. Do not upload the version again.</p>` : ''}
-    ${pr?.reviewerRequested && pr.reviewer ? `<p>Review requested from <strong>@${escape(pr.reviewer)}</strong>.</p>` : ''}
-    ${directory ? `<div class="button-row">${pr?.number ? secondary('openPullRequest', `Open PR #${pr.number}`, attrs) : ''}${secondary('checkPullRequest', 'Check status', attrs)}${pr?.supported !== false && !pr?.number ? secondary('createPullRequest', 'Create PR for this upload', attrs) : ''}${pr?.reviewRequestError && pr.reviewer && pr.number ? secondary('requestReviewer', `Retry review request to @${pr.reviewer} — notify reviewer`, `${attrs} data-reviewer="${escape(pr.reviewer)}" data-confirmed="true"`) : ''}</div>` : ''}
-    <p class="hint">Approval does not mean merged. Only a verified merge is shown as Merged. SkillJetty never merges a PR for you.</p></section>`;
+    ${pr?.mergeError ? `<p class="warning">Merge not confirmed: ${escape(pr.mergeError)}</p>` : ''}
+    ${pr?.branchDeleteError ? `<p class="warning">${pr.identityVerified === true && pr.status === 'merged' ? 'The PR is merged. Branch cleanup needs attention:' : 'Recorded branch cleanup could not be verified:'} ${escape(pr.branchDeleteError)}</p>` : ''}
+    ${pr?.status === 'merged' && pr.identityVerified === true && pr.branchDeleted ? '<p>Merge confirmed. Submission branch deleted.</p>' : ''}
+    ${pr?.reviewerRequested && pr.identityVerified !== false && pr.reviewer ? `<p>Review requested from <strong>@${escape(pr.reviewer)}</strong>.</p>` : ''}
+    ${directory ? `<div class="button-row">${pr?.number ? secondary('openPullRequest', pr.identityVerified === false ? `Inspect mismatched PR #${pr.number}` : `Open PR #${pr.number}`, attrs) : ''}${secondary('checkPullRequest', 'Check status', attrs)}${pr?.number && pr.identityVerified && pr.status !== 'closed' && (pr.status !== 'merged' || !pr.branchDeleted) ? secondary('mergePullRequest', pr.status === 'merged' ? 'Delete merged PR branch' : 'Merge PR and delete branch', `${attrs} data-confirmed="true"`) : ''}${pr?.supported !== false && (!pr?.number || pr.identityVerified === false || pr.status === 'closed') ? secondary('createPullRequest', pr?.status === 'closed' && pr.identityVerified ? 'Find current PR for this upload' : 'Create PR for this upload', attrs) : ''}${pr?.reviewRequestError && pr.identityVerified !== false && pr.reviewer && pr.number ? secondary('requestReviewer', `Retry review request to @${pr.reviewer} — notify reviewer`, `${attrs} data-reviewer="${escape(pr.reviewer)}" data-confirmed="true"`) : ''}</div>` : ''}
+    <p class="hint">Merge verifies this exact uploaded commit. Its branch is removed only after GitHub confirms the merge.</p></section>`;
 }
 function reviews(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
   return { title: 'Check PRs', hint: 'Check the connected repository’s uploaded versions. Refreshing status does not create PRs, request reviews, or merge anything.',

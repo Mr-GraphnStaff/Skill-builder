@@ -414,7 +414,7 @@ export class GuidedWorkbenchController {
             try {
               const reviewed = await reviewLibraryRelease(this.workspace(), result.release.directory, 'create', string('reviewer'), this.hooks.github);
               this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError ?? result.cleanupError;
-              this.state.receipt.note = reviewed.pr.error ? reviewed.pr.number && reviewed.pr.identityVerified ? 'PR created; the latest review status is unavailable. Open or check the recorded PR; the upload is retained.' : 'Uploaded — PR not created or verified. The uploaded version and draft remain recoverable; retry from Check PRs.' : reviewed.pr.reviewRequestError ? 'PR created — review request failed or remains uncertain. Check the recorded PR without uploading another version.' : 'Uploaded with a recorded PR. Review, checks and merge are separate actions; SkillJetty does not merge.';
+              this.state.receipt.note = reviewed.pr.error ? reviewed.pr.number && reviewed.pr.identityVerified ? 'PR created; the latest review status is unavailable. Open or check the recorded PR; the upload is retained.' : 'Uploaded — PR not created or verified. The uploaded version and draft remain recoverable; retry from Check PRs.' : reviewed.pr.reviewRequestError ? 'PR created — review request failed or remains uncertain. Check the recorded PR without uploading another version.' : 'Uploaded with a recorded PR. Use Merge PR and delete branch when this submission is ready.';
             } catch {
               this.state.receipt.pr = { supported: true, status: 'uploaded', error: 'Upload is verified, but PR metadata could not be saved. Use Check PRs before retrying; the draft and release remain recoverable.' };
               this.state.receipt.note = 'Uploaded — PR receipt not confirmed. No further upload is needed to retry PR creation.';
@@ -459,12 +459,19 @@ export class GuidedWorkbenchController {
           if (items.length > 50) this.state.reviewQueueError = 'The first 50 versions were checked. Check additional versions individually to keep requests bounded.';
           await this.refreshReviews(); break;
         }
-        case 'checkPullRequest': case 'createPullRequest': case 'requestReviewer': {
+        case 'mergePullRequest': case 'checkPullRequest': case 'createPullRequest': case 'requestReviewer': {
+          if (message.action === 'mergePullRequest' && payload.confirmed !== true) throw new Error('Choose Merge PR and delete branch to confirm this exact submission.');
           if (message.action === 'requestReviewer' && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request first.');
           if (message.action === 'createPullRequest' && string('reviewer') && payload.confirmed !== true) throw new Error('Explicitly confirm the selected reviewer before creating a PR with a review request.');
-          this.state.busy = true; this.progress(message.action === 'checkPullRequest' ? 'Checking this recorded PR…' : message.action === 'createPullRequest' ? 'Finding or creating the PR for the existing upload…' : 'Requesting the selected eligible reviewer…');
-          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github);
+          this.state.busy = true; this.progress(message.action === 'mergePullRequest' ? 'Verifying this submission, merging it and cleaning up its branch…' : message.action === 'checkPullRequest' ? 'Checking this recorded PR…' : message.action === 'createPullRequest' ? 'Finding or creating the PR for the existing upload…' : 'Requesting the selected eligible reviewer…');
+          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'mergePullRequest' ? 'merge' : message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github);
           if (this.state.receipt?.directory === string('directory')) { this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError; }
+          if (message.action === 'mergePullRequest') {
+            if (reviewed.pr.mergeError) this.state.error = reviewed.pr.mergeError;
+            else if (reviewed.pr.branchDeleteError) this.state.error = `PR merged. Branch cleanup needs attention: ${reviewed.pr.branchDeleteError}`;
+            else if (reviewed.pr.status !== 'merged' || reviewed.pr.identityVerified !== true) this.state.error = 'The merge outcome is not verified for this exact submission. Check the recorded PR before retrying.';
+            else this.state.notice = reviewed.pr.branchDeleted ? 'PR merged and its submission branch deleted.' : 'PR merge status refreshed.';
+          }
           await this.refreshReviews(); break;
         }
         case 'openPullRequest': {
@@ -488,9 +495,9 @@ export class GuidedWorkbenchController {
       const detail = error instanceof Error ? error.message : String(error);
       this.state.error = friendlyError(detail);
     } finally {
-      if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
+      if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
       this.state.busy = false; this.state.progress = undefined; this.state.waitingForInput = false;
-      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action)) this.state.skillsStale = true;
+      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest'].includes(message.action)) this.state.skillsStale = true;
     }
     return this.state;
   }

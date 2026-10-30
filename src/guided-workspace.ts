@@ -325,14 +325,14 @@ export function libraryReviewContext(root: string, directory: string): { item: L
   return { item, context: { repository: item.repository, baseBranch: item.baseBranch ?? connection.baseBranch, branch: item.branch, commit: item.commit, skillName: item.skillName, version: item.version } };
 }
 
-export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer', reviewer?: string, runner?: GitHubRunner): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
+export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer' | 'merge', reviewer?: string, runner?: GitHubRunner): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
   const { item, context } = libraryReviewContext(root, directory);
   const service = new GitHubReviewService(root, runner);
-  let pr = action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
+  let pr = action === 'merge' ? item.pr ? await service.merge(context, item.pr) : { supported: true, status: 'uploaded' as const, mergeError: 'Create and verify this upload’s PR before merging.' } : action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
     ? item.pr ? await service.requestReviewer(context, item.pr, reviewer ?? '') : { supported: !!githubRepository(context.repository), status: 'uploaded' as const, reviewRequestError: 'Create the PR before requesting a reviewer.' }
     : await service.check(context, item.pr);
   // Confirm the PR receipt on disk before any optional notification or cleanup.
-  pr = recordLibraryReview(root, item.directory, pr);
+  pr = recordLibraryReview(root, item.directory, pr, action === 'create' ? { repairHistoricalNumber: item.pr?.number } : {});
   if (action === 'create' && reviewer && pr.number && pr.identityVerified) {
     pr = recordLibraryReview(root, item.directory, await service.requestReviewer(context, pr, reviewer));
   }

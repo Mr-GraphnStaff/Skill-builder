@@ -7,6 +7,7 @@ export type PullRequestRecord = {
   number?: number; url?: string; base?: string; head?: string; headCommit?: string;
   checkedAt?: string; lastAttemptAt?: string; error?: string; warning?: string;
   reviewer?: string; reviewerRequested?: boolean; reviewRequestError?: string;
+  mergeCommit?: string; branchDeleted?: boolean; mergeError?: string; branchDeleteError?: string;
   identityVerified?: boolean; creationUncertain?: boolean; reviewRequestUncertain?: boolean;
 };
 export type GuidedReviewItem = { directory: string; skillName: string; version: string; repository?: string; pr?: PullRequestRecord };
@@ -50,5 +51,5 @@ export type GuidedState = {
 export type GuidedAction = 'ready' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
   | 'verifyRepository' | 'setRepositoryFolder' | 'pullRepository' | 'openRepositorySkill' | 'showCreate' | 'createSkill' | 'openPackage' | 'openPackagePath' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
-  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage';
+  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage';
 export type GuidedMessage = { action: GuidedAction; payload?: Record<string, unknown>; editorSkillId?: string; editorPath?: string; editorContent?: string };
