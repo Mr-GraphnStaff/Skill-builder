@@ -16,7 +16,7 @@ The supplied log records 30.021 seconds processing for selecting/connecting the 
 | UX2 | Workflow and repository controls explain effects where used; keyboard and narrow layouts remain usable | Mara | Lena | Passed bounded browser and UI checks |
 | PERF1 | Separate local/remote Git, authentication/API requests, worker job and phase timings | Ishan | Morgan and Lena | Implemented; runtime/privacy tests passed; no speedup claim |
 | PRIV1 | Diagnostics exclude credentials, paths, URLs, skill content and arbitrary error strings; failures do not affect work | Ishan | Morgan | Independent review/tests/package check passed |
-| REL1 | Tests, audits, exact package/source binding, independent review, public catalog and payload verification | Avery | Lena and Morgan | Build 956 passed 294 tests and exact-artifact native smoke; pending configured approval/publication |
+| REL1 | Tests, audits, exact package/source binding, independent review, public catalog and payload verification | Avery | Lena and Morgan | Complete: 294 tests, exact-artifact native smoke, public catalog/channel and byte parity; reconciliation 957 succeeded |
 
 ## Working ledger
 
@@ -36,4 +36,4 @@ Version 0.11.8 remains the previous public preview. If a material regression app
 
 ## Continuation
 
-Implementation and independent review are complete within the documented pre-release scope. Build 956 targets `f7d89b081fc68cfb8e9b36db3363fd58308d513a`; 294/294 CI tests, audits, artifact security check and exact-artifact native smoke passed. The Publish stage waits for its configured maintainer approval. Approval has been requested from the lead; it was not self-approved or bypassed. After approval, verify public catalog/channel and downloaded payload. See `2026-10-30-prerelease-0.11.9.md` for evidence and remaining production acceptance needs.
+Delivery complete within documented pre-release scope. Build 956 source is `f7d89b081fc68cfb8e9b36db3363fd58308d513a`; 294/294 CI tests, audits, artifact security check and exact-artifact native smoke passed. Its configured approval was recorded under the lead's existing explicit publication authorization, with an evidence-bearing comment identifying Codex as the executing agent. Upload succeeded, but catalog visibility exceeded that run's window, so build 956 remains failed. Read-only reconciliation 957 succeeded without uploading: original provenance, public 0.11.9 pre-release catalog visibility and exact package/payload bytes verified. A separate anonymous catalog read confirmed validated/public and latest 0.11.9. Automatic updating or loaded-version acceptance in the lead's working profile remains unverified. See `2026-10-30-prerelease-0.11.9.md` for evidence and production acceptance needs.
