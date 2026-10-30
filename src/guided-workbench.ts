@@ -59,9 +59,11 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
 
   const saveExternalEdits = async () => {
     const root = await hooks.getRoot(); if (!root) return;
+    const localRepository = getWorkspaceConnection(root)?.localPath;
+    const managedRoots = [path.join(root, 'skills'), ...(localRepository ? [localRepository] : [])];
     for (const document of vscode.workspace.textDocuments) {
-      const managedDocument = ['skills', path.join('.skill-workbench', 'repositories')].some(folder => {
-        const relative = path.relative(path.join(root, folder), document.uri.fsPath);
+      const managedDocument = managedRoots.some(folder => {
+        const relative = path.relative(folder, document.uri.fsPath);
         return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
       });
       if (document.isDirty && document.uri.scheme === 'file' && managedDocument) {

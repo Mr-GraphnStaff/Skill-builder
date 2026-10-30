@@ -9,7 +9,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function fixture() {
+function fixture(options = {}) {
   const panels = [], controllers = [], commands = new Map(), events = [], dispatchHooks = new Map();
   const disposable = () => ({ dispose() {} });
   class Controller {
@@ -46,13 +46,14 @@ function fixture() {
   try {
     Module._load = function(id, parent, main) {
       if (parent?.filename === file && id === 'vscode') return vscode;
+      if (parent?.filename === file && id === './guided-workspace.js' && options.connection) return { getWorkspaceConnection: () => options.connection };
       if (parent?.filename === file && id === './guided-controller.js') return { GuidedWorkbenchController: Controller };
       return originalLoad.call(this, id, parent, main);
     };
     require(file).activateGuidedWorkbench({ subscriptions: [], extensionPath: path.resolve(__dirname, '..'),
       extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: async () => path.resolve('fake-prerelease-data') });
   } finally { Module._load = originalLoad; delete require.cache[file]; }
-  return { panels, controllers, commands, events, dispatchHooks,
+  return { panels, controllers, commands, events, dispatchHooks, vscode,
     async open() { await commands.get('skillBuilder.openWorkbench')(); return panels.at(-1); } };
 }
 
@@ -187,4 +188,19 @@ test('reopened panel starts a separate diagnostics context while an old task fin
   assert.notEqual(startup.operationId, old.operationId);
   assert.equal(metrics().find(metric => metric.stage === 'editorPreparation').operationId, old.operationId);
   assert.equal(replacement.htmlWrites, 1);
+});
+
+
+test('pull protects unsaved documents only inside the selected local repository', async () => {
+  const localPath = path.resolve('selected-skills-project');
+  const f = fixture({ connection: { repository: 'https://github.com/example/skills', localPath } }), panel = await f.open();
+  let saved = 0, unrelated = 0;
+  f.vscode.workspace.textDocuments.push(
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(localPath, 'notes/SKILL.md') }, async save() { saved++; return false; } },
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.resolve('unrelated-project/notes.md') }, async save() { unrelated++; return true; } }
+  );
+  await panel.receive({ action: 'pullRepository' });
+  assert.equal(saved, 1); assert.equal(unrelated, 0);
+  assert.equal(f.events.some(event => event.type === 'dispatch' && event.action === 'pullRepository'), false);
+  assert.match(f.controllers[0].state.error, /could not be saved/);
 });
