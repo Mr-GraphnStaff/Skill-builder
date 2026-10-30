@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { emitWorkbenchMetric, type WorkbenchMetric } from './workbench-metrics.js';
+import { currentWorkbenchMetrics, emitWorkbenchMetric, withWorkbenchMetrics, type WorkbenchMetric } from './workbench-metrics.js';
 import * as path from 'node:path';
 import { homedir } from 'node:os';
 import { getWorkspaceConnection } from './guided-workspace.js';
@@ -97,7 +97,8 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       }
       if (['pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPackage', 'openPackagePath'].includes(message.action)) await saveExternalEdits();
       if (panel !== activePanel || controller !== activeController) return;
-      await activeController.dispatch(message);
+      const operationContext = { ...metricContext };
+      await withWorkbenchMetrics(metric => logMetric(metric, operationContext), () => activeController.dispatch(message));
     } catch (error) { activeController.state.error = error instanceof Error ? error.message : String(error); }
     finally { clearInterval(heartbeat); }
     const elapsed = Date.now() - started;
@@ -144,8 +145,11 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
           return session.accessToken;
         }),
         connectGitHub: async () => {
-          const session = await vscode.authentication.getSession('github', ['repo'], { forceNewSession: { detail: 'Choose the GitHub account with access to your connected skill repository. This account is managed by VS Code.' }, clearSessionPreference: true });
-          return session.account.label;
+          const started = performance.now(); let outcome: 'ok' | 'error' = 'error';
+          try {
+            const session = await vscode.authentication.getSession('github', ['repo'], { forceNewSession: { detail: 'Choose the GitHub account with access to your connected skill repository. This account is managed by VS Code.' }, clearSessionPreference: true });
+            outcome = 'ok'; return session.account.label;
+          } finally { emitWorkbenchMetric(currentWorkbenchMetrics(), { stage: 'authentication', operation: 'switchSession', durationMs: performance.now() - started, outcome }); }
         },
         chooseRepositoryFolder: async current => (await vscode.window.showOpenDialog({
           title: 'Choose the actual local skills repository folder', defaultUri: vscode.Uri.file(await pickerRoot(current)),
@@ -189,7 +193,8 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         render();
         // Initial repository verification runs after first paint and does not
         // serialize or block local file opening/editing.
-        void createdController.verifyRepository();
+        const verificationContext = { action: 'startupRepositoryVerification', operationId: randomUUID() };
+        void withWorkbenchMetrics(metric => logMetric(metric, verificationContext), () => createdController.verifyRepository());
       }
       const memory = process.memoryUsage();
       activityLog.appendLine(`${new Date().toISOString()} action=OpenWorkbench durationMs=${Date.now() - started} hostHeapUsedBytes=${memory.heapUsed} hostHeapDeltaBytes=${memory.heapUsed - memoryBefore} hostExternalBytes=${memory.external} outcome=${createdController.state.error ? 'error' : 'completed'}`);

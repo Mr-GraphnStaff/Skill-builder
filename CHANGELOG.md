@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.9 — 2026-10-30 (public pre-release)
+
+- Keep operation status visible from the top of the workbench while scrolling, with distinct waiting, working and completion feedback.
+- Put the skill task first and explain workflow actions and optional repository settings where they are used.
+- Separate local Git, remote Git, managed GitHub authentication and API timings using bounded diagnostics without credentials, paths or repository names.
+- Identify background jobs and their phases so snapshot and release preparation delays can be investigated.
+
 ## 0.11.8
 
 - Match pull requests to the current upload commit when a skill/version branch is reused; preserve historical PR receipts during repair.

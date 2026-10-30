@@ -1,5 +1,13 @@
 # Responsive workbench and activity feedback
 
+## Public pre-release 0.11.9: explain the wait
+
+Operation status begins at the top of the workbench and stays visible while scrolling. Contextual help explains workflow actions and optional repository/GitHub settings. A file picker or account selection is a request for your input, distinct from processing; elapsed time and host responses do not imply a percentage complete.
+
+Open **SkillJetty: Open Workbench**, then **Open performance log** to inspect the local **SkillJetty — Pre-release Performance** output channel. Each foreground operation has an ID; startup repository verification is correlated separately. Git diagnostics distinguish local commands from remote operations. Managed GitHub session acquisition is timed separately from API requests, including bounded HTTP outcomes and timeouts. Background worker records identify the job and measured phases. Repeated calls appear as repeated records; an error or timeout is not automatically described as a retry.
+
+These diagnostics use fixed categories and numeric/boolean fields, never command arguments, repository URLs, filesystem paths, tokens, request bodies, response bodies or arbitrary error text. They stay in the local Output channel. Git's own credential helper/SSO exchange is included in the remote Git duration: the extension cannot attribute that internal time to authentication independently. Managed VS Code session timing likewise does not establish whether a token was refreshed internally. Nested phase and operation totals overlap and must not be added together. No speedup is claimed until a comparable workload has been measured.
+
 ## Beta 0.11.2: load saved work on demand
 
 Opening reads repository connection metadata only: no draft enumeration, skill manifests, release archive verification or scan workers. Create and Open remain available immediately. **Load skills** enumerates drafts and verifies saved releases; **Unload skills** clears catalog and review-list state without deleting files. Changes mark a loaded list stale instead of silently scanning it again.

@@ -20,7 +20,7 @@ function fixture(t) {
 function checkSchema(metrics) {
   for (const metric of metrics) {
     assert.ok(METRIC_STAGES.includes(metric.stage)); assert.ok(Number.isFinite(metric.durationMs) && metric.durationMs >= 0);
-    assert.ok(Object.keys(metric).every(k => ['stage', 'durationMs', 'fileCount', 'byteCount', 'outcome'].includes(k)));
+    assert.ok(Object.keys(metric).every(k => ['stage', 'durationMs', 'fileCount', 'byteCount', 'outcome', 'jobKind', 'operation', 'statusCode', 'exitCode', 'timedOut'].includes(k)));
   }
   const json = JSON.stringify(metrics); assert.doesNotMatch(json, /PRIVATE|private-name|private-package|workspace|https:|\\\\/);
 }

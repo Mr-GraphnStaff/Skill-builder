@@ -35,6 +35,7 @@ const DEFAULT_TIMEOUT = 120_000;
 export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeoutMs?: number; onMetric?: WorkbenchMetricSink } = {}): Promise<WorkbenchJobResult<J>> {
   const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > DEFAULT_TIMEOUT) return Promise.reject(new Error('Invalid local operation timeout.'));
+  const metric = (value: WorkbenchMetric) => emitWorkbenchMetric(options.onMetric, { ...value, jobKind: job.kind });
   return new Promise((resolve, reject) => {
     const started = performance.now(); let readyAt: number | undefined;
     const worker = new Worker(path.join(__dirname, 'workbench-job-worker.js'), {
@@ -43,22 +44,23 @@ export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeo
       // Do not propagate parent execArgv startup-module hooks.
       execArgv: []
     });
-    let settled = false;
+    let settled = false, timedOut = false;
     const finish = (error?: Error, result?: unknown) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       const finished = performance.now();
-      emitWorkbenchMetric(options.onMetric, { stage: readyAt === undefined ? 'workerStartup' : 'workerExecution', durationMs: finished - (readyAt ?? started), outcome: error ? 'error' : 'ok' });
+      metric({ stage: readyAt === undefined ? 'workerStartup' : 'workerExecution', durationMs: finished - (readyAt ?? started), outcome: error ? 'error' : 'ok', timedOut });
       // Await teardown before resolving, so the next queued write cannot race
       // a terminated job. Atomic staging/guard checks remain in core functions.
       worker.terminate().then(() => {
-        emitWorkbenchMetric(options.onMetric, { stage: 'workerTeardown', durationMs: performance.now() - finished, outcome: 'ok' });
+        metric({ stage: 'workerTeardown', durationMs: performance.now() - finished, outcome: 'ok' });
         if (error) reject(error);
         else resolve(result as WorkbenchJobResult<J>);
-      }, failure => { emitWorkbenchMetric(options.onMetric, { stage: 'workerTeardown', durationMs: performance.now() - finished, outcome: 'error' }); reject(error ?? failure); });
+      }, failure => { metric({ stage: 'workerTeardown', durationMs: performance.now() - finished, outcome: 'error' }); reject(error ?? failure); });
     };
     const timer = setTimeout(() => {
+      timedOut = true;
       const uncertain = WRITING_JOBS.has(job.kind)
         ? ' The local write may already have completed. Inspect the saved drafts or releases before trying again; nothing was retried automatically.'
         : ' No upload was attempted. Your existing draft is retained.';
@@ -67,9 +69,9 @@ export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeo
     worker.on('message', (message: unknown) => {
       if (settled || !message || typeof message !== 'object') return;
       const reply = message as { type?: string; metric?: WorkbenchMetric; ok?: boolean; result?: unknown; error?: unknown };
-      if (reply.type === 'metric') { if (reply.metric) emitWorkbenchMetric(options.onMetric, reply.metric); return; }
+      if (reply.type === 'metric') { if (reply.metric) metric(reply.metric); return; }
       if (reply.type === 'ready') {
-        if (readyAt === undefined) { readyAt = performance.now(); emitWorkbenchMetric(options.onMetric, { stage: 'workerStartup', durationMs: readyAt - started, outcome: 'ok' }); }
+        if (readyAt === undefined) { readyAt = performance.now(); metric({ stage: 'workerStartup', durationMs: readyAt - started, outcome: 'ok' }); }
         return;
       }
       if (reply.type !== 'result') return;

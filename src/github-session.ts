@@ -1,4 +1,6 @@
 import * as https from 'node:https';
+import { performance } from 'node:perf_hooks';
+import { currentWorkbenchMetrics, emitWorkbenchMetric } from './workbench-metrics.js';
 import type { GitHubRunner } from './github-review.js';
 
 /** VS Code owns authentication. Tokens are request-local and never persisted.
@@ -8,18 +10,27 @@ export function createGitHubSessionRunner(getToken: () => Promise<string>, reque
     if (!(request.endpoint === 'user' || request.endpoint.startsWith('repos/')) || request.endpoint.startsWith('/')
       || request.endpoint.includes('://') || /[\x00-\x20#]/.test(request.endpoint) || !['GET', 'POST', 'PUT'].includes(request.method)) throw new Error('Invalid GitHub API endpoint.');
     let token: string;
-    try { token = await getToken(); } catch { throw new Error('GitHub sign-in was cancelled or unavailable. Use Connect / switch GitHub; previous uploads and PRs are retained.'); }
-    if (typeof token !== 'string' || !token || /[\r\n]/.test(token)) throw new Error('GitHub authentication is unavailable. Use Connect / switch GitHub.');
+    const sink = currentWorkbenchMetrics(), authStarted = performance.now();
+    let authOutcome: 'ok' | 'error' = 'error';
+    try {
+      token = await getToken();
+      if (typeof token !== 'string' || !token || /[\r\n]/.test(token)) throw new Error('Invalid session');
+      authOutcome = 'ok';
+    } catch { throw new Error('GitHub sign-in was cancelled or unavailable. Use Connect / switch GitHub; previous uploads and PRs are retained.'); }
+    finally { emitWorkbenchMetric(sink, { stage: 'authentication', operation: 'session', durationMs: performance.now() - authStarted, outcome: authOutcome }); }
     const body = request.body === undefined ? undefined : JSON.stringify(request.body);
     return new Promise((resolve, reject) => {
+      const started = performance.now(); let statusCode: number | undefined, timedOut = false;
+      const operation = request.endpoint === 'user' ? 'account' : request.endpoint.includes('/reviews') ? 'reviews' : request.endpoint.includes('/collaborators') ? 'collaborators' : request.endpoint.includes('/pulls') ? 'pullRequests' : request.endpoint.includes('/git/') ? 'references' : 'repository';
       let settled = false; let responseStream: import('node:http').IncomingMessage | undefined;
       let req: import('node:http').ClientRequest | undefined;
-      const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(deadline); if (error) { responseStream?.destroy(); req?.destroy(); reject(error); } else resolve(value); };
-      const deadline = setTimeout(() => finish(new Error('GitHub request timed out.')), Math.max(1, Math.min(timeoutMs, 30_000)));
+      const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(deadline); emitWorkbenchMetric(sink, { stage: 'githubRequest', operation, durationMs: performance.now() - started, statusCode, timedOut, outcome: error ? 'error' : 'ok' }); if (error) { responseStream?.destroy(); req?.destroy(); reject(error); } else resolve(value); };
+      const deadline = setTimeout(() => { timedOut = true; finish(new Error('GitHub request timed out.')); }, Math.max(1, Math.min(timeoutMs, 30_000)));
       try { req = requestFactory({ protocol: 'https:', hostname: 'api.github.com', port: 443, rejectUnauthorized: true, path: `/${request.endpoint}`, method: request.method,
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'SkillJetty', ...(body === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }) } }, response => {
         responseStream = response;
         const status = response.statusCode ?? 0;
+        statusCode = status;
         if (status < 200 || status >= 300) { finish(new Error(`GitHub API HTTP ${status}${status >= 300 && status < 400 ? ': redirect refused' : ''}`)); return; }
         const chunks: Buffer[] = []; let bytes = 0;
         response.on('data', (chunk: Buffer) => {
