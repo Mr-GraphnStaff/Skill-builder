@@ -59,7 +59,8 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
 
   const saveExternalEdits = async () => {
     const root = await hooks.getRoot(); if (!root) return;
-    const localRepository = getWorkspaceConnection(root)?.localPath;
+    let localRepository: string | undefined;
+    try { localRepository = getWorkspaceConnection(root)?.localPath; } catch { /* Invalid optional repository metadata must not block local editing. Pull validates it separately. */ }
     const managedRoots = [path.join(root, 'skills'), ...(localRepository ? [localRepository] : [])];
     for (const document of vscode.workspace.textDocuments) {
       const managedDocument = managedRoots.some(folder => {

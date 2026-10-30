@@ -46,7 +46,7 @@ function fixture(options = {}) {
   try {
     Module._load = function(id, parent, main) {
       if (parent?.filename === file && id === 'vscode') return vscode;
-      if (parent?.filename === file && id === './guided-workspace.js' && options.connection) return { getWorkspaceConnection: () => options.connection };
+      if (parent?.filename === file && id === './guided-workspace.js' && options.connection) return { getWorkspaceConnection: () => { if (options.connection instanceof Error) throw options.connection; return options.connection; } };
       if (parent?.filename === file && id === './guided-controller.js') return { GuidedWorkbenchController: Controller };
       return originalLoad.call(this, id, parent, main);
     };
@@ -203,4 +203,12 @@ test('pull protects unsaved documents only inside the selected local repository'
   assert.equal(saved, 1); assert.equal(unrelated, 0);
   assert.equal(f.events.some(event => event.type === 'dispatch' && event.action === 'pullRepository'), false);
   assert.match(f.controllers[0].state.error, /could not be saved/);
+});
+
+
+test('invalid optional repository metadata does not block local package opening', async () => {
+  const f = fixture({ connection: new Error('Invalid connection metadata') }), panel = await f.open();
+  await panel.receive({ action: 'openPackage' });
+  assert(f.events.some(event => event.type === 'dispatch' && event.action === 'openPackage'));
+  assert.equal(f.controllers[0].state.error, undefined);
 });
