@@ -91,7 +91,7 @@ test('guided workbench owns its activity container while retained native command
   assert.equal(manifest.contributes.views.skillBuilder[0].type, 'webview');
   assert.equal(manifest.contributes.views.explorer, undefined);
   const hidden = manifest.contributes.menus.commandPalette;
-  assert(manifest.contributes.commands.every(item => item.command === 'skillBuilder.openWorkbench' || hidden.some(rule => rule.command === item.command && rule.when === 'false')));
+  assert(manifest.contributes.commands.every(item => ['skillBuilder.openWorkbench', 'skillBuilder.showPerformanceLog'].includes(item.command) || hidden.some(rule => rule.command === item.command && rule.when === 'false')));
   const declared = new Set(manifest.contributes.commands.map(item => item.command));
   for (const item of Object.values(manifest.contributes.menus).flat()) assert(declared.has(item.command), `Menu references undeclared command ${item.command}`);
   const f = fixture(t);
