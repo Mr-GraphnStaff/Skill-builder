@@ -2,6 +2,11 @@
 
 ## Final pre-release change: early diagnostics access 0.11.12
 
+**Release freeze is in effect: bug fixes only, no new features.** David explicitly
+confirmed this after authorizing 0.11.12 Marketplace publication. Avery notified
+the staffed architecture, UI, QA and security agents and owns carrying this rule
+into future handoffs. New feature proposals remain unimplemented during the freeze.
+
 The lead authorized moving Open performance log into Activity from the first
 screen. This is the final pre-release change until the production decision;
 further feature changes are frozen unless the lead directs otherwise. Production
@@ -9,7 +14,13 @@ must expose neither the performance-log button nor its Command Palette command,
 and must not add a diagnostics opt-in setting. Activity remains in the production
 candidate. Stable promotion awaits the lead's testing and decision.
 
-Source/focused independent QA passed; CI/artifact/publication are pending. See
+CI967 passed 320/320 tests and audits from source
+`a5b7cf680aa3040ccb9a4677936872b6d7205940`; independent exact-artifact review and
+isolated native smoke passed. Build 967 uploaded once; its catalog visibility
+window expired and that verification failure remains recorded. Read-only
+reconciliation 968 succeeded and independently verified public 0.11.12 pre-release
+visibility and exact public bytes without another upload. Delivery is complete,
+with user acceptance/production promotion pending under the freeze. See
 `2026-10-31-prerelease-0.11.12.md`. Prior delivery evidence below is retained.
 
 ## Current assignment: activity and performance 0.11.11 — October 31
