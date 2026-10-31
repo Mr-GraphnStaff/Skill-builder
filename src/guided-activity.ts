@@ -1,4 +1,4 @@
-import type { GuidedAction } from './guided-contract.js';
+import type { GuidedAction, GuidedState } from './guided-contract.js';
 
 /** Fixed UI copy, never instructions or text taken from imported packages. */
 export function activityForAction(action: GuidedAction): string {
@@ -30,4 +30,19 @@ export function activityForAction(action: GuidedAction): string {
 
 export function actionNeedsInput(action: GuidedAction): boolean {
   return ['setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action);
+}
+
+/** Navigation guidance follows the actual result, including partial uploads. */
+export function nextActivityMessage(state: GuidedState): string {
+  if (state.error) return 'Next: read the error details before retrying.';
+  if (state.receipt?.cleanupError) return 'Next: inspect the cleanup notice; the saved upload remains recorded.';
+  if (state.step === 'done') {
+    if (state.receipt?.local) return 'Next: open the saved package folder or start another skill.';
+    if (state.receipt?.pr?.error || state.receipt?.pr?.creationUncertain) return 'Next: use Check PRs to confirm the existing upload.';
+    return state.receipt?.pr?.number ? 'Next: open the recorded pull request and review this submission.' : 'Next: inspect the uploaded review branch.';
+  }
+  if (state.step === 'publish') return 'Next: review the sharing summary and choose how to save or submit.';
+  if (state.step === 'check') return state.check?.valid ? 'Next: review the check results and prepare the sharing summary.' : 'Next: review the findings and return to the draft.';
+  if (state.step === 'edit') return 'Next: edit the draft or run its structural check.';
+  return 'Next: create or open a skill, or choose a recorded submission.';
 }

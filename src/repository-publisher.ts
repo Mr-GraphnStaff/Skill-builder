@@ -239,7 +239,8 @@ async function verifyGitBlobs(preview: PublishPreview, committed = false): Promi
 
 /** Prepare a reviewable commit in the destination repository's own history. */
 export async function prepareRepositoryPublish(
-  releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false
+  releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false,
+  options: { localPath?: string } = {}
 ): Promise<PublishPreview> {
   report(onProgress, 'Validating the prepared release.');
   validateRepository(repository);
@@ -261,8 +262,24 @@ export async function prepareRepositoryPublish(
     const emptyHooks = path.join(temp, 'empty-hooks');
     await fs.mkdir(emptyTemplate); await fs.mkdir(emptyHooks);
     await git(temp, ['check-ref-format', '--branch', baseBranch]);
-    report(onProgress, 'Downloading the destination repository; this operation has a 120-second deadline.');
-    await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
+    if (options.localPath) {
+      // Reuse downloaded objects without changing the author's files, index,
+      // branch, configuration or hooks. No alternates/hardlinks tie the owned
+      // publication checkout to subsequent GC or edits in the selected repo.
+      const { validateProjectRepositoryForPublish } = await import('./managed-repository.js');
+      const local = await validateProjectRepositoryForPublish(repository, options.localPath);
+      report(onProgress, 'Reusing your local repository to prepare an isolated submission…');
+      await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--', local, checkoutPath]);
+      await git(checkoutPath, ['remote', 'set-url', 'origin', repository]);
+      report(onProgress, 'Fetching the latest destination branch; existing downloaded data is reused…');
+      await git(checkoutPath, ['fetch', '--no-tags', '--refmap=', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
+      // Point HEAD at the fetched base without checking out content before
+      // the conversion/filter overrides below have been installed.
+      await git(checkoutPath, ['update-ref', '--no-deref', 'HEAD', `refs/remotes/origin/${baseBranch}`]);
+    } else {
+      report(onProgress, 'Downloading the destination repository for this submission…');
+      await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
+    }
     report(onProgress, 'Preparing the destination checkout.');
     // Prevent user/repository filters and line-ending conversions from running or
     // altering a release. info/attributes takes precedence over tracked attributes.
@@ -278,7 +295,7 @@ export async function prepareRepositoryPublish(
       const advertised = await git(checkoutPath, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]);
       if (advertised.trim()) {
         await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/skilljetty-upload`]);
-        await git(checkoutPath, ['switch', '-c', branch, 'refs/remotes/origin/skilljetty-upload']);
+        await git(checkoutPath, ['switch', '-C', branch, 'refs/remotes/origin/skilljetty-upload']);
         // Pull the latest base into an existing review branch before replacing
         // the selected version. A conflict stops before any remote write.
         await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`]);
@@ -291,8 +308,8 @@ export async function prepareRepositoryPublish(
           // conflicts are resolved by the incoming copy; other conflicts stop.
         }
         pulledPaths = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(file => file && !file.startsWith(`${relativePath}/`)).sort();
-      } else await git(checkoutPath, ['switch', '-c', branch]);
-    } else await git(checkoutPath, ['switch', '-c', branch]);
+      } else await git(checkoutPath, ['switch', '-C', branch]);
+    } else await git(checkoutPath, ['switch', '-C', branch]);
     const destination = path.join(checkoutPath, relativePath);
     // The target path must not traverse a symlink already present in the target repository.
     for (const part of [manifest.skillName]) {
@@ -347,7 +364,9 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   // Retrying an unsuccessful push reuses the existing commit instead of duplicating it.
   if (staged.length > 0) {
     if (JSON.stringify(staged) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Unexpected staged files; publication stopped.');
-    await verifyGitBlobs(preview);
+    // This exact index tree was byte-verified during preparation. Its immutable
+    // identity above plus the fresh file inventory avoids rereading every file
+    // merely to prove the same indexed blob identities.
     const emptyHooks = path.join(path.dirname(preview.checkoutPath), 'empty-hooks');
     await fs.mkdir(emptyHooks, { recursive: true });
     report(onProgress, 'Creating the release commit.');
@@ -356,7 +375,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   const commit = (await git(preview.checkoutPath, ['rev-parse', 'HEAD'])).trim();
   const actual = preview.changedFiles?.length === 0 ? [] : (await git(preview.checkoutPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', `${commit}^`, commit])).split('\0').filter(Boolean).sort();
   if (preview.changedFiles?.length !== 0 && JSON.stringify(actual) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Commit contents differ from the reviewed release.');
-  await verifyGitBlobs(preview, true);
+  if ((await git(preview.checkoutPath, ['rev-parse', 'HEAD^{tree}'])).trim() !== expected.indexTree) throw new Error('Committed tree differs from the reviewed release.');
   report(onProgress, 'Pushing the release branch to the selected repository.');
   await git(preview.checkoutPath, ['push', '--porcelain', 'origin', `HEAD:refs/heads/${preview.branch}`]);
   report(onProgress, 'Confirming the published commit on the remote repository.');

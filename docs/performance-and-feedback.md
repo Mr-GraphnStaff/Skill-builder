@@ -1,5 +1,38 @@
 # Responsive workbench and activity feedback
 
+## Public pre-release 0.11.11: activity and less repeated work
+
+Advancing a step moves focus to the Activity area. Its current message announces
+meaningful updates; a bounded scrolling history retains working, waiting,
+completed and failed stages. Updates do not repeatedly take focus. Reading older
+entries pauses automatic following, and elapsed-time updates remain silent.
+Success markers require an observed successful result; structural findings show
+that attention is needed. This is activity reporting, not a percentage estimate.
+
+Submissions reuse downloaded objects from the configured local repository in an
+isolated publication copy, then fetch the latest destination branch. The selected
+repository's files, staging index, branch and settings are preserved. This avoids
+a full remote clone on each configured submission, but still copies local Git
+data and writes the isolated checkout. Submissions without a configured local
+repository retain the independent-download path.
+
+Guided saved-version listings read bounded metadata rather than reopening every
+historical archive. The selected comparison or action still verifies its release
+payload. A listed version is not a new integrity certification. Packaging uses
+one captured source inventory; publication retains the reviewed Git tree identity
+instead of repeatedly rereading the same bytes to prove unchanged blob identities.
+
+Repository verification avoids filter-discovery subprocesses for commands that do
+not process working-tree content. Content operations still disable configured
+filters immediately before use. Fixed diagnostic phases now include release
+preparation, PR preparation, receipt recording and local cleanup, so waits around
+PR creation can be distinguished from GitHub API time.
+
+No end-to-end speedup percentage is claimed. The lead's supplied large-package
+submission spent 5.4 seconds cloning out of 110.3 seconds overall; the remaining
+work needs comparable real-workflow measurements. Native assistive-technology
+acceptance and the lead's pre-release testing remain separate from automated checks.
+
 ## Public pre-release 0.11.9: explain the wait
 
 Operation status begins at the top of the workbench and stays visible while scrolling. Contextual help explains workflow actions and optional repository/GitHub settings. A file picker or account selection is a request for your input, distinct from processing; elapsed time and host responses do not imply a percentage complete.

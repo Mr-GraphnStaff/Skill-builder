@@ -9,6 +9,7 @@ export type RepositoryVerification = {
   remoteCommit?: string; dirty?: boolean; trustRequired?: boolean;
 };
 const controls = new Set(['.skill-workbench', '.skilljetty-prerelease', '.skilljetty-beta', '.vscode']);
+const metadataOnlyCommands = new Set(['config', 'rev-parse', 'remote', 'branch', 'for-each-ref', 'ls-remote', 'ls-tree', 'fetch']);
 const isControl = (name: string) => controls.has(name.replace(/\\/g, '/').split('/')[0].toLowerCase());
 function projectPath(localPath?: string): string {
   if (!localPath?.trim() || !path.isAbsolute(localPath)) throw new Error('Setup required: choose an explicit absolute local Skills repository folder.');
@@ -42,6 +43,16 @@ function remoteIdentity(repository: string): string {
 }
 async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skilljetty-disabled-hooks-${randomUUID()}`)): Promise<string> {
   const base = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${hooks}`, '-c', 'submodule.recurse=false'];
+  // Metadata/object transport cannot apply worktree clean/smudge filters. Avoid
+  // a second Git process for those commands, but discover drivers immediately
+  // before every content operation so a newly configured driver is disabled too.
+  if (metadataOnlyCommands.has(args[0])) {
+    try { return await repositoryGit(cwd, [...base, ...args]); }
+    catch (error) {
+      if (/spawn git.*ENOENT/i.test(String(error))) throw new Error('Setup required: Git is not installed or is unavailable on PATH. The selected folder was preserved.');
+      throw error;
+    }
+  }
   // Even a read-only status can invoke clean filters; neutralize configured drivers first.
   let configuration = '';
   try { configuration = await repositoryGit(cwd, [...base, 'config', '--name-only', '--get-regexp', '^filter\\.']); } catch (error) {
@@ -65,6 +76,15 @@ async function identity(checkout: string, repository: string): Promise<void> {
   const top = (await git(checkout, ['rev-parse', '--show-toplevel'])).trim();
   if (path.relative(await fs.realpath(checkout), await fs.realpath(top)) !== '') throw new Error('Setup required: select the Git repository root.');
   if (remoteIdentity((await git(checkout, ['remote', 'get-url', 'origin'])).trim()) !== remoteIdentity(repository)) throw new Error('Setup required: the local origin does not match the registered repository.');
+}
+/** Validate a local object source without changing its files, index, refs or configuration.
+ * Publication prepares an owned checkout separately, so local edits are allowed. */
+export async function validateProjectRepositoryForPublish(repository: string, localPath: string): Promise<string> {
+  const checkout = projectPath(localPath);
+  remoteIdentity(repository);
+  await guard(checkout);
+  await identity(checkout, repository);
+  return checkout;
 }
 async function dirty(checkout: string): Promise<boolean> {
   const rows = (await git(checkout, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored'])).split('\0');

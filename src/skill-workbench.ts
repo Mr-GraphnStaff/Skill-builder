@@ -308,9 +308,12 @@ export function updateSkillRepository(workspaceRoot: string, id: string, reposit
   record.repository = repository.trim(); record.baseBranch = branch.trim(); saveCatalog(workspaceRoot, catalog); return record;
 }
 export function validateWorkbenchSkill(record: WorkbenchSkill): ValidationReport {
+  return validateSkillPayload(record);
+}
+function validateSkillPayload(record: WorkbenchSkill, captured?: Payload[]): ValidationReport {
   const errors: string[] = []; const warnings: string[] = []; let files: Payload[] = [];
   try {
-    files = sourceFiles(record.sourcePath);
+    files = captured ?? sourceFiles(record.sourcePath);
     const manifest = files.find(file => file.relative === 'SKILL.md');
     if (!manifest) throw new Error('SKILL.md is missing.');
     if (metadata(manifest.bytes).name !== record.name || path.basename(record.sourcePath) !== record.name) throw new Error('Skill name, catalog identity and source folder must match.');
@@ -336,10 +339,11 @@ export function prepareSkillRelease(workspaceRoot: string, id: string, version: 
   const record = readCatalog(workspaceRoot).find(item => item.id === id);
   if (!record) throw new Error('Unknown workbench skill.');
   guarded(workspaceRoot, record.sourcePath);
-  const validation = validateWorkbenchSkill(record);
-  if (!validation.valid) throw new Error(validation.errors.join('\n'));
+  // Validate and package the same captured bytes. A second disk traversal is
+  // neither needed nor a coherent snapshot when an editor is saving files.
   const files = sourceFiles(record.sourcePath);
-  if (JSON.stringify(digests(files)) !== JSON.stringify(validation.files)) throw new Error('Source changed during validation. Save your files and prepare the release again.');
+  const validation = validateSkillPayload(record, files);
+  if (!validation.valid) throw new Error(validation.errors.join('\n'));
   const directory = path.join(path.resolve(workspaceRoot), 'releases', record.name, version);
   guarded(workspaceRoot, directory);
   if (fs.existsSync(directory)) {
@@ -372,10 +376,10 @@ export function prepareSkillRelease(workspaceRoot: string, id: string, version: 
     zip.writeZip(packagePath);
     const packed = fs.readFileSync(packagePath);
     const reopened = readArchive(packed).sort((a, b) => a.relative.localeCompare(b.relative));
-    if (JSON.stringify(digests(reopened)) !== JSON.stringify(digests(files))) throw new Error('Repacked archive failed byte-for-byte roundtrip verification.');
+    if (JSON.stringify(digests(reopened)) !== JSON.stringify(validation.files)) throw new Error('Repacked archive failed byte-for-byte roundtrip verification.');
     writeFiles(path.join(staging, 'source', record.name), files);
     const changelogBytes = Buffer.from(`${changelog.trim()}\n`, 'utf8');
-    const manifest: ReleaseManifest = { version, skillName: record.name, createdAt: new Date().toISOString(), files: digests(files), packageSha256: hash(packed), changelogSha256: hash(changelogBytes) };
+    const manifest: ReleaseManifest = { version, skillName: record.name, createdAt: new Date().toISOString(), files: validation.files, packageSha256: hash(packed), changelogSha256: hash(changelogBytes) };
     if (record.originalPackagePath) {
       guarded(workspaceRoot, record.originalPackagePath);
       const original = fs.readFileSync(record.originalPackagePath);
@@ -391,29 +395,53 @@ export function prepareSkillRelease(workspaceRoot: string, id: string, version: 
   } finally { if (fs.existsSync(staging)) fs.rmSync(staging, { recursive: true, force: true }); }
 }
 export function listSkillReleases(workspaceRoot: string, id: string): WorkbenchRelease[] {
+  return listSkillReleaseMetadata(workspaceRoot, id).map(release => verifySkillRelease(release.directory));
+}
+
+/** Listing evidence only: payload bytes are verified when a version is used. */
+export function listSkillReleaseMetadata(workspaceRoot: string, id: string): WorkbenchRelease[] {
   const record = readCatalog(workspaceRoot).find(item => item.id === id);
   if (!record) throw new Error('Unknown workbench skill.');
   const folder = path.join(path.resolve(workspaceRoot), 'releases', record.name); guarded(workspaceRoot, folder);
   if (!fs.existsSync(folder)) return [];
   return fs.readdirSync(folder, { withFileTypes: true }).filter(entry => entry.isDirectory() && !entry.name.startsWith('.')).map(entry => {
     checkVersion(entry.name); const directory = path.join(folder, entry.name); guarded(workspaceRoot, directory);
-    return verifySkillRelease(directory);
+    return readSkillReleaseMetadata(directory);
   });
 }
 
-export function verifySkillRelease(directory: string): WorkbenchRelease {
+/** Read identities and manifests without reading historical source or archives. */
+export function readSkillReleaseMetadata(directory: string): WorkbenchRelease {
   directory = path.resolve(directory); guarded(directory, directory);
   const manifestPath = path.join(directory, 'release.json'); guarded(directory, manifestPath);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as ReleaseManifest;
   const name = skillName(manifest.skillName); checkVersion(manifest.version);
   if (path.basename(directory) !== manifest.version || path.basename(path.dirname(directory)) !== name) throw new Error('Release identity does not match its directory.');
   if (!Array.isArray(manifest.files) || !/^[a-f0-9]{64}$/.test(manifest.packageSha256) || !/^[a-f0-9]{64}$/.test(manifest.changelogSha256)) throw new Error('Release manifest is missing valid content hashes.');
+  const packagePath = path.join(directory, `${name}-${manifest.version}.skill`); guarded(directory, packagePath);
+  return { directory, version: manifest.version, skillName: name, packagePath, manifest };
+}
+
+/** Look up one version without decoding unrelated historical releases. */
+export function findSkillRelease(workspaceRoot: string, id: string, version: string): WorkbenchRelease | undefined {
+  checkVersion(version);
+  const record = readCatalog(workspaceRoot).find(item => item.id === id);
+  if (!record) throw new Error('Unknown workbench skill.');
+  const directory = path.join(path.resolve(workspaceRoot), 'releases', record.name, version);
+  guarded(workspaceRoot, directory);
+  return fs.existsSync(directory) ? readSkillReleaseMetadata(directory) : undefined;
+}
+
+export function verifySkillRelease(directory: string): WorkbenchRelease {
+  const release = readSkillReleaseMetadata(directory);
+  directory = release.directory;
+  const { manifest, packagePath } = release;
+  const name = release.skillName;
   const source = path.join(directory, 'source', name); guarded(directory, source);
   const record = { id: name, name, sourcePath: source };
   const validation = validateWorkbenchSkill(record);
   if (!validation.valid) throw new Error(`Release validation failed: ${validation.errors.join('; ')}`);
   if (JSON.stringify(validation.files) !== JSON.stringify(manifest.files)) throw new Error('Release source inventory does not match its manifest.');
-  const packagePath = path.join(directory, `${name}-${manifest.version}.skill`); guarded(directory, packagePath);
   if (fs.statSync(packagePath).size > LIMITS.archive) throw new Error('Release package exceeds archive size limits.');
   const packageBytes = fs.readFileSync(packagePath);
   if (hash(packageBytes) !== manifest.packageSha256) throw new Error('Release package hash mismatch.');

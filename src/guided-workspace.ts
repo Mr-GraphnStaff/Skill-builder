@@ -5,13 +5,14 @@ import { randomUUID } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import {
   registerSkillFolder, listWorkbenchSkills, updateSkillRepository, validateWorkbenchSkill,
-  prepareSkillRelease, listSkillReleases, verifySkillRelease, completeWorkbenchSkill,
+  prepareSkillRelease, findSkillRelease, verifySkillRelease, completeWorkbenchSkill,
   type WorkbenchSkill, type WorkbenchRelease, type FileDigest
 } from './skill-workbench.js';
 import { listLibraryReleases, recordLibraryPublication, recordLibraryReview, type LibraryRelease } from './workbench-library.js';
 import { githubRepository, GitHubReviewService, type GitHubRunner, type ReviewContext } from './github-review.js';
 import type { PullRequestRecord } from './guided-contract.js';
 import { resolveRepositoryDefaultBranch, verifyRepositoryBranchCommit, prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview } from './repository-publisher.js';
+import { measureWorkbenchPhase, currentWorkbenchMetrics } from './workbench-metrics.js';
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
 const MAX_TEXT = 16 * 1024 * 1024;
@@ -259,7 +260,7 @@ function sameFiles(left: { path: string; size: number; sha256: string }[], right
 }
 
 /** Called only from the guided screen's explicit Publish version action. */
-export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: (message: string) => void, options: { deferCleanup?: boolean; expectedFiles?: FileDigest[] } = {}): Promise<GuidedPublication> {
+export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: import('./guided-contract.js').GuidedProgress, options: { deferCleanup?: boolean; expectedFiles?: FileDigest[] } = {}): Promise<GuidedPublication> {
   const saved = getWorkspaceConnection(root);
   if (!saved) throw new Error('Connect your skill repository first.');
   const skill = listWorkbenchSkills(root).find(item => item.id === id);
@@ -268,40 +269,47 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
   // Resolve again immediately before publishing. A saved base branch is not
   // trusted after remote configuration changes, and never comes from a name box.
   const connection = await connectWorkspaceRepository(root, saved.repository);
+  onProgress?.('Connected repository verified.', 'succeeded');
   updateSkillRepository(root, skill.id, connection.repository, connection.baseBranch);
-  const validation = validateWorkbenchSkill(skill);
+  onProgress?.('Checking the draft against the reviewed file summary…');
+  const validation = measureWorkbenchPhase('skillValidation', currentWorkbenchMetrics(), () => validateWorkbenchSkill(skill));
   if (!validation.valid) throw new Error(`Fix the skill check errors before publishing: ${validation.errors.join('; ')}`);
   if (options.expectedFiles && !sameFiles(validation.files, options.expectedFiles)) throw new Error('The draft changed after the sharing summary was reviewed. Check it and review a fresh summary before submitting. Nothing was uploaded.');
-  const previous = listSkillReleases(root, skill.id).find(item => item.version === version);
+  onProgress?.('Preparing the selected version package and version notes…');
+  const previous = findSkillRelease(root, skill.id, version);
   let release: WorkbenchRelease;
   if (previous) {
-    release = verifySkillRelease(previous.directory);
+    release = measureWorkbenchPhase('releaseVerification', currentWorkbenchMetrics(), () => verifySkillRelease(previous.directory));
     const changed = !sameFiles(validation.files, release.manifest.files)
       || fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim();
-    if (changed) release = prepareSkillRelease(root, skill.id, version, changelog, true);
-    const receipt = listLibraryReleases(root, skill.name).find(item => item.directory === release.directory && item.status === 'uploaded');
+    if (changed) release = measureWorkbenchPhase('releasePreparation', currentWorkbenchMetrics(), () => prepareSkillRelease(root, skill.id, version, changelog, true));
+    const receipt = listLibraryReleases(root, skill.name, { verifyPayload: false }).find(item => item.directory === release.directory && item.status === 'uploaded');
     if (!changed && receipt?.commit && receipt.branch && receipt.repository) {
       onProgress?.('Checking the previously uploaded version.');
       if (sameRepository(receipt.repository, connection.repository)
           && await verifyRepositoryBranchCommit(receipt.repository, receipt.branch, receipt.commit)) {
         let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
-        try { if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory); }
+        try { if (!options.deferCleanup) cleanup = measureWorkbenchPhase('localCleanup', currentWorkbenchMetrics(), () => completeWorkbenchSkill(root, skill.id, release.directory)); }
         catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
         return { release, publication: { repository: receipt.repository, branch: receipt.branch, commit: receipt.commit }, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
       }
       // A removed/replaced branch or a different selected repository is a
       // fresh upload of the user's chosen version, with prior receipts retained.
-      release = prepareSkillRelease(root, skill.id, version, changelog, true);
+      release = measureWorkbenchPhase('releasePreparation', currentWorkbenchMetrics(), () => prepareSkillRelease(root, skill.id, version, changelog, true));
     }
-  } else release = prepareSkillRelease(root, skill.id, version, changelog);
+  } else release = measureWorkbenchPhase('releasePreparation', currentWorkbenchMetrics(), () => prepareSkillRelease(root, skill.id, version, changelog));
+  onProgress?.('Version package and notes prepared.', 'succeeded');
   if (options.expectedFiles && !sameFiles(release.manifest.files, options.expectedFiles)) throw new Error('The prepared release differs from the reviewed sharing summary. The local files are preserved and nothing was uploaded. Review a fresh summary.');
-  const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress, true);
+  const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress, true, { localPath: connection.localPath });
   try {
     const publication = await pushPreparedRelease(preview, onProgress);
+    onProgress?.('Upload commit confirmed by the destination repository.', 'succeeded');
     let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
     try {
-      recordLibraryPublication(root, release.directory, { ...publication, baseBranch: connection.baseBranch });
-      if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory);
+      onProgress?.('Saving the verified upload receipt…');
+      measureWorkbenchPhase('receiptRecording', currentWorkbenchMetrics(), () => recordLibraryPublication(root, release.directory, { ...publication, baseBranch: connection.baseBranch }));
+      onProgress?.('Upload receipt saved.', 'succeeded');
+      if (!options.deferCleanup) { onProgress?.('Finishing local draft cleanup…'); cleanup = measureWorkbenchPhase('localCleanup', currentWorkbenchMetrics(), () => completeWorkbenchSkill(root, skill.id, release.directory)); onProgress?.('Local draft cleanup finished.', 'succeeded'); }
     } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
     return { release, publication, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
   } finally { await disposePublishPreview(preview, onProgress); }
@@ -314,7 +322,7 @@ function connectedRepository(root: string, repository: string): boolean {
 }
 
 export function connectedReviewReleases(root: string): LibraryRelease[] {
-  return listLibraryReleases(root).filter(item => item.status === 'uploaded' && !!item.repository && connectedRepository(root, item.repository));
+  return listLibraryReleases(root, undefined, { verifyPayload: false }).filter(item => item.status === 'uploaded' && !!item.repository && connectedRepository(root, item.repository));
 }
 
 export function libraryReviewContext(root: string, directory: string): { item: LibraryRelease; context: ReviewContext } {
@@ -322,24 +330,29 @@ export function libraryReviewContext(root: string, directory: string): { item: L
   const item = connectedReviewReleases(root).find(release => path.resolve(release.directory) === path.resolve(directory));
   const connection = getWorkspaceConnection(root);
   if (!item?.repository || !item.branch || !item.commit || !connection) throw new Error('This version has no verified upload in the connected repository. Connect its recorded repository before checking or creating its PR.');
+  verifySkillRelease(item.directory);
   return { item, context: { repository: item.repository, baseBranch: item.baseBranch ?? connection.baseBranch, branch: item.branch, commit: item.commit, skillName: item.skillName, version: item.version } };
 }
 
-export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer' | 'merge', reviewer?: string, runner?: GitHubRunner): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
-  const { item, context } = libraryReviewContext(root, directory);
-  const service = new GitHubReviewService(root, runner);
+export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer' | 'merge', reviewer?: string, runner?: GitHubRunner, onProgress?: import('./guided-contract.js').GuidedProgress): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
+  onProgress?.('Checking the saved upload and pull request identity…');
+  const { item, context } = measureWorkbenchPhase('reviewPreparation', currentWorkbenchMetrics(), () => libraryReviewContext(root, directory));
+  const service = new GitHubReviewService(root, runner, onProgress);
   let pr = action === 'merge' ? item.pr ? await service.merge(context, item.pr) : { supported: true, status: 'uploaded' as const, mergeError: 'Create and verify this upload’s PR before merging.' } : action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
     ? item.pr ? await service.requestReviewer(context, item.pr, reviewer ?? '') : { supported: !!githubRepository(context.repository), status: 'uploaded' as const, reviewRequestError: 'Create the PR before requesting a reviewer.' }
     : await service.check(context, item.pr);
   // Confirm the PR receipt on disk before any optional notification or cleanup.
-  pr = recordLibraryReview(root, item.directory, pr, action === 'create' ? { repairHistoricalNumber: item.pr?.number } : {});
+  onProgress?.('Saving the pull request result locally…');
+  pr = measureWorkbenchPhase('receiptRecording', currentWorkbenchMetrics(), () => recordLibraryReview(root, item.directory, pr, action === 'create' ? { repairHistoricalNumber: item.pr?.number } : {}));
+  onProgress?.(pr.error || pr.creationUncertain ? 'Pull request outcome needs attention; its available result was saved.' : 'Pull request result saved.', pr.error || pr.creationUncertain ? 'info' : 'succeeded');
   if (action === 'create' && reviewer && pr.number && pr.identityVerified) {
-    pr = recordLibraryReview(root, item.directory, await service.requestReviewer(context, pr, reviewer));
+    const requested = await service.requestReviewer(context, pr, reviewer);
+    pr = measureWorkbenchPhase('receiptRecording', currentWorkbenchMetrics(), () => recordLibraryReview(root, item.directory, requested));
   }
   let cleanupError: string | undefined;
   if (action !== 'check' && pr.number && pr.identityVerified) {
     const draft = listWorkbenchSkills(root).find(skill => skill.name === item.skillName);
-    if (draft) { try { completeWorkbenchSkill(root, draft.id, item.directory); } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); } }
+    if (draft) { try { onProgress?.('Preserving the submitted version and finishing local draft cleanup…'); measureWorkbenchPhase('localCleanup', currentWorkbenchMetrics(), () => completeWorkbenchSkill(root, draft.id, item.directory)); onProgress?.('Local draft cleanup finished.', 'succeeded'); } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); onProgress?.('Local cleanup needs attention; the upload receipt is retained.', 'info'); } }
   }
   return { pr, ...(cleanupError ? { cleanupError } : {}) };
 }

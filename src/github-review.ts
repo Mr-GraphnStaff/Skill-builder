@@ -78,7 +78,7 @@ function validateContext(context: ReviewContext): Repository | undefined {
 
 export class GitHubReviewService {
   private readonly run: GitHubRunner;
-  constructor(private readonly cwd: string, runner?: GitHubRunner) {
+  constructor(private readonly cwd: string, runner?: GitHubRunner, private readonly onProgress?: import('./guided-contract.js').GuidedProgress) {
     this.run = runner ?? (async request => {
       const args = ['api', '--hostname', 'github.com', '--method', request.method, request.endpoint, '--header', 'Accept: application/vnd.github+json'];
       if (request.body !== undefined) args.push('--input', '-');
@@ -202,11 +202,13 @@ export class GitHubReviewService {
   async ensure(context: ReviewContext, previous?: PullRequestRecord): Promise<PullRequestRecord> {
     const repo = validateContext(context); if (!repo) return this.check(context, previous);
     try {
+      this.onProgress?.('Looking for a pull request matching this uploaded version…');
       const found = await this.findForCreation(context, previous);
       if (found) return await this.status(context, found, previous?.number === found.number ? previous : undefined);
       if (previous?.creationUncertain) return { ...previous, lastAttemptAt: new Date().toISOString(), error: 'The earlier creation is still unconfirmed. Use Check PRs before retrying Create PR; no duplicate write was attempted.' };
       // Historical PR identity/reviewer state must not carry into a new submission.
       previous = { supported: true, status: 'uploaded' };
+      this.onProgress?.('Confirming the uploaded branch before creating its pull request…');
       const ref = await this.run({ method: 'GET', endpoint: `repos/${repo.fullName}/git/ref/heads/${encodeURIComponent(context.branch)}` }) as any;
       if (ref?.ref !== `refs/heads/${context.branch}` || ref.object?.sha !== context.commit) return { ...previous, supported: true, status: 'unknown', warning: 'The upload branch no longer matches the recorded version commit. No PR was created; inspect the branch and upload receipt.' };
       // No skill text or user changelog is embedded: avoid automatic mentions
@@ -216,6 +218,7 @@ export class GitHubReviewService {
       const body = `SkillJetty version ${context.version} for ${context.skillName}.\n\nVerified upload commit: ${context.commit}\n\n- [Editable source](https://github.com/${repo.fullName}/tree/${context.commit}/${prefix}/source/${encodeURIComponent(context.skillName)})\n- [Skill package](${base}/${encodeURIComponent(`${context.skillName}-${context.version}.skill`)})\n- [Version notes](${base}/CHANGELOG.md)\n\nReview and merge remain separate actions. Use the explicit Merge action when this exact submission is ready.`;
       let created: any;
       try {
+        this.onProgress?.('Creating the pull request on GitHub…');
         created = await this.run({ method: 'POST', endpoint: `repos/${repo.fullName}/pulls`, body: { title: `SkillJetty: ${context.skillName} ${context.version}`, head: context.branch, base: context.baseBranch, body } });
         this.identity(context, created, previous);
       }
@@ -224,6 +227,8 @@ export class GitHubReviewService {
         return { ...previous, supported: true, status: previous?.status ?? 'uploaded', creationUncertain: true, lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR creation was not confirmed. ${githubError(error)}` };
       }
       const confirmed = this.identity(context, created, previous);
+      this.onProgress?.(confirmed.identityVerified ? 'Pull request created and its uploaded commit verified.' : 'Pull request created; its identity needs attention.', confirmed.identityVerified ? 'succeeded' : 'info');
+      this.onProgress?.('Reading the pull request review status…');
       // Preserve a successfully created PR even if the following reviews read fails.
       return this.check(context, confirmed);
     } catch (error) { return { ...previous, supported: true, status: previous?.status ?? 'uploaded', lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR not created or verified. ${githubError(error)}` }; }

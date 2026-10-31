@@ -10,10 +10,10 @@ import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
 import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
-import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState } from './guided-contract.js';
+import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState, type GuidedActivityStatus } from './guided-contract.js';
 import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
 import type { ValidationReport } from './skill-workbench.js';
-import { activityForAction, actionNeedsInput } from './guided-activity.js';
+import { activityForAction, actionNeedsInput, nextActivityMessage } from './guided-activity.js';
 
 export type GuidedHooks = {
   onMetric?: WorkbenchMetricSink;
@@ -33,9 +33,31 @@ export type GuidedHooks = {
 export class GuidedWorkbenchController {
   private pending: Promise<void> = Promise.resolve();
   private previewInventory?: string;
+  private activitySequence = 0;
+  private operationActivity?: number;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
   constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; }
-  private runJob<J extends WorkbenchJob>(job: J) { return runWorkbenchJob(job, { onMetric: this.hooks.onMetric }); }
+  private async runJob<J extends WorkbenchJob>(job: J) {
+    const phases: Record<string, string> = {
+      archiveRead: 'Package bytes read.', archiveDecode: 'Package contents decoded.',
+      extractWrite: 'Extracted files written.', extractedReadback: 'Extracted files read back and inventoried.',
+      originalPreservation: 'Original package bytes preserved.', catalogWrite: 'Draft registration saved.'
+    };
+    const result = await runWorkbenchJob(job, { onMetric: metric => {
+      this.hooks.onMetric?.(metric);
+      if (this.state.busy && metric.outcome === 'ok' && phases[metric.stage]) this.activity(phases[metric.stage], 'succeeded');
+    } });
+    const completed: Partial<Record<WorkbenchJob['kind'], string>> = {
+      validate: 'Structural check finished.', snapshot: 'File comparison and sharing summary prepared.',
+      openPackage: 'Package extracted and its files checked.', registerFolder: 'Skill folder copied and registered.',
+      prepareRelease: 'Version package prepared.', verifyRelease: 'Selected version integrity verified.'
+    };
+    if (this.state.busy && completed[job.kind]) {
+      const invalid = job.kind === 'validate' && !(result as ValidationReport).valid;
+      this.activity(invalid ? 'Structural check found issues to review.' : completed[job.kind]!, invalid ? 'failed' : 'succeeded');
+    }
+    return result;
+  }
   private verificationSequence = 0;
   async verifyRepository(): Promise<void> {
     const sequence = ++this.verificationSequence, root = this.root;
@@ -188,7 +210,20 @@ export class GuidedWorkbenchController {
     this.state.step = 'check';
     return result.valid;
   }
-  private progress(message: string, waitingForInput = false) { this.state.progress = message; this.state.waitingForInput = waitingForInput; this.hooks.onState?.(this.state); }
+  private activity(message: string, status: GuidedActivityStatus) {
+    // Only explicit completion evidence earns a success marker. A superseded
+    // progress message remains a record of work that was announced.
+    const previous = this.state.activity?.at(-1);
+    if (previous?.status === 'running' || previous?.status === 'waiting') previous.status = 'info';
+    const entry = { id: ++this.activitySequence, message, status };
+    this.state.activity = [...(this.state.activity ?? []), entry].slice(-100);
+    this.hooks.onState?.(this.state);
+    return entry.id;
+  }
+  private progress(message: string, waitingForInput = false, status: GuidedActivityStatus = waitingForInput ? 'waiting' : 'running') {
+    this.state.progress = message; this.state.waitingForInput = waitingForInput;
+    this.activity(message, status);
+  }
   dispatch(message: GuidedMessage): Promise<GuidedState> {
     // Pickers and network calls can yield while another message arrives. Keep
     // their complete transitions ordered instead of changing the active skill
@@ -208,6 +243,7 @@ export class GuidedWorkbenchController {
       if (message.action !== 'save' && message.action !== 'ready') {
         this.state.busy = true;
         this.progress(activityForAction(message.action), actionNeedsInput(message.action));
+        this.operationActivity = this.state.activity?.at(-1)?.id;
         await new Promise<void>(resolve => setImmediate(resolve));
       }
       if (message.action !== 'reloadFile') this.buffer(message);
@@ -406,12 +442,12 @@ export class GuidedWorkbenchController {
           const supported = !!githubRepository(this.state.connection.repository);
           const priorUpload = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: this.active().name })).find(item => item.version === version && item.status === 'uploaded');
           if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(this.state.connection.repository); }
-          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, message => this.progress(message), { deferCleanup: supported, expectedFiles: preview.inventory });
+          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, (message, status) => this.progress(message, false, status), { deferCleanup: supported, expectedFiles: preview.inventory });
           this.state.receipt = receiptFor(result);
           if (supported) {
             this.progress('Upload verified. Creating or finding its pull request…');
             try {
-              const reviewed = await reviewLibraryRelease(this.workspace(), result.release.directory, 'create', string('reviewer'), this.hooks.github);
+              const reviewed = await reviewLibraryRelease(this.workspace(), result.release.directory, 'create', string('reviewer'), this.hooks.github, (message, status) => this.progress(message, false, status));
               this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError ?? result.cleanupError;
               this.state.receipt.note = reviewed.pr.error ? reviewed.pr.number && reviewed.pr.identityVerified ? 'PR created; the latest review status is unavailable. Open or check the recorded PR; the upload is retained.' : 'Uploaded — PR not created or verified. The uploaded version and draft remain recoverable; retry from Check PRs.' : reviewed.pr.reviewRequestError ? 'PR created — review request failed or remains uncertain. Check the recorded PR without uploading another version.' : 'Uploaded with a recorded PR. Use Merge PR and delete branch when this submission is ready.';
             } catch {
@@ -452,7 +488,7 @@ export class GuidedWorkbenchController {
           this.progress('Checking PRs for recorded uploads in the connected repository…');
           const items = await this.runJob({ kind: 'reviews', root: this.workspace() });
           for (const item of items.slice(0, 50)) {
-            try { await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github); }
+            try { await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github, (message, status) => this.progress(message, false, status)); }
             catch { this.state.reviewQueueError = 'Some saved upload metadata could not be checked. Inspect the affected version and reconnect its recorded repository; known statuses are retained.'; }
           }
           if (items.length > 50) this.state.reviewQueueError = 'The first 50 versions were checked. Check additional versions individually to keep requests bounded.';
@@ -463,7 +499,7 @@ export class GuidedWorkbenchController {
           if (message.action === 'requestReviewer' && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request first.');
           if (message.action === 'createPullRequest' && string('reviewer') && payload.confirmed !== true) throw new Error('Explicitly confirm the selected reviewer before creating a PR with a review request.');
           this.state.busy = true; this.progress(message.action === 'mergePullRequest' ? 'Verifying this submission, merging it and cleaning up its branch…' : message.action === 'checkPullRequest' ? 'Checking this recorded PR…' : message.action === 'createPullRequest' ? 'Finding or creating the PR for the existing upload…' : 'Requesting the selected eligible reviewer…');
-          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'mergePullRequest' ? 'merge' : message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github);
+          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'mergePullRequest' ? 'merge' : message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github, (message, status) => this.progress(message, false, status));
           if (this.state.receipt?.directory === string('directory')) { this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError; }
           if (message.action === 'mergePullRequest') {
             if (reviewed.pr.mergeError) this.state.error = reviewed.pr.mergeError;
@@ -496,6 +532,17 @@ export class GuidedWorkbenchController {
     } finally {
       if (reviewMode && ['loadReviewers', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest', 'openPullRequest', 'connectGitHub'].includes(message.action)) this.state.form = { mode: 'reviews' };
       this.state.busy = false; this.state.progress = undefined; this.state.waitingForInput = false;
+      if (this.operationActivity !== undefined) {
+        const checkFailed = ['check', 'preparePublish'].includes(message.action) && this.state.check?.valid === false;
+        const failed = !!this.state.error || checkFailed;
+        const operation = this.state.activity?.find(entry => entry.id === this.operationActivity);
+        if (operation) operation.status = failed ? 'failed' : 'succeeded';
+        const last = this.state.activity?.at(-1);
+        if (last && (last.status === 'running' || last.status === 'waiting')) last.status = 'info';
+        this.activity(this.state.error ? 'This action needs attention. See the error details.' : checkFailed ? 'Structural check needs attention. Review the findings below.' : 'Action finished. The next step is ready below.', failed ? 'failed' : 'succeeded');
+        if (!this.state.error) this.activity(nextActivityMessage(this.state), 'info');
+        this.operationActivity = undefined;
+      }
       if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest'].includes(message.action)) this.state.skillsStale = true;
     }
     return this.state;

@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-export const METRIC_STAGES = ['archiveRead', 'archiveValidation', 'archiveDecode', 'extractWrite', 'extractedReadback', 'originalPreservation', 'catalogWrite', 'editorPreview', 'workerStartup', 'workerExecution', 'workerTeardown', 'pickerWait', 'operationTotal', 'editorPreparation', 'webviewRender', 'gitLocal', 'gitRemote', 'authentication', 'githubRequest', 'githubCli', 'skillValidation', 'libraryScan', 'releaseVerification', 'changeComparison', 'releasePreparation'] as const;
+export const METRIC_STAGES = ['archiveRead', 'archiveValidation', 'archiveDecode', 'extractWrite', 'extractedReadback', 'originalPreservation', 'catalogWrite', 'editorPreview', 'workerStartup', 'workerExecution', 'workerTeardown', 'pickerWait', 'operationTotal', 'editorPreparation', 'webviewRender', 'gitLocal', 'gitRemote', 'authentication', 'githubRequest', 'githubCli', 'skillValidation', 'libraryScan', 'releaseVerification', 'changeComparison', 'releasePreparation', 'receiptRecording', 'reviewPreparation', 'localCleanup'] as const;
 export type MetricStage = typeof METRIC_STAGES[number];
 export type WorkbenchMetric = { stage: MetricStage; durationMs: number; fileCount?: number; byteCount?: number; outcome?: 'ok' | 'error'; operation?: string; jobKind?: string; statusCode?: number; exitCode?: number; timedOut?: boolean };
 export type WorkbenchMetricSink = (metric: WorkbenchMetric) => void;

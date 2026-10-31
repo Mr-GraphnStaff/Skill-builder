@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.11 — 2026-10-31 (public pre-release)
+
+- Focus the workbench Activity area when advancing a step and show a scrolling history of actual work, waiting, success and errors without repeatedly taking focus.
+- Reuse the configured local repository's downloaded data for isolated submissions and fetch destination changes; preserve local edits, staged files and repository settings.
+- List historical releases from metadata and verify the selected release when used, rather than repeatedly reopening every package.
+- Reuse inventories within packaging and verified Git tree identities during publication while retaining reviewed-content, destination and conflict checks.
+- Reduce unnecessary Git configuration subprocesses and add timings and activity messages around packaging, PR preparation, receipts and cleanup.
+
 ## 0.11.10 — 2026-10-30 (public pre-release)
 
 - Rename the guided Check step to Sanity check and limit it to structural metadata, identity and package integrity.

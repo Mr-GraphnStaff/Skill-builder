@@ -1,5 +1,17 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Current assignment: activity and performance 0.11.11 — October 31
+
+The lead authorized implementing the performance audit recommendations and
+focus/activity changes, publishing to the public pre-release Marketplace, then
+testing as the candidate for the next production version. Stable publication
+awaits that testing. Avery coordinates on Codex Windows; Ishan implements
+host/core, Mara UI, Morgan managed Git/security and Lena independent QA/accessibility.
+Source stays in the active pre-release checkout; existing work is preserved.
+Detailed requirements, review evidence and delivery state are in
+`2026-10-31-prerelease-0.11.11.md`. Integrated checks and release are in progress;
+the completed 0.11.10 delivery below remains historical evidence.
+
 ## Current assignment: structural-only Sanity check 0.11.10
 
 The lead explicitly authorized structural-only Sanity check behavior and public pre-release publication. Delivery is complete: 0.11.10 is verified as the latest public Marketplace pre-release, source `5a5d9cecc467aa26e89a5a3aa51e12a0830ff625`, CI build 960 (303/303 tests, zero skips), independent QA/security/package review and exact-artifact native smoke. Build 960's publication verification exceeded its catalog window; read-only reconciliation 961 succeeded and independently verified original provenance, catalog/channel and exact public bytes/payload. SHA-256: `86c68cc577c6b7f0b40544f325640daca8be1198b5ae7b591f87d92965331e63`.

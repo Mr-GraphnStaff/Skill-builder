@@ -1,4 +1,7 @@
 export type GuidedStep = 'start' | 'edit' | 'check' | 'publish' | 'done';
+export type GuidedActivityStatus = 'running' | 'waiting' | 'succeeded' | 'failed' | 'info';
+export type GuidedActivityEntry = { id: number; message: string; status: GuidedActivityStatus };
+export type GuidedProgress = (message: string, status?: GuidedActivityStatus) => void;
 export type SkillTarget = 'portable' | 'claude' | 'codex' | 'gemini' | 'copilot';
 export type ReviewerChoice = { login: string; name?: string };
 export type PullRequestRecord = {
@@ -16,6 +19,7 @@ export type GuidedState = {
   step: GuidedStep;
   busy?: boolean;
   progress?: string;
+  activity?: GuidedActivityEntry[];
   waitingForInput?: boolean;
   skillsLoaded?: boolean;
   skillsStale?: boolean;

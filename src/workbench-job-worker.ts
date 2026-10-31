@@ -10,7 +10,7 @@ const onMetric = (metric: WorkbenchMetric) => emitWorkbenchMetric(value => paren
 function perform(job: WorkbenchJob): unknown {
   if (!job || typeof job !== 'object') throw new Error('Choose a supported local operation.');
   switch (job.kind) {
-    case 'library': return measureWorkbenchPhase('libraryScan', onMetric, () => listLibraryReleases(job.root, job.skillName));
+    case 'library': return measureWorkbenchPhase('libraryScan', onMetric, () => listLibraryReleases(job.root, job.skillName, { verifyPayload: false }));
     case 'reviews': return connectedReviewReleases(job.root);
     case 'validate': return measureWorkbenchPhase('skillValidation', onMetric, () => validateWorkbenchSkill(job.skill));
     case 'openPackage': return openSkillPackage(job.file, job.root, job.replaceExisting, onMetric);
@@ -22,7 +22,7 @@ function perform(job: WorkbenchJob): unknown {
     case 'snapshot': {
       const validation = measureWorkbenchPhase('skillValidation', onMetric, () => validateWorkbenchSkill(job.skill));
       if (!validation.valid) throw new Error(validation.errors.join('\n'));
-      const releases = measureWorkbenchPhase('libraryScan', onMetric, () => listLibraryReleases(job.root, job.skill.name));
+      const releases = measureWorkbenchPhase('libraryScan', onMetric, () => listLibraryReleases(job.root, job.skill.name, { verifyPayload: false }));
       const baseline = releases[0];
       const prior = baseline ? measureWorkbenchPhase('releaseVerification', onMetric, () => verifySkillRelease(baseline.directory).manifest.files) : undefined;
       const summary = measureWorkbenchPhase('changeComparison', onMetric, () => summarizeFileChanges(validation.files, baseline && prior ? { version: baseline.version, files: prior } : undefined));

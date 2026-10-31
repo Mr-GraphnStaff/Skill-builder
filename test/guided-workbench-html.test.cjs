@@ -101,7 +101,7 @@ test('serialized file data restores both textarea values before the baseline wit
     assert.doesNotMatch(source, /<\/script>|[\u2028\u2029]/);
     const editor = step === 'edit' ? { value: 'HTML parser already lost the leading line.' } : null;
     const hidden = step === 'check' ? { value: 'HTML parser already lost the leading line.' } : null;
-    const document = { getElementById: id => id === 'main-content' ? { dataset: {} } : id === 'editorContent' ? editor : hidden };
+    const document = { getElementById: id => id === 'main-content' ? { dataset: {} } : id === 'editorContent' ? editor : id === 'bufferContent' ? hidden : null };
     const prefix = source.slice(0, source.indexOf('const initialFields'));
     const result = new vm.Script(prefix + ';({ content: (editor || hiddenBuffer).value, baseline: initialEditorContent, injected: typeof globalThis.injected });').runInNewContext({ document, acquireVsCodeApi: () => ({ getState: () => ({}) }) });
     assert.equal(result.content, content);

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { verifySkillRelease, restoreSkillRelease, updateSkillRepository, validateWorkbenchSkill, WorkbenchSkill, type FileDigest } from './skill-workbench.js';
+import { verifySkillRelease, readSkillReleaseMetadata, restoreSkillRelease, updateSkillRepository, validateWorkbenchSkill, WorkbenchSkill, type FileDigest } from './skill-workbench.js';
 import { readSkillIdentity, semanticVersion, compareReleaseVersions, nextReleaseVersion } from './skill-identity.js';
 import { githubRepository, reviewRecord } from './github-review.js';
 import type { PullRequestRecord } from './guided-contract.js';
@@ -12,6 +12,7 @@ export type LibraryRelease = {
   status: 'uploaded' | 'archived' | 'prepared';
   repository?: string; baseBranch?: string; branch?: string; commit?: string; publishedAt?: string;
   pr?: PullRequestRecord;
+  verification?: 'metadata' | 'verified';
 };
 const semver = semanticVersion;
 
@@ -26,9 +27,9 @@ function safe(root: string, target: string): void {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
 }
-function localRelease(root: string, directory: string) {
+function localRelease(root: string, directory: string, verifyPayload = true) {
   safe(root, directory);
-  const release = verifySkillRelease(directory);
+  const release = verifyPayload ? verifySkillRelease(directory) : readSkillReleaseMetadata(directory);
   if (path.relative(path.join(path.resolve(root), 'releases', release.skillName, release.version), path.resolve(directory)) !== '') throw new Error('Release is outside this workspace library.');
   return release;
 }
@@ -110,7 +111,7 @@ export function recordLibraryPublication(root: string, directory: string, result
   finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
 }
 
-export function listLibraryReleases(root: string, skillFilter?: string): LibraryRelease[] {
+export function listLibraryReleases(root: string, skillFilter?: string, options: { verifyPayload?: boolean } = {}): LibraryRelease[] {
   const base = path.join(path.resolve(root), 'releases'); safe(root, base);
   if (!fs.existsSync(base)) return [];
   const items: LibraryRelease[] = [];
@@ -120,7 +121,7 @@ export function listLibraryReleases(root: string, skillFilter?: string): Library
     const folder = path.join(base, name.name); safe(root, folder);
     for (const version of fs.readdirSync(folder, { withFileTypes: true })) {
       if (!version.isDirectory() || !semver.test(version.name)) continue;
-      const release = localRelease(root, path.join(folder, version.name));
+      const release = localRelease(root, path.join(folder, version.name), options.verifyPayload !== false);
       const receipt = receiptPath(root, release.skillName, release.version);
       const archiveRecord = path.join(path.resolve(root), '.skill-workbench', 'completed', release.skillName, release.version, 'record.json'); safe(root, archiveRecord);
       let data: Partial<Publication> = {};
@@ -137,15 +138,15 @@ export function listLibraryReleases(root: string, skillFilter?: string): Library
         try { pr = readReview(root, release.skillName, release.version, upload); }
         catch { pr = { supported: !!githubRepository(upload.repository), status: 'unknown', error: 'Saved PR metadata could not be verified. Use Check PRs to repair it; the upload remains recorded.' }; }
       }
-      items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, ...data, ...(pr ? { pr } : {}) });
+      items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, verification: options.verifyPayload === false ? 'metadata' : 'verified', ...data, ...(pr ? { pr } : {}) });
     }
   }
   return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || compareReleaseVersions(b.version, a.version) || b.version.localeCompare(a.version));
 }
 
 export function restoreLibraryRelease(root: string, directory: string): WorkbenchSkill {
-  const release = localRelease(root, directory);
-  const item = listLibraryReleases(root, release.skillName).find(release => path.resolve(release.directory) === path.resolve(directory));
+  const release = localRelease(root, directory, false);
+  const item = listLibraryReleases(root, release.skillName, { verifyPayload: false }).find(release => path.resolve(release.directory) === path.resolve(directory));
   const draft = restoreSkillRelease(root, directory);
   if (item?.repository && item.baseBranch) return updateSkillRepository(root, draft.id, item.repository, item.baseBranch);
   return draft;
@@ -182,7 +183,7 @@ export function summarizeSkillChanges(root: string, skill: WorkbenchSkill): Skil
   safe(root, skill.sourcePath);
   const validation = validateWorkbenchSkill(skill);
   if (!validation.valid) throw new Error(validation.errors.join('\n'));
-  const baseline = listLibraryReleases(root, skill.name)[0];
+  const baseline = listLibraryReleases(root, skill.name, { verifyPayload: false })[0];
   const prior = baseline ? localRelease(root, baseline.directory).manifest.files : undefined;
   return summarizeFileChanges(validation.files, baseline && prior ? { version: baseline.version, files: prior } : undefined);
 }
