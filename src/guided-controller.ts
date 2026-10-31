@@ -112,8 +112,9 @@ export class GuidedWorkbenchController {
       if (current?.pr) this.state.receipt.pr = current.pr;
     }
   }
-  private select(skill: WorkbenchSkill, opening?: OpenedSkillPackage) {
+  private select(skill: WorkbenchSkill, opening?: OpenedSkillPackage, replacement = false) {
     const editorStarted = performance.now();
+    const newWorkflow = this.state.active?.id !== skill.id || !!opening || replacement;
     const manifestContent = opening?.manifestContent ?? readGuidedFile(skill, 'SKILL.md');
     const identity = readSkillIdentity(manifestContent);
     this.state.active = { id: skill.id, name: skill.name, version: identity.declaredVersion,
@@ -124,6 +125,7 @@ export class GuidedWorkbenchController {
     this.previewInventory = undefined;
     this.state.step = 'edit'; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined; this.state.form = undefined;
     emitWorkbenchMetric(this.hooks.onMetric, { stage: 'editorPreparation', durationMs: performance.now() - editorStarted, fileCount: this.state.files.length, outcome: 'ok' });
+    if (newWorkflow) this.resetWorkflowActivity();
   }
   private buffer(message: GuidedMessage) {
     if (message.editorContent === undefined && message.editorPath === undefined) return;
@@ -210,6 +212,20 @@ export class GuidedWorkbenchController {
     this.state.step = 'check';
     return result.valid;
   }
+  private resetWorkflowActivity() {
+    // A successful opening starts a fresh skill workflow, but keep the import
+    // and extraction evidence already produced by this opening operation.
+    const operation = this.operationActivity;
+    const entries = operation === undefined ? [] : (this.state.activity ?? []).filter(entry => entry.id >= operation);
+    const rootRetained = entries.some(entry => entry.id === operation);
+    this.state.activity = entries.map((entry, index) => ({ ...entry, id: index + 1 }));
+    this.state.activityGeneration = (this.state.activityGeneration ?? 0) + 1;
+    this.activitySequence = entries.length;
+    // Zero is a nonmatching sentinel if the bounded list evicted the root.
+    // Finally still records completion without changing a different phase.
+    this.operationActivity = operation === undefined ? undefined : rootRetained ? 1 : 0;
+    this.hooks.onState?.(this.state);
+  }
   private activity(message: string, status: GuidedActivityStatus) {
     // Only explicit completion evidence earns a success marker. A superseded
     // progress message remains a record of work that was announced.
@@ -258,6 +274,7 @@ export class GuidedWorkbenchController {
         case 'chooseWorkspace': {
           const root = await this.hooks.chooseWorkspace?.();
           if (root) {
+            const changedWorkspace = !this.root || path.relative(this.root, root) !== '';
             this.progress('Opening your selected work folder…'); this.root = root;
             this.state.drafts = []; this.state.library = []; this.state.reviewQueue = undefined;
             this.state.skillsLoaded = false; this.state.skillsStale = false;
@@ -265,6 +282,7 @@ export class GuidedWorkbenchController {
             this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined;
             this.state.libraryError = undefined; this.state.reviewQueueError = undefined; this.state.step = 'start';
             this.refreshConnection(); void this.verifyRepository();
+            if (changedWorkspace) this.resetWorkflowActivity();
           }
           else this.state.notice = 'Folder selection canceled. Your saved work is still available.';
           break;
@@ -298,7 +316,7 @@ export class GuidedWorkbenchController {
           const folder = await this.hooks.pickFolder?.(connection.localPath);
           if (folder) {
             this.progress('Opening the selected skill folder…');
-            this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }));
+            this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }), undefined, true);
           } else { this.state.form = previousForm; this.state.notice = 'Opening canceled. Your current work is retained.'; }
           break;
         }
@@ -337,7 +355,7 @@ export class GuidedWorkbenchController {
         }
         case 'openFolder': {
           const folder = await this.hooks.pickFolder?.();
-          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true })); }
+          if (folder) { this.progress('Copying the selected skill folder into your beta workspace…'); this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }), undefined, true); }
           else this.state.notice = 'Opening canceled. No folder was imported.';
           break;
         }
@@ -346,7 +364,7 @@ export class GuidedWorkbenchController {
           if (!skill) throw new Error('That draft is no longer active. Refresh to see saved drafts.');
           this.select(skill); break;
         }
-        case 'restoreVersion': this.select(await this.runJob({ kind: 'restoreRelease', root: this.workspace(), directory: string('directory') })); break;
+        case 'restoreVersion': this.select(await this.runJob({ kind: 'restoreRelease', root: this.workspace(), directory: string('directory') }), undefined, true); break;
         case 'openFile': {
           const skill = this.active(); const relative = string('path');
           if (!this.state.files.some(item => item.path === relative)) throw new Error('Choose a file belonging to this skill.');
@@ -517,7 +535,8 @@ export class GuidedWorkbenchController {
         case 'back':
           this.state.step = this.state.step === 'publish' ? 'check' : this.state.step === 'check' ? 'edit' : 'start'; this.state.form = undefined; break;
         case 'startAnother':
-          this.state.step = 'start'; this.state.active = undefined; this.state.editor = undefined; this.state.files = []; this.state.form = undefined; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined; break;
+          this.state.step = 'start'; this.state.active = undefined; this.state.editor = undefined; this.state.files = []; this.state.form = undefined; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined;
+          this.resetWorkflowActivity(); break;
         case 'openLink': {
           const url = string('url');
           const allowed = this.state.receipt && ['sourceUrl', 'packageUrl', 'changelogUrl', 'reviewUrl'].some(key => (this.state.receipt as Record<string, unknown>)[key] === url);

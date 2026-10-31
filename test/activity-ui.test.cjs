@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { renderGuidedWorkbench } = require('../out/guided-workbench-html.js');
 
-function harness({ saved = {}, step = 'edit', activity = [] } = {}) {
+function harness({ saved = {}, step = 'edit', activity = [], activityGeneration = 0 } = {}) {
   const state = { step, active: { id: 'sample', name: 'sample' }, hasWorkspace: true,
-    repositories: [], drafts: [], library: [], files: [], target: 'portable', activity };
+    repositories: [], drafts: [], library: [], files: [], target: 'portable', activity, activityGeneration };
   const html = renderGuidedWorkbench(state, 'activityUiNonce');
   const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)[1];
   const nodes = new Map(), handlers = new Map(), windowHandlers = new Map(), posted = [], timers = new Map();
@@ -81,15 +81,39 @@ test('activity retains explicit outcomes without inferring success from a later 
 });
 
 test('history follows new entries at the bottom and preserves position while reading earlier entries', () => {
-  const h = harness(), history = h.nodes.get('activity-history');
+  const h = harness({ activityGeneration: 7 }), history = h.nodes.get('activity-history');
   const entries = Array.from({ length: 10 }, (_, index) => entry(index));
-  h.receive({ type: 'progress', activity: entries });
+  h.receive({ type: 'progress', activity: entries, activityGeneration: 7 });
   assert.equal(history.scrollTop, history.scrollHeight);
   history.scrollTop = 15;
-  h.receive({ type: 'progress', activity: [...entries, entry(11)] });
+  h.receive({ type: 'progress', activity: [...entries, entry(11)], activityGeneration: 7 });
   assert.equal(history.scrollTop, 15);
-  const next = harness({ saved: h.saved(), activity: [...entries, entry(11)] });
+  const next = harness({ saved: h.saved(), activity: [...entries, entry(11)], activityGeneration: 7 });
   assert.equal(next.nodes.get('activity-history').scrollTop, 15, 'completion render preserves reading position');
+});
+
+test('a new skill generation resets the prior skill reading position and follows its own activity', () => {
+  const previous = Array.from({ length: 12 }, (_, index) => entry(index, 'info', `Previous skill ${index}`));
+  const h = harness({ activity: previous, activityGeneration: 3 });
+  const history = h.nodes.get('activity-history');
+  history.scrollTop = 15;
+  h.receive({ type: 'progress', activity: previous, activityGeneration: 3 });
+  assert.equal(h.saved().activityScroll.follow, false);
+  const current = Array.from({ length: 8 }, (_, index) => entry(index + 12, 'info', `New skill ${index}`));
+  h.receive({ type: 'progress', activity: current, activityGeneration: 4 });
+  assert.equal(history.scrollTop, history.scrollHeight);
+  assert.equal(h.saved().activityScroll.follow, true);
+  assert.equal(h.saved().activityScroll.generation, 4);
+  assert.equal(history.children[0].children[1].textContent, 'New skill 0');
+  const completed = harness({ saved: h.saved(), activity: current, activityGeneration: 4 });
+  assert.equal(completed.nodes.get('activity-history').scrollTop, completed.nodes.get('activity-history').scrollHeight);
+});
+
+test('a new generation arriving in the final render does not inherit a previous skill scroll offset', () => {
+  const current = Array.from({ length: 8 }, (_, index) => entry(index));
+  const h = harness({ saved: { activityScroll: { top: 15, follow: false, generation: 11 } }, activity: current, activityGeneration: 12 });
+  assert.equal(h.nodes.get('activity-history').scrollTop, h.nodes.get('activity-history').scrollHeight);
+  assert.equal(h.saved().activityScroll.generation, 12);
 });
 
 test('activity is bounded, renders hostile text as text, and announces only the current status', () => {

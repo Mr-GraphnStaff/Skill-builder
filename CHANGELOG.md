@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.13 — 2026-10-31 (public pre-release bug fix)
+
+- Start a fresh Activity list for each new skill workflow instead of carrying history across skills.
+- Keep the current skill's check, package and submission steps together, including when returning to the same draft.
+- Preserve the opening operation's real import details and retain earlier history when opening is canceled or fails.
+- Reset the history reading position for a new skill while preserving it within the same workflow.
+
 ## 0.11.12 — 2026-10-31 (public pre-release)
 
 - Make Open performance log available in Activity from the first screen, including before choosing a workspace and while an operation is running.

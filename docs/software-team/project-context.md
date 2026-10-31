@@ -1,5 +1,14 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Freeze bug fix: per-skill Activity reset 0.11.13
+
+David reported history accumulating across skills and explicitly chose a fresh
+list per new skill, keeping its steps together. The bug-fix-only freeze remains
+active; no feature expansion or production promotion is authorized by this fix.
+Controller/UI fixes and independent QA are in progress, with evidence in
+`2026-10-31-prerelease-0.11.13.md`. Production still must expose no performance-log
+option. Prior release records below remain preserved.
+
 ## Final pre-release change: early diagnostics access 0.11.12
 
 **Release freeze is in effect: bug fixes only, no new features.** David explicitly

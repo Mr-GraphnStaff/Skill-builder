@@ -116,7 +116,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     } else {
       const completion = activeController.state.error ? 'Needs attention. See the details below.' : `Finished in ${(processingMs / 1000).toFixed(1)} seconds.`;
       activeController.state.progress = completion;
-      await activePanel.webview.postMessage({ type: 'operationComplete', error: activeController.state.error, message: completion, activity: activeController.state.activity });
+      await activePanel.webview.postMessage({ type: 'operationComplete', error: activeController.state.error, message: completion, activity: activeController.state.activity, activityGeneration: activeController.state.activityGeneration });
       render();
     }
   };
@@ -179,7 +179,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
             }
           }
           if (panel === createdPanel && controller === createdController) {
-            void createdPanel.webview.postMessage({ type: 'progress', message: state.progress ?? '', waitingForInput: state.waitingForInput === true, activity: state.activity }).then(() => undefined, () => undefined);
+            void createdPanel.webview.postMessage({ type: 'progress', message: state.progress ?? '', waitingForInput: state.waitingForInput === true, activity: state.activity, activityGeneration: state.activityGeneration }).then(() => undefined, () => undefined);
           }
         }
       });

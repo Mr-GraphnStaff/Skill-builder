@@ -348,10 +348,13 @@ const script = `
   const activityOutput = document.getElementById('progress-message');
   const activityHistory = document.getElementById('activity-history');
   let historyInitialized = false;
-  function updateActivityHistory(entries) {
+  let historyGeneration = saved.activityScroll?.generation ?? 0;
+  function updateActivityHistory(entries, generation = historyGeneration) {
     if (!activityHistory || !Array.isArray(entries)) return;
-    const follow = historyInitialized ? activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24 : saved.activityScroll?.follow !== false;
-    const position = historyInitialized ? activityHistory.scrollTop : saved.activityScroll?.top || 0;
+    const nextGeneration = Number.isSafeInteger(generation) && generation >= 0 ? generation : historyGeneration;
+    const reset = nextGeneration !== historyGeneration;
+    const follow = reset || (historyInitialized ? activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24 : saved.activityScroll?.follow !== false);
+    const position = reset ? 0 : historyInitialized ? activityHistory.scrollTop : saved.activityScroll?.top || 0;
     const labels = { running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' };
     const rows = entries.slice(-100).filter(entry => entry && typeof entry.message === 'string' && Object.prototype.hasOwnProperty.call(labels, entry.status)).map(entry => {
       const row = document.createElement('li');
@@ -367,7 +370,8 @@ const script = `
     activityHistory.hidden = rows.length === 0;
     activityHistory.scrollTop = follow ? activityHistory.scrollHeight : position;
     historyInitialized = true;
-    saved.activityScroll = { top: activityHistory.scrollTop, follow };
+    historyGeneration = nextGeneration;
+    saved.activityScroll = { top: activityHistory.scrollTop, follow, generation: historyGeneration };
     vscode.setState(saved);
   }
   function focusActivity() {
@@ -377,9 +381,9 @@ const script = `
     saved.activityFocus = true;
     vscode.setState(saved);
   }
-  updateActivityHistory(initialActivity);
+  updateActivityHistory(initialActivity, initialActivityGeneration);
   if (activityHistory) activityHistory.addEventListener('scroll', () => {
-    saved.activityScroll = { top: activityHistory.scrollTop, follow: activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24 };
+    saved.activityScroll = { top: activityHistory.scrollTop, follow: activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24, generation: historyGeneration };
     vscode.setState(saved);
   });
   if (activityStatus && typeof ResizeObserver === 'function') {
@@ -602,7 +606,7 @@ const script = `
     const message = event.data || {};
     if (message.type === 'progress') {
       lastHostResponse = Date.now();
-      updateActivityHistory(message.activity);
+      updateActivityHistory(message.activity, message.activityGeneration);
       if (message.message) beginActivity(String(message.message), message.waitingForInput === true);
     }
     if (message.type === 'repositoryVerification') {
@@ -624,7 +628,7 @@ const script = `
     }
     if (message.type === 'heartbeat' && actionPending) lastHostResponse = Date.now();
     if (message.type === 'operationComplete') {
-      updateActivityHistory(message.activity);
+      updateActivityHistory(message.activity, message.activityGeneration);
       lockActions(false);
       finishActivity(message.error ? 'Needs attention. Your work is kept on this screen.' : String(message.message || 'Ready.'));
       if (message.error) clientError(String(message.error));
@@ -681,7 +685,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
       ${screen.html}
       ${state.step !== 'edit' && state.editor ? `<textarea id="bufferContent" hidden data-editor-path="${escape(state.editor.path)}" ${state.editor.readOnly ? 'readonly data-read-only="true"' : ''}>${escape(state.editor.content)}</textarea>` : ''}
       ${primary ? `<footer class="action-bar"><button type="button" class="secondary" data-action="back" ${backDisabled ? 'disabled data-unavailable="true"' : ''}>← Back</button><button id="primary-action" class="primary" type="${primary.form ? 'submit' : 'button'}" ${primary.form ? `form="${primary.form}"` : `data-action="${primary.action}"`} ${primary.id ? `data-id="${escape(primary.id)}"` : ''} ${state.busy || primary.disabled ? 'disabled' : ''} ${primary.disabled ? 'data-unavailable="true"' : ''}>${state.busy ? 'Working…' : escape(primary.label)} <span aria-hidden="true">→</span></button></footer>` : ''}
-    </main></div><script nonce="${nonce}">const initialFileContent = ${scriptString(state.editor?.content ?? '')};const initialActivity = JSON.parse(${scriptString(JSON.stringify(state.activity ?? []))});${script}</script></body></html>`;
+    </main></div><script nonce="${nonce}">const initialFileContent = ${scriptString(state.editor?.content ?? '')};const initialActivity = JSON.parse(${scriptString(JSON.stringify(state.activity ?? []))});const initialActivityGeneration = ${Number.isSafeInteger(state.activityGeneration) ? state.activityGeneration : 0};${script}</script></body></html>`;
 }
 
 export function renderGuidedLauncher(nonce: string, brand?: GuidedBrand): string {

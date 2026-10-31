@@ -20,6 +20,7 @@ export type GuidedState = {
   busy?: boolean;
   progress?: string;
   activity?: GuidedActivityEntry[];
+  activityGeneration?: number;
   waitingForInput?: boolean;
   skillsLoaded?: boolean;
   skillsStale?: boolean;

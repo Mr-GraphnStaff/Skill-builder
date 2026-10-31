@@ -1,5 +1,15 @@
 # Responsive workbench and activity feedback
 
+## Public pre-release 0.11.13: Activity belongs to one skill workflow
+
+Each newly created or opened skill starts a fresh Activity list at 1. Import
+details from that opening remain visible. The same skill's checks, packaging and
+submission stay together; returning to its active draft keeps those earlier steps.
+Canceled or failed openings preserve the existing history. Starting another skill
+or changing work folders resets the workflow; ordinary navigation and autosave do
+not. History following starts fresh for a new workflow and respects reading older
+entries within the same workflow. This is a bug fix under the release freeze.
+
 ## Public pre-release 0.11.12: diagnostics from the first screen
 
 **Open performance log** is always available in Activity, before choosing a work

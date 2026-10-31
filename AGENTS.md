@@ -3,7 +3,7 @@
 ## Release freeze — October 31, 2026
 
 David Farris has declared a release freeze: bug fixes only, no new features.
-The final planned pre-release is 0.11.12. Preserve this scope in team handoffs;
+The feature set is frozen after 0.11.12; only bug-fix releases may follow. Preserve this scope in team handoffs;
 the lead decides when the freeze ends and when production promotion proceeds.
 Production must expose no performance-log option: remove its Activity button and
 Command Palette command during stable promotion, and add no diagnostics opt-in

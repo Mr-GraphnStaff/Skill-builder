@@ -4,7 +4,7 @@ const manifest = require('../package.json');
 test('public prerelease uses the existing Marketplace identity and public entry point', () => {
   assert.equal(manifest.publisher, 'DavidFarris');
   assert.equal(manifest.name, 'skill-builder');
-  assert.equal(manifest.version, '0.11.12');
+  assert.equal(manifest.version, '0.11.13');
   assert.equal(manifest.displayName, 'SkillJetty — Agent Skills Studio');
   assert.deepEqual(manifest.contributes.commands.map(item => item.command), ['skillBuilder.openWorkbench', 'skillBuilder.showPerformanceLog']);
   assert.match(manifest.homepage, /Mr-GraphnStaff\/Skill-builder/);
