@@ -1,5 +1,17 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Final pre-release change: early diagnostics access 0.11.12
+
+The lead authorized moving Open performance log into Activity from the first
+screen. This is the final pre-release change until the production decision;
+further feature changes are frozen unless the lead directs otherwise. Production
+must expose neither the performance-log button nor its Command Palette command,
+and must not add a diagnostics opt-in setting. Activity remains in the production
+candidate. Stable promotion awaits the lead's testing and decision.
+
+Source/focused independent QA passed; CI/artifact/publication are pending. See
+`2026-10-31-prerelease-0.11.12.md`. Prior delivery evidence below is retained.
+
 ## Current assignment: activity and performance 0.11.11 — October 31
 
 The lead authorized implementing the performance audit recommendations and

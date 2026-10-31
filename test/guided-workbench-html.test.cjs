@@ -13,6 +13,22 @@ function state(overrides = {}) {
   };
 }
 
+test('performance log is in Activity from the first screen through busy later steps', () => {
+  for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
+    for (const hasWorkspace of [false, true]) {
+      const html = renderGuidedWorkbench(state({ step, hasWorkspace, busy: true,
+        check: { valid: true, errors: [], warnings: [], compatibility: '', behaviorNote: '' },
+        publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
+      const activityStart = html.indexOf('id="operation-status"');
+      const logButton = html.indexOf('id="open-performance-log"');
+      assert(logButton > activityStart && logButton < html.indexOf('<main id="main-content"'), step);
+      assert.equal((html.match(/id="open-performance-log"/g) || []).length, 1);
+      assert.match(html, /data-action="openPerformanceLog" id="open-performance-log" data-diagnostics="true"/);
+      assert.doesNotMatch(html, /<button[^>]*id="open-performance-log"[^>]*\bdisabled/);
+    }
+  }
+});
+
 test('saved skills are opt-in and unloaded content is not rendered', () => {
   const saved = { drafts: [{ id: 'private-draft', name: 'private-draft' }], library: [{ skillName: 'private-release', version: '1.0.0', directory: 'local', status: 'archived' }] };
   const unloaded = renderGuidedWorkbench(state(saved), nonce);

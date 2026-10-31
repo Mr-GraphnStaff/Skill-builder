@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.12 — 2026-10-31 (public pre-release)
+
+- Make Open performance log available in Activity from the first screen, including before choosing a workspace and while an operation is running.
+- Keep startup and earlier timings available without advancing the skill workflow or opening repository settings.
+
 ## 0.11.11 — 2026-10-31 (public pre-release)
 
 - Focus the workbench Activity area when advancing a step and show a scrolling history of actual work, waiting, success and errors without repeatedly taking focus.

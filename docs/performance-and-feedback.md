@@ -1,5 +1,16 @@
 # Responsive workbench and activity feedback
 
+## Public pre-release 0.11.12: diagnostics from the first screen
+
+**Open performance log** is always available in Activity, before choosing a work
+folder and while an operation is running. The log is created when the extension
+activates; opening it later still shows startup and earlier recorded timings.
+Access no longer depends on repository settings or advancing to another step.
+
+This is the final pre-release change before the lead's production decision.
+Production promotion must remove the performance-log button and Command Palette
+command; no production diagnostics opt-in is to be added.
+
 ## Public pre-release 0.11.11: activity and less repeated work
 
 Advancing a step moves focus to the Activity area. Its current message announces
@@ -77,4 +88,4 @@ A separate genuine edited save, including history preservation, took 24.41 ms me
 
 Use **SkillJetty: Open Workbench** and confirm the public pre-release version banner. Check immediate feedback on opening a package, checking files and preparing/saving a package. Scroll to the middle and bottom during a long operation; status should stay visible. Open **Help with this step** and **Repository & GitHub settings**, then confirm the explanations match their actions. Cancel a native picker; confirm the controls recover and your draft remains. Check keyboard focus, reduced motion and high contrast as applicable. Native assistive-technology behavior still requires hands-on verification.
 
-For troubleshooting, use **Open performance log** under repository settings, or select **SkillJetty — Pre-release Performance** in VS Code's Output panel. This local channel records fixed operation labels, timings and outcomes. It does not transmit telemetry or record skill content, file paths, repositories or credentials. A completed handler is not a claim that a skill's AI behavior was tested.
+For troubleshooting, use **Open performance log** in Activity, or select **SkillJetty — Pre-release Performance** in VS Code's Output panel. This local channel records fixed operation labels, timings and outcomes. It does not transmit telemetry or record skill content, file paths, repositories or credentials. A completed handler is not a claim that a skill's AI behavior was tested.
