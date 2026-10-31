@@ -70,14 +70,18 @@ test('actual host delivers activity before dispatch and sends stage updates with
   const baselineRenders = panel.htmlWrites;
   const operation = panel.receive({ action: 'check' });
   await entered.promise;
-  const firstDispatch = f.events.findIndex(event => event.type === 'dispatch');
-  assert(firstDispatch > 0);
-  assert.equal(f.events[0].type, 'message'); assert.equal(f.events[0].message.type, 'progress');
-  assert.match(f.events[0].message.message, /checking/i);
-  assert(panel.messages.some(message => message.type === 'progress' && message.message === 'Reading and checking the selected skill…'));
-  assert.equal(panel.htmlWrites, baselineRenders, 'no page replacement while work is pending');
-  assert.equal(panel.messages.some(message => message.type === 'operationComplete'), false);
-  release.resolve(); await operation;
+  try {
+    const firstDispatch = f.events.findIndex(event => event.type === 'dispatch');
+    assert(firstDispatch > 0);
+    assert.equal(f.events[0].type, 'message'); assert.equal(f.events[0].message.type, 'progress');
+    assert.match(f.events[0].message.message, /sanity check/i);
+    assert(panel.messages.some(message => message.type === 'progress' && message.message === 'Reading and checking the selected skill…'));
+    assert.equal(panel.htmlWrites, baselineRenders, 'no page replacement while work is pending');
+    assert.equal(panel.messages.some(message => message.type === 'operationComplete'), false);
+  } finally {
+    // An assertion must not strand the simulated operation's real heartbeat.
+    release.resolve(); await operation;
+  }
   assert.equal(panel.messages.at(-1).type, 'operationComplete');
   assert.equal(panel.htmlWrites, baselineRenders + 1, 'one final page replacement');
   const completion = f.events.findIndex(event => event.type === 'message' && event.message.type === 'operationComplete');
