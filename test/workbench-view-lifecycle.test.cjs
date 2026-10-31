@@ -99,14 +99,14 @@ test('guided workbench owns its activity container while retained native command
   assert.deepEqual(f.executions, ['workbench.view.extension.skillBuilder', 'skillBuilder.workbenchView.focus']);
 });
 
-test('native lifecycle tree separates drafts and library with Edit, Check, Publish as dominant draft actions', async t => {
+test('native lifecycle tree separates drafts and library with Edit, Sanity check, Publish as dominant draft actions', async t => {
   const f = fixture(t);
   const top = await f.provider.getChildren();
   assert.equal(top[0].label, 'Create a new skill…');
   assert.deepEqual(top.filter(node => node.kind === 'group').map(node => node.label), ['Drafts', 'Published / library']);
   const draft = (await f.provider.getChildren(top.find(node => node.group === 'drafts')))[0];
   const children = await f.provider.getChildren(draft);
-  assert.deepEqual(children.slice(0, 3).map(node => node.label), ['Edit skill', 'Check skill', 'Publish…']);
+  assert.deepEqual(children.slice(0, 3).map(node => node.label), ['Edit skill', 'Sanity check', 'Publish…']);
   assert(children.some(node => node.kind === 'tools'));
 });
 
@@ -186,7 +186,7 @@ test('checks use readable Markdown and block repository work for an invalid draf
   assert.equal(f.counts.repositories, 0); assert.equal(f.counts.prepared, 0);
   const report = f.documents.at(-1);
   assert.equal(report.language, 'markdown');
-  assert.match(report.content, /Local validation needs attention/);
+  assert.match(report.content, /Structural checks need attention/);
   assert.match(report.content, /## Errors/);
   assert.doesNotMatch(report.content, /"report"\s*:/);
 });
