@@ -5,7 +5,14 @@
 David reported history accumulating across skills and explicitly chose a fresh
 list per new skill, keeping its steps together. The bug-fix-only freeze remains
 active; no feature expansion or production promotion is authorized by this fix.
-Controller/UI fixes and independent QA are in progress, with evidence in
+Controller/UI fixes and independent source QA passed. CI969 passed 325/325 tests,
+audits and packaging; independent exact-artifact review and isolated installed
+native workflow smoke passed, including same-skill preservation/new-skill reset.
+Build 969 uploaded once; public payload verified but catalog visibility exceeded
+the original window. Read-only reconciliation 970 succeeded and independently
+verified public 0.11.13 pre-release visibility and exact package bytes without
+another upload. Delivery is complete; human acceptance/production promotion remain
+pending. Evidence is in
 `2026-10-31-prerelease-0.11.13.md`. Production still must expose no performance-log
 option. Prior release records below remain preserved.
 
