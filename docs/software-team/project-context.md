@@ -9,8 +9,15 @@ awaits that testing. Avery coordinates on Codex Windows; Ishan implements
 host/core, Mara UI, Morgan managed Git/security and Lena independent QA/accessibility.
 Source stays in the active pre-release checkout; existing work is preserved.
 Detailed requirements, review evidence and delivery state are in
-`2026-10-31-prerelease-0.11.11.md`. Integrated checks and release are in progress;
-the completed 0.11.10 delivery below remains historical evidence.
+`2026-10-31-prerelease-0.11.11.md`. CI965 passed 319/319 tests, audits and packaging
+from source `7d602a28055144048ab91c38a64fd9406fea6685`. Independent artifact review,
+isolated exact-artifact native smoke and QA review passed within their stated
+scope. Build 965 uploaded once; its catalog visibility window expired and that
+verification result remains failed. Read-only reconciliation 966 succeeded and
+independently verified public 0.11.11 pre-release visibility and exact package
+bytes without another upload. Delivery is complete for this pre-release. Human
+UAT, screen-reader and live GitHub acceptance remain pending before stable
+promotion. The completed 0.11.10 delivery below remains historical evidence.
 
 ## Current assignment: structural-only Sanity check 0.11.10
 

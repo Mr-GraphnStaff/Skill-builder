@@ -16,7 +16,7 @@ a full remote clone on each configured submission, but still copies local Git
 data and writes the isolated checkout. Submissions without a configured local
 repository retain the independent-download path.
 
-Guided saved-version listings read bounded metadata rather than reopening every
+Guided saved-version listings read metadata rather than reopening every
 historical archive. The selected comparison or action still verifies its release
 payload. A listed version is not a new integrity certification. Packaging uses
 one captured source inventory; publication retains the reviewed Git tree identity
