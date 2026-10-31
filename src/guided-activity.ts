@@ -10,7 +10,7 @@ export function activityForAction(action: GuidedAction): string {
     createSkill: 'Creating your local draft…', resume: 'Opening your saved draft…', restoreVersion: 'Restoring a saved release into a draft…',
     openFile: 'Opening the selected file…', createFile: 'Creating the file…', save: 'Saving your changes locally…',
     restoreEdit: 'Restoring the earlier edit and preserving your current work…', refreshHistory: 'Loading earlier edits…',
-    reloadFile: 'Loading the saved file…', check: 'Checking skill files and compatibility…',
+    reloadFile: 'Loading the saved file…', check: 'Running a structural sanity check…',
     preparePublish: 'Comparing your changes and preparing the sharing summary…',
     savePackage: 'Checking and saving your local package…', publish: 'Preparing your submission…',
     discoverRepositories: 'Finding repositories you can connect…', connectRepository: 'Checking the repository connection…',
@@ -23,7 +23,7 @@ export function activityForAction(action: GuidedAction): string {
     requestReviewer: 'Sending the review request you confirmed…', connectGitHub: 'Waiting for GitHub sign-in in VS Code…',
     openPullRequest: 'Opening the recorded pull request…', openLink: 'Opening the selected link…',
     edit: 'Returning to your draft…', back: 'Opening the previous step…', startAnother: 'Opening your skills…',
-    showCreate: 'Opening a new draft form…', setTarget: 'Updating compatibility settings…'
+    showCreate: 'Opening a new draft form…', setTarget: 'Updating the intended application…'
   };
   return labels[action] ?? 'Working on your request…';
 }

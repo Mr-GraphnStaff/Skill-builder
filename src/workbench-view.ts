@@ -122,7 +122,7 @@ export function activateWorkbench(context: vscode.ExtensionContext, hooks: Hooks
       if (node.kind === 'skill' && node.skill) {
         const actions = [
           action('Edit skill', 'skillBuilder.workbenchEditSkill', node.skill),
-          action('Check skill', 'skillBuilder.workbenchValidate', node.skill),
+          action('Sanity check', 'skillBuilder.workbenchValidate', node.skill),
           action('Publish…', 'skillBuilder.workbenchPublishRelease', node.skill)
         ];
         const tools = new WorkbenchNode('Files, tests, and publishing options', 'tools', node.skill);
@@ -480,7 +480,7 @@ async function showMarkdown(content: string) {
 
 async function showSkillCheck(skill: ManagedSkill, report: ReturnType<typeof validateWorkbenchSkill>) {
   const list = (values: string[]) => values.length ? values.map(value => `- ${escapeMarkdown(value)}`).join('\n') : '- None.';
-  await showMarkdown(`# Check: ${escapeMarkdown(skill.name)}\n\n**Local validation ${report.valid ? 'passed' : 'needs attention'}.** ${report.files.length} files inspected.\n\n${localLink(path.join(skill.sourcePath, 'SKILL.md'), 'Edit the skill')}\n\n## Errors\n\n${list(report.errors)}\n\n## Warnings\n\n${list(report.warnings)}\n\n## Next step\n\n${report.valid ? 'Review any warnings, then choose **Publish**. You can also use the manual playground before publishing.' : 'Fix the errors in your draft and choose **Check skill** again.'}\n\nThese are local file and structure checks. Claude behavior has not been executed by this check.\n`);
+  await showMarkdown(`# Sanity check: ${escapeMarkdown(skill.name)}\n\n**Structural checks ${report.valid ? 'passed' : 'need attention'}.** ${report.files.length} files inspected.\n\nSecurity scanning was not performed by SkillJetty.\n\n${localLink(path.join(skill.sourcePath, 'SKILL.md'), 'Edit the skill')}\n\n## Errors\n\n${list(report.errors)}\n\n## Structural notes\n\n${list(report.warnings)}\n\n## Next step\n\n${report.valid ? 'Review any structural notes, then choose **Publish**. You can also use the manual playground before publishing.' : 'Fix the errors in your draft and choose **Sanity check** again.'}\n\nSanity check covers required metadata, skill identity and package structure. Application compatibility and model behavior were not tested.\n`);
 }
 
 async function selectLibraryEntry(root: string, requested?: LibraryRelease): Promise<LibraryRelease | undefined> {

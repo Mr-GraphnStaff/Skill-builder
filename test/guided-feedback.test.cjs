@@ -66,7 +66,7 @@ test('step clicks show specific feedback before host work and reject a duplicate
   const h = harness(); h.click('check'); h.click('check');
   assert.equal(h.posted.length, 1);
   assert.equal(h.posted[0].message.action, 'check');
-  assert.equal(h.posted[0].label, 'Checking your skill files…');
+  assert.equal(h.posted[0].label, 'Running a structural sanity check…');
   assert.equal(h.posted[0].spinning, true);
   assert.equal(h.main.attributes['aria-busy'], 'true');
   assert.equal(h.buttons[0].disabled, true);
@@ -168,7 +168,7 @@ test('successful autosave resumes exactly one queued action with its own progres
   h.receive({ type: 'saved' });
   assert.equal(h.posted.length, 2);
   assert.equal(h.posted[1].message.action, 'check');
-  assert.equal(h.posted[1].label, 'Checking your skill files…');
+  assert.equal(h.posted[1].label, 'Running a structural sanity check…');
   assert.equal(h.posted[1].spinning, true);
 });
 

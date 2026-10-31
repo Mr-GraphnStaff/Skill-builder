@@ -10,7 +10,6 @@ import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
 import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
-import { checkSkillCompatibility } from './skill-compatibility.js';
 import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState } from './guided-contract.js';
 import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
 import type { ValidationReport } from './skill-workbench.js';
@@ -182,10 +181,10 @@ export class GuidedWorkbenchController {
       const file = this.state.files.find(entry => message.startsWith(`${entry.path}:`))?.path;
       return { message, ...(file ? { file } : {}) };
     };
-    let compatibility: ReturnType<typeof checkSkillCompatibility>;
-    try { compatibility = checkSkillCompatibility(skill, this.state.target, result.files.map(file => file.path)); }
-    catch { compatibility = { warnings: [], compatibility: 'Correct the file errors before compatibility can be checked.', behaviorNote: 'No AI model was run.' }; }
-    this.state.check = { valid: result.valid, errors: result.errors.map(fileFinding), warnings: [...result.warnings.map(fileFinding), ...compatibility.warnings], compatibility: compatibility.compatibility, behaviorNote: compatibility.behaviorNote };
+    const targets: Record<SkillTarget, string> = { portable: 'Portable Agent Skills', claude: 'Claude', codex: 'ChatGPT / Codex', gemini: 'Gemini CLI', copilot: 'GitHub Copilot' };
+    this.state.check = { valid: result.valid, errors: result.errors.map(fileFinding), warnings: result.warnings.map(fileFinding),
+      compatibility: `Intended application: ${targets[this.state.target]}. Application compatibility was not tested.`,
+      behaviorNote: 'No AI model was run. Test the skill in your intended application before relying on its behavior.' };
     this.state.step = 'check';
     return result.valid;
   }
@@ -403,7 +402,7 @@ export class GuidedWorkbenchController {
           }
           if (!this.state.connection) throw new Error('Connect your repository before publishing.');
           this.state.step = 'publish';
-          this.state.busy = true; this.progress('Checking and packaging this version…');
+          this.state.busy = true; this.progress('Sanity checking and packaging this version…');
           const supported = !!githubRepository(this.state.connection.repository);
           const priorUpload = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: this.active().name })).find(item => item.version === version && item.status === 'uploaded');
           if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(this.state.connection.repository); }

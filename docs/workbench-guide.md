@@ -20,15 +20,17 @@ The file list shows every supported nested file. Select text files to edit them 
 
 Edits save locally after a short pause and before moving to the next step. The save indicator reports success or an error. If a file changed in another editor, the newer disk copy is retained and your conflicting buffer is saved under `.skill-workbench/recovery/`. Use **Reload saved file** after preserving/reviewing that recovery copy. No conflicting edit is silently substituted for another skill's file.
 
-Select a compatibility target if helpful. Portable is the default. This changes guidance, not the skill's contents, and does not install or run the skill.
+Select an intended application if helpful. Portable is the default. This is context for your work; the sanity check does not verify compatibility, install the skill or run it.
 
-Choose **Check and continue**.
+Choose **Sanity check**.
 
-## Check
+## Sanity check
 
-Review structural errors and warnings. Errors link back to the relevant file where possible. Choose the highlighted fix action, edit, and check again. When the check passes, continue to Submit.
+The sanity check verifies readable YAML metadata, required name and description, matching skill identity and package structure. Structural errors link back to the relevant file where possible. Fix those items and run the sanity check again before continuing to Submit. Fonts, binary assets, indirectly referenced supporting files and alternative evaluation filenames do not create content-review warnings.
 
-Checking is local and does not upload your skill. A static check does not establish tool availability, script safety, skill triggering, model behavior or successful installation in a particular application. Run realistic prompts in the intended application before deciding the skill is ready for others.
+**Structural checks passed. Security scanning was not performed by SkillJetty.** This is a local packaging check, not security approval, vendor compatibility verification or a model test. It does not traverse every reference or verify runtime-generated paths. Use your organization's dedicated scanners and intended runtime checks before sharing or executing the skill; no external scanner is automatically connected or invoked.
+
+External review should cover the complete artifact, including supporting assets and preserved `original.skill` archives. Editing a copy does not remove content from its immutable original. SkillJetty continues to enforce safe import and archive handling, identity, size and decompression limits, and repository URL protections; these guards remain active independently of content scanning.
 
 ## Submit
 

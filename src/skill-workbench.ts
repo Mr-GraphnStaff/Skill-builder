@@ -4,7 +4,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { inflateRawSync } from 'node:zlib';
 import AdmZip from 'adm-zip';
 import { isUtf8 } from 'node:buffer';
-import { analyzeSkill } from './skill-analysis.js';
 import { measureWorkbenchPhase, type WorkbenchMetricSink } from './workbench-metrics.js';
 
 const yaml: { load(value: string): unknown } = require('js-yaml');
@@ -315,17 +314,9 @@ export function validateWorkbenchSkill(record: WorkbenchSkill): ValidationReport
     const manifest = files.find(file => file.relative === 'SKILL.md');
     if (!manifest) throw new Error('SKILL.md is missing.');
     if (metadata(manifest.bytes).name !== record.name || path.basename(record.sourcePath) !== record.name) throw new Error('Skill name, catalog identity and source folder must match.');
-    const analysisFiles = files.filter(file => !file.directory).map(file => {
-      const text = isUtf8(file.bytes) && !file.bytes.includes(0);
-      if (!text) warnings.push(`${file.relative}: Binary contents were preserved but were not scanned for text credentials or code capabilities.`);
-      return { relativePath: file.relative, size: file.bytes.length, content: text ? file.bytes.toString('utf8') : undefined };
-    });
-    const analysis = analyzeSkill(manifest.bytes.toString('utf8'), analysisFiles, record.name);
-    for (const finding of analysis.findings) {
-      const message = `${finding.file ?? 'SKILL.md'}: ${finding.message}`;
-      if (finding.severity === 'error') errors.push(message);
-      else warnings.push(message);
-    }
+    // This is a structural sanity check, not a content/security scanner.
+    // sourceFiles and metadata enforce the file, path, size and identity
+    // contracts. Supporting files need no prescribed names or direct links.
   } catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
   return { valid: errors.length === 0, errors, warnings, files: digests(files) };
 }
@@ -336,9 +327,8 @@ function validateOriginalArchive(original: Buffer, name: string): void {
   const originalFiles = readArchive(original);
   const originalManifest = originalFiles.find(file => file.relative === 'SKILL.md');
   if (!originalManifest || metadata(originalManifest.bytes).name !== name) throw new Error('Original package skill identity mismatch.');
-  const analysis = analyzeSkill(originalManifest.bytes.toString('utf8'), originalFiles.filter(file => !file.directory).map(file => ({ relativePath: file.relative, size: file.bytes.length, content: isUtf8(file.bytes) && !file.bytes.includes(0) ? file.bytes.toString('utf8') : undefined })), name);
-  const blocking = analysis.findings.filter(finding => finding.severity === 'error');
-  if (blocking.length) throw new Error(`Original package validation failed: ${blocking.map(finding => `${finding.file ?? 'SKILL.md'}: ${finding.message}`).join('; ')}`);
+  // Immutable originals retain the same archive and metadata boundaries as
+  // imports. Their illustrative text must not introduce a separate scanner gate.
 }
 export function prepareSkillRelease(workspaceRoot: string, id: string, version: string, changelog: string, replaceExisting = false): WorkbenchRelease {
   checkVersion(version);

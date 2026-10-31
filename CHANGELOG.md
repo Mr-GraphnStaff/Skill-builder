@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.10 — 2026-10-30 (public pre-release)
+
+- Rename the guided Check step to Sanity check and limit it to structural metadata, identity and package integrity.
+- Remove detailed security detections, quality wording heuristics, direct-reference notices, mandatory evaluation filenames and per-binary warnings from guided validation and original-package verification.
+- State explicitly that the sanity check does not perform security scanning; use dedicated scanners for content and execution risk review.
+- Preserve archive/path/link/expansion limits, safe file handling, immutable originals, recovery and explicit upload/review behavior.
+
 ## 0.11.9 — 2026-10-30 (public pre-release)
 
 - Keep operation status visible from the top of the workbench while scrolling, with distinct waiting, working and completion feedback.

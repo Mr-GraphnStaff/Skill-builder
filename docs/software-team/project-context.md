@@ -1,5 +1,9 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Current assignment: structural-only Sanity check 0.11.10
+
+The lead explicitly authorized structural-only Sanity check behavior and public pre-release publication. Core import/prepare/verify checks retain metadata, identity, archive and integrity boundaries, without detailed security/quality scanning. Dedicated external scanners remain separate and are not automatically invoked. Existing publication authority covers recording the Azure gate after independent artifact checks; no duplicate permission request is required. Current evidence and delivery status are in `2026-10-30-prerelease-0.11.10.md`. The completed 0.11.9 assignment below remains historical evidence.
+
 David Farris is team lead. Avery Chen coordinates integration and release on the local Windows host. This assignment uses Software Team 1.0.16, standing roster 1.0.9. Named roles are agent working identities; evidence below requires actual inspection or execution.
 
 ## Outcome and authority

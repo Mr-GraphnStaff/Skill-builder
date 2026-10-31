@@ -2,7 +2,7 @@
 
 Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-The 0.11.9 public preview identifies itself inside the workbench and stores its drafts, history, packages and repository connection in `.skilljetty-prerelease` beneath the selected work folder. It does not automatically import or migrate stable or local-beta data. Absolute or escaping inherited skills/export directory settings fall back to channel-local defaults. Import an existing skill explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
+The 0.11.10 public preview identifies itself inside the workbench and stores its drafts, history, packages and repository connection in `.skilljetty-prerelease` beneath the selected work folder. It does not automatically import or migrate stable or local-beta data. Absolute or escaping inherited skills/export directory settings fall back to channel-local defaults. Import an existing skill explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -16,13 +16,13 @@ The preview acknowledges clicks with an activity indicator and explains what is 
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.11.9** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.11.10** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
 1. **Start:** choose **Create a new skill**, **Open a .skill file**, or **Open a skill folder**. You can also resume saved work. A repository connection is needed only when you are ready to publish.
 2. **Edit:** write the skill's instructions and edit its supporting files in the workbench. Add text files or copy existing assets. Changes save locally.
-3. **Check:** see problems with links to the files that need attention. Fix them, then check again. Checking does not upload anything, and a passed structural check does not establish model behavior.
+3. **Sanity check:** check required metadata, identity and package structure. Fix structural problems before continuing. Security scanning is not performed by SkillJetty; use dedicated scanners for detailed content and execution-risk review.
 4. **Submit:** review the detected file changes and managed release number. Add optional context, then save a package on this computer. To share through GitHub, connect a repository and choose **Upload & create PR**. You can optionally choose a reviewer; requesting review notifies that person. A manual release-number override is available under Advanced.
 5. **Done:** open the pull request or the source, `.skill` and changelog links. Use **Check status** to refresh review progress. Choose **Work on another skill** when finished.
 
@@ -57,9 +57,9 @@ Use **Check PRs** from Start to refresh saved submissions, including uploads mad
 
 This review flow supports **GitHub.com**. Other Git destinations retain branch uploads; their review process must be completed in the hosting service. Additional repository services are a future discussion.
 
-## Portable skills and application checks
+## Portable skills and application guidance
 
-The default is the [open Agent Skills format](https://agentskills.io/specification): `SKILL.md` plus optional supporting files. You can select Portable, Claude, ChatGPT/Codex, Gemini CLI or GitHub Copilot for compatibility guidance. Application-specific files such as `agents/openai.yaml` are preserved. Compatibility checks do not promise identical behavior across applications, install the skill, or run a model.
+The default is the [open Agent Skills format](https://agentskills.io/specification): `SKILL.md` plus optional supporting files. Application-specific files such as `agents/openai.yaml` are preserved. The guided sanity check verifies structure; it does not verify application compatibility, resolve every link, run a model or perform security scanning. Your selected application is context for your work. Dedicated scanners should inspect the complete package, including preserved originals, before sharing or execution.
 
 ## Your work stays recoverable
 

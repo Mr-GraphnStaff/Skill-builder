@@ -127,17 +127,22 @@ test('duplicate paths, CRC corruption and excessive entry count never create edi
   assert.equal(fs.existsSync(path.join(workspace, 'skills')), false);
 });
 
-test('source symlinks and catalog paths outside workspace cannot enter releases', t => {
+test('source symlinks and catalog paths outside workspace cannot enter releases', async t => {
   const { temp, workspace } = fixture(t);
   const source = path.join(workspace, 'skills/nested-tool'); fs.mkdirSync(source, { recursive: true });
   fs.writeFileSync(path.join(source, 'SKILL.md'), manifest);
   const record = wb.registerSkillFolder(workspace, source);
   const external = path.join(temp, 'external'); fs.mkdirSync(external);
   fs.writeFileSync(path.join(external, 'private.txt'), 'outside-workspace');
-  try { fs.symlinkSync(external, path.join(source, 'linked'), process.platform === 'win32' ? 'junction' : 'dir'); }
-  catch (error) { if (error.code === 'EPERM') { t.skip('Host does not permit test links.'); return; } throw error; }
-  assert.equal(wb.validateWorkbenchSkill(record).valid, false);
-  assert.throws(() => wb.prepareSkillRelease(workspace, record.id, '1.0.0', 'Changes'), /links/);
+  await t.test('source link guard', st => {
+    try { fs.symlinkSync(external, path.join(source, 'linked'), process.platform === 'win32' ? 'junction' : 'dir'); }
+    catch (error) {
+      if (error.code === 'EPERM' || (process.platform === 'win32' && error.code === 'EISDIR')) { st.skip('Host filesystem does not permit creating the link fixture.'); return; }
+      throw error;
+    }
+    assert.equal(wb.validateWorkbenchSkill(record).valid, false);
+    assert.throws(() => wb.prepareSkillRelease(workspace, record.id, '1.0.0', 'Changes'), /links/);
+  });
   const catalogPath = path.join(workspace, '.skill-workbench/catalog.json');
   const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8')); catalog.skills[0].sourcePath = external;
   fs.writeFileSync(catalogPath, JSON.stringify(catalog));
@@ -211,22 +216,21 @@ test('registering an external folder keeps original user folder untouched throug
   assert.deepEqual(wb.listWorkbenchSkills(workspace), []);
 });
 
-test('intended dotfile credentials block releases without leaking values, ordinary dotfiles and binary files survive', t => {
+test('sanity checks leave content scanning to external tools and preserve dotfiles and binary assets', t => {
   const { temp, workspace } = fixture(t);
   const record = wb.importSkillPackage(input(temp, archive({ 'nested-tool/.ordinary': 'keep this text', 'nested-tool/raw.data': Buffer.from([255, 0]) })), workspace);
   const fakeCredential = 'fake-test-key-12345678901234567890';
   fs.writeFileSync(path.join(record.sourcePath, '.env'), `API_KEY=${fakeCredential}\n`);
-  const blocked = wb.validateWorkbenchSkill(record);
-  assert.equal(blocked.valid, false);
-  assert.ok(blocked.errors.some(message => message.includes('.env') && /credential/.test(message)));
-  assert.equal(JSON.stringify(blocked).includes(fakeCredential), false);
-  assert.throws(() => wb.prepareSkillRelease(workspace, record.id, '1.0.0', 'Changes'), /credential/);
+  const structural = wb.validateWorkbenchSkill(record);
+  assert.equal(structural.valid, true);
+  assert.deepEqual(structural.errors, []);
+  assert.deepEqual(structural.warnings, []);
+  assert.equal(JSON.stringify(structural).includes(fakeCredential), false);
   fs.writeFileSync(path.join(record.sourcePath, '.env'), '# Runtime configuration uses external credentials\n');
   fs.writeFileSync(path.join(record.sourcePath, 'runner.custom'), 'const { spawnSync } = require("node:child_process");\n');
   const reviewed = wb.validateWorkbenchSkill(record);
   assert.equal(reviewed.valid, true);
-  assert.ok(reviewed.warnings.some(message => message.includes('runner.custom') && /Process execution/.test(message)));
-  assert.ok(reviewed.warnings.some(message => message.includes('raw.data') && /not scanned/.test(message)));
+  assert.deepEqual(reviewed.warnings, []);
   const release = wb.prepareSkillRelease(workspace, record.id, '1.0.0', 'Reviewed capabilities');
   const zip = new AdmZip(release.packagePath);
   assert.equal(zip.readAsText('nested-tool/.ordinary'), 'keep this text');
@@ -247,13 +251,15 @@ test('release verification rejects changed package, source, changelog, original 
   }
 });
 
-test('redacting editable secrets does not silently publish credential-bearing immutable original', t => {
+test('structural validation preserves the original package without claiming to scan its contents', t => {
   const { temp, workspace } = fixture(t);
   const record = wb.importSkillPackage(input(temp, archive({ 'nested-tool/.env': 'API_KEY=fake-credential-12345678901234567890' })), workspace);
   fs.writeFileSync(path.join(record.sourcePath, '.env'), '# removed credential');
   assert.equal(wb.validateWorkbenchSkill(record).valid, true);
-  assert.throws(() => wb.prepareSkillRelease(workspace, record.id, '1.0.0', 'Redact credential'), /Original package validation failed/);
-  assert.equal(fs.existsSync(path.join(workspace, 'releases/nested-tool/1.0.0')), false);
+  const release = wb.prepareSkillRelease(workspace, record.id, '1.0.0', 'Edit current source; original remains preserved');
+  assert.equal(wb.verifySkillRelease(release.directory).version, '1.0.0');
+  assert.equal(new AdmZip(path.join(release.directory, 'original.skill')).readAsText('nested-tool/.env'), 'API_KEY=fake-credential-12345678901234567890');
+  assert.equal(new AdmZip(release.packagePath).readAsText('nested-tool/.env'), '# removed credential');
 });
 
 test('failed import catalog write rolls back new source, preserves original and permits clean retry', t => {
