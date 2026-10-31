@@ -44,6 +44,9 @@ origin, damaged releases, attributes and exact committed bytes.
 
 Full integrated tests, artifact verification, isolated native smoke and public
 Marketplace readback are pending. This ledger will be updated with exact results.
+CI attempt 964 ran all 319 tests: 318 passed and one hardcoded previous-version
+identity expectation failed. The expectation, local package filename and current
+README version references were updated for 0.11.11. Attempt 964 published nothing.
 No measured end-to-end speedup is claimed; user-workflow timing and human/native
 screen-reader acceptance remain unverified. Existing production and work data are
 preserved. Rollback is to select the previous verified pre-release; any corrective

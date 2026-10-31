@@ -112,7 +112,7 @@
     "test": "npm run compile && node --test test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npm run package:pre-release",
-    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.11.10.vsix",
+    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.11.11.vsix",
     "ci:package": "node scripts/ci/release.cjs prepare",
     "ci:beta-package": "node scripts/ci/beta-release.cjs prepare",
     "import-skill": "node scripts/import-skill.mjs",
