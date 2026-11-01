@@ -1,5 +1,19 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Production hotfix 0.12.1 — November 1, 2026
+
+David authorized immediate correction and production publication after a false
+"Commit contents differ from the reviewed release" failure. Stable 0.12.1 is
+published and publicly verified: source main `8c7682dd`, production build 975,
+335/335 tests passed, independent QA/security and exact-installed-artifact native
+publication/tamper smoke passed. All four changed-path comparisons use consistent
+literal paths; integrity checks remain. The missing unchanged-file-move regression
+is now covered under Git rename settings true/false/copies. Build 975 uploaded once;
+its catalog wait timed out, then independent read-only public verification passed
+at 18:03 UTC. Pre-release stays `f293bf7`, the user's data/profile are untouched,
+and the bug-fix-only freeze continues. See `2026-11-01-production-0.12.1.md` for
+artifact hash, evidence, limits and live user retry pending after update/reload.
+
 ## Authorized production promotion — November 1, 2026
 
 David authorized promoting tested pre-release 0.11.13 to production including
