@@ -1,5 +1,32 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Gear/settings consolidation — November 1, 2026
+
+David explicitly authorized this bounded feature-freeze exception and Marketplace
+pre-release publication: finish the wiki, move setup to native Extension Settings,
+and retain a compact read-only Configuration summary with a gear in the workbench.
+Production 0.12.1 and release source `0bbed9d` remain unchanged by this assignment.
+Unrelated features remain frozen. The user's later production diagnostics decision
+supersedes older notes below: hide its button and retain the Command Palette command.
+
+Public preview 0.13.1/source `ac197a4` passed 359/359 CI tests, independent QA/security,
+exact-artifact installed payload parity (179 files), and fresh scripted native
+Settings/core-workflow checks. Existing connections prefill only unset Workspace
+fields; saving settings does not perform repository operations. New repository URL
+and local path settings are preview-specific. Explicit blanks are respected,
+active edits and work folders are preserved, and final external writes check the
+captured settings generation. The AI category is included. Build 977 caught a real
+VS Code settings snapshot issue before publication and was canceled; replacement
+build 978 passed the fresh native check. Run 978 uploaded once; its catalog wait
+timed out and remains a failed task. Read-only reconciliation at 20:47:04 UTC
+verified the exact public bytes/payload, latest validated 0.13.1 pre-release,
+retained stable 0.12.1 and public AI category. Independent fresh-catalog VS Code
+action-method fixtures enabled both channel switches at 20:47:11 UTC. Final wiki
+commit `8c17858` is public; nine changed pages, heading links and six diagrams passed
+browser readback. Delivery is complete with human GUI, screen-reader, live SSO and
+user-computer installed-state acceptance unclaimed. See
+`2026-11-01-prerelease-0.13.1.md` for the exact artifact and limitations.
+
 ## Channel-switch repair and public wiki — November 1, 2026
 
 David explicitly authorized pre-release publication to restore missing switches.
