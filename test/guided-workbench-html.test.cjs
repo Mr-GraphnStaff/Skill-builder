@@ -13,6 +13,47 @@ function state(overrides = {}) {
   };
 }
 
+test('production keeps Activity without a performance-log option across all workflow steps', () => {
+  for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
+    for (const hasWorkspace of [false, true]) {
+      const html = renderGuidedWorkbench(state({ step, hasWorkspace, busy: true,
+        check: { valid: true, errors: [], warnings: [], compatibility: '', behaviorNote: '' },
+        publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
+      assert(html.indexOf('id="operation-status"') < html.indexOf('<main id="main-content"'), step);
+      assert.match(html, /id="activity-history"/);
+      assert.doesNotMatch(html, /openPerformanceLog|open-performance-log|performance-log-help/);
+    }
+  }
+});
+
+test('saved skills are opt-in and unloaded content is not rendered', () => {
+  const saved = { drafts: [{ id: 'private-draft', name: 'private-draft' }], library: [{ skillName: 'private-release', version: '1.0.0', directory: 'local', status: 'archived' }] };
+  const unloaded = renderGuidedWorkbench(state(saved), nonce);
+  assert.match(unloaded, /data-action="loadSkills"[^>]*>Load skills/);
+  assert.match(unloaded, /saved skills load only when you ask/);
+  assert.doesNotMatch(unloaded, /Resume private-draft|Improve private-release/);
+  assert.doesNotMatch(unloaded, /data-action="unloadSkills"/);
+  const loaded = renderGuidedWorkbench(state({ ...saved, skillsLoaded: true }), nonce);
+  assert.match(loaded, /Resume private-draft/);
+  assert.match(loaded, /Improve private-release/);
+  assert.match(loaded, /data-action="unloadSkills"[^>]*>Unload skills/);
+  assert.match(loaded, /Your files stay saved/);
+  const empty = renderGuidedWorkbench(state({ skillsLoaded: true }), nonce);
+  assert.match(empty, /No saved skills were found/);
+  const stale = renderGuidedWorkbench(state({ ...saved, skillsLoaded: true, skillsStale: true }), nonce);
+  assert.match(stale, /saved list may be out of date/);
+  assert.match(stale, /Choose Reload skills to include your latest changes/);
+});
+
+test('a keyboard-accessible optional path form bypasses the native file chooser', () => {
+  const html = renderGuidedWorkbench(state({ form: { path: 'C:\\Downloads\\sample.skill' } }), nonce);
+  assert.match(html, /<summary>Open by file path<\/summary>/);
+  assert.match(html, /data-form-action="openPackagePath"/);
+  assert.match(html, /<label for="packagePath">Full package path \(required\)<\/label>/);
+  assert.match(html, /id="packagePath"[^>]*value="C:\\Downloads\\sample.skill"[^>]*required/);
+  assert.match(html, /if \(action === 'openPackagePath'\) payload = \{ path: fieldValue\('packagePath'\) \}/);
+});
+
 test('each guided step marks progress; Start offers equal choices and later steps have one next action', () => {
   for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
     const html = renderGuidedWorkbench(state({ step, active: { id: 'sample', name: 'sample' }, check: { valid: true, errors: [], warnings: [], compatibility: 'Portable', behaviorNote: 'No model was run.' }, publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
@@ -73,7 +114,7 @@ test('serialized file data restores both textarea values before the baseline wit
     assert.doesNotMatch(source, /<\/script>|[\u2028\u2029]/);
     const editor = step === 'edit' ? { value: 'HTML parser already lost the leading line.' } : null;
     const hidden = step === 'check' ? { value: 'HTML parser already lost the leading line.' } : null;
-    const document = { getElementById: id => id === 'main-content' ? { dataset: {} } : id === 'editorContent' ? editor : hidden };
+    const document = { getElementById: id => id === 'main-content' ? { dataset: {} } : id === 'editorContent' ? editor : id === 'bufferContent' ? hidden : null };
     const prefix = source.slice(0, source.indexOf('const initialFields'));
     const result = new vm.Script(prefix + ';({ content: (editor || hiddenBuffer).value, baseline: initialEditorContent, injected: typeof globalThis.injected });').runInNewContext({ document, acquireVsCodeApi: () => ({ getState: () => ({}) }) });
     assert.equal(result.content, content);
@@ -109,7 +150,8 @@ test('check and publish explain their limits and show actionable file findings',
   assert.match(check, /Fix and return to editing/);
   assert.match(check, /No AI model has been executed/);
   const publish = renderGuidedWorkbench(state({ step: 'publish', publish: { version: '2.0.1', changelog: 'Improved input handling.', repository: 'https://github.com/example/Skills.git', fileCount: 4 } }), nonce);
-  assert.match(publish, /id="releaseVersion"[^>]*value="2.0.1"/);
+  assert.match(publish, /id="releaseVersion"[^>]*value=""/);
+  assert.match(publish, /2.0.1/);
   assert.match(publish, /Improved input handling\.<\/textarea>/);
   assert.match(publish, /Editable source/);
   assert.match(publish, /Installable .skill package/);
@@ -147,7 +189,7 @@ test('submission reviewer choice is optional, escaped and explicitly discloses n
   assert.match(select[2], /value="casey" selected/);
   assert.match(select[2], /Casey &lt;script&gt;unsafe\(\)&lt;\/script&gt;/);
   assert.match(html, /Submitting a review request will notify that person/);
-  assert.match(html, /const reviewer = fieldValue\('reviewer'\)/);
+  assert.match(html, /const reviewer = action === 'publish' \? fieldValue\('reviewer'\) : ''/);
   assert.match(html, /reviewer, confirmed: !!reviewer/);
 });
 
@@ -216,7 +258,7 @@ test('trusted DAF-TECH PNG and configurable product wordmark appear throughout t
     assert.match(html, /width="64" height="64" alt="DAF-TECH"/);
     assert.match(html, /class="brand-product">Brand Product<\/strong>/);
     assert.match(html, /Agent Skills Studio/);
-    assert.match(html, /Build it\. Version it\. Ship it\./);
+    assert.match(html, /Build it\. Improve it\. Share it\./);
     assert.match(html, /img-src data:/);
     assert.equal((html.match(/id="primary-action"/g) || []).length, step === 'start' ? 0 : 1);
   }
@@ -241,7 +283,7 @@ test('branding rejects external or non-PNG image sources and escapes configurabl
 test('teal primary action maintains readable white-text contrast in normal and hover states', () => {
   const html = renderGuidedWorkbench(state(), nonce);
   const primary = /\.primary \{ background: (#[a-f0-9]{6}); color: (#[a-f0-9]{6})/i.exec(html);
-  const hover = /\.primary:hover \{ background: (#[a-f0-9]{6})/i.exec(html);
+  const hover = /\.primary:hover:not\(:disabled\) \{ background: (#[a-f0-9]{6})/i.exec(html);
   assert(primary); assert(hover);
   const luminance = hex => {
     const rgb = [1, 3, 5].map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255)

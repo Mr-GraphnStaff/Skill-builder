@@ -1,7 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { verifySkillRelease, restoreSkillRelease, updateSkillRepository, WorkbenchSkill } from './skill-workbench.js';
+import { verifySkillRelease, readSkillReleaseMetadata, restoreSkillRelease, updateSkillRepository, validateWorkbenchSkill, WorkbenchSkill, type FileDigest } from './skill-workbench.js';
+import { readSkillIdentity, semanticVersion, compareReleaseVersions, nextReleaseVersion } from './skill-identity.js';
 import { githubRepository, reviewRecord } from './github-review.js';
 import type { PullRequestRecord } from './guided-contract.js';
 
@@ -11,8 +12,9 @@ export type LibraryRelease = {
   status: 'uploaded' | 'archived' | 'prepared';
   repository?: string; baseBranch?: string; branch?: string; commit?: string; publishedAt?: string;
   pr?: PullRequestRecord;
+  verification?: 'metadata' | 'verified';
 };
-const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const semver = semanticVersion;
 
 function safe(root: string, target: string): void {
   root = path.resolve(root); target = path.resolve(target);
@@ -25,9 +27,9 @@ function safe(root: string, target: string): void {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
 }
-function localRelease(root: string, directory: string) {
+function localRelease(root: string, directory: string, verifyPayload = true) {
   safe(root, directory);
-  const release = verifySkillRelease(directory);
+  const release = verifyPayload ? verifySkillRelease(directory) : readSkillReleaseMetadata(directory);
   if (path.relative(path.join(path.resolve(root), 'releases', release.skillName, release.version), path.resolve(directory)) !== '') throw new Error('Release is outside this workspace library.');
   return release;
 }
@@ -47,7 +49,7 @@ function readReview(root: string, name: string, version: string, upload: Publica
 }
 
 /** Mutable review metadata is deliberately outside immutable release bytes. */
-export function recordLibraryReview(root: string, directory: string, result: PullRequestRecord): PullRequestRecord {
+export function recordLibraryReview(root: string, directory: string, result: PullRequestRecord, options: { repairHistoricalNumber?: number } = {}): PullRequestRecord {
   const release = localRelease(root, directory);
   const receipt = receiptPath(root, release.skillName, release.version);
   if (!fs.existsSync(receipt)) throw new Error('A verified upload receipt is required before recording a PR.');
@@ -55,7 +57,18 @@ export function recordLibraryReview(root: string, directory: string, result: Pul
   let previous: PullRequestRecord | undefined;
   try { previous = readReview(root, release.skillName, release.version, upload); } catch { /* A fresh server check can repair invalid metadata. */ }
   let pr = reviewRecord(result, upload.repository);
-  if (previous?.number && pr.number && previous.number !== pr.number) throw new Error('A different PR is already recorded for this version; inspect its repository state.');
+  if (previous?.number && pr.number && previous.number !== pr.number) {
+    const repair = options.repairHistoricalNumber === previous.number
+      && ((previous.identityVerified === false && !!previous.headCommit && previous.headCommit !== upload.commit)
+        || previous.status === 'closed' || previous.status === 'merged')
+      && pr.identityVerified === true && pr.headCommit === upload.commit
+      && pr.head === upload.branch && pr.base === upload.baseBranch;
+    if (!repair) throw new Error('A different PR is already recorded for this version; inspect its repository state.');
+    const oldTarget = reviewPath(root, release.skillName, release.version);
+    const history = `${oldTarget}.superseded-${previous.number}-${randomUUID()}.json`; safe(root, history);
+    fs.copyFileSync(oldTarget, history, fs.constants.COPYFILE_EXCL);
+    previous = undefined; // Old approvals, reviewer notifications and errors belong to the old PR.
+  }
   if (previous && pr.error) pr = { ...previous, ...pr, status: pr.number && pr.identityVerified && !previous.number ? pr.status : previous.status,
     checkedAt: previous.checkedAt, number: pr.number ?? previous.number, creationUncertain: pr.creationUncertain ?? previous.creationUncertain };
   const target = reviewPath(root, release.skillName, release.version);
@@ -98,7 +111,7 @@ export function recordLibraryPublication(root: string, directory: string, result
   finally { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); }
 }
 
-export function listLibraryReleases(root: string, skillFilter?: string): LibraryRelease[] {
+export function listLibraryReleases(root: string, skillFilter?: string, options: { verifyPayload?: boolean } = {}): LibraryRelease[] {
   const base = path.join(path.resolve(root), 'releases'); safe(root, base);
   if (!fs.existsSync(base)) return [];
   const items: LibraryRelease[] = [];
@@ -108,7 +121,7 @@ export function listLibraryReleases(root: string, skillFilter?: string): Library
     const folder = path.join(base, name.name); safe(root, folder);
     for (const version of fs.readdirSync(folder, { withFileTypes: true })) {
       if (!version.isDirectory() || !semver.test(version.name)) continue;
-      const release = localRelease(root, path.join(folder, version.name));
+      const release = localRelease(root, path.join(folder, version.name), options.verifyPayload !== false);
       const receipt = receiptPath(root, release.skillName, release.version);
       const archiveRecord = path.join(path.resolve(root), '.skill-workbench', 'completed', release.skillName, release.version, 'record.json'); safe(root, archiveRecord);
       let data: Partial<Publication> = {};
@@ -125,36 +138,75 @@ export function listLibraryReleases(root: string, skillFilter?: string): Library
         try { pr = readReview(root, release.skillName, release.version, upload); }
         catch { pr = { supported: !!githubRepository(upload.repository), status: 'unknown', error: 'Saved PR metadata could not be verified. Use Check PRs to repair it; the upload remains recorded.' }; }
       }
-      items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, ...data, ...(pr ? { pr } : {}) });
+      items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, verification: options.verifyPayload === false ? 'metadata' : 'verified', ...data, ...(pr ? { pr } : {}) });
     }
   }
-  return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || b.version.localeCompare(a.version, undefined, { numeric: true }));
+  return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || compareReleaseVersions(b.version, a.version) || b.version.localeCompare(a.version));
 }
 
 export function restoreLibraryRelease(root: string, directory: string): WorkbenchSkill {
-  const release = localRelease(root, directory);
-  const item = listLibraryReleases(root, release.skillName).find(release => path.resolve(release.directory) === path.resolve(directory));
+  const release = localRelease(root, directory, false);
+  const item = listLibraryReleases(root, release.skillName, { verifyPayload: false }).find(release => path.resolve(release.directory) === path.resolve(directory));
   const draft = restoreSkillRelease(root, directory);
   if (item?.repository && item.baseBranch) return updateSkillRepository(root, draft.id, item.repository, item.baseBranch);
   return draft;
 }
 
-/** Suggest a new immutable version; the publisher still validates user input. */
+/** Allocate the next immutable release identity without asking the user to do bookkeeping. */
 export function suggestReleaseVersion(skill: WorkbenchSkill, versions: string[]): string {
-  let declared = '1.0.0';
+  let declared: string | undefined;
   try {
+    safe(skill.sourcePath, path.join(skill.sourcePath, 'SKILL.md'));
     const text = fs.readFileSync(path.join(skill.sourcePath, 'SKILL.md'), 'utf8');
-    const block = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-    const parsed = block ? require('js-yaml').load(block[1]) : undefined;
-    if (typeof parsed?.metadata?.version === 'string' && semver.test(parsed.metadata.version)) declared = parsed.metadata.version;
+    declared = readSkillIdentity(text).declaredVersion;
   } catch { /* Normal validation reports metadata errors before packaging. */ }
-  const compare = (a: string, b: string) => {
-    const left = a.split(/[.+-]/).slice(0, 3).map(BigInt), right = b.split(/[.+-]/).slice(0, 3).map(BigInt);
-    for (let i = 0; i < 3; i++) { if (left[i] !== right[i]) return left[i] > right[i] ? 1 : -1; }
-    return 0;
+  const previous = versions.filter(value => semver.test(value)).sort(compareReleaseVersions).at(-1);
+  if (!previous) return declared ?? '1.0.0';
+  if (declared && compareReleaseVersions(declared, previous) > 0) return declared;
+  let next = nextReleaseVersion(previous);
+  while (versions.includes(next)) next = nextReleaseVersion(next);
+  return next;
+}
+
+export type SkillChangeSummary = {
+  baselineVersion?: string;
+  added: string[];
+  changed: string[];
+  removed: string[];
+  unchanged: number;
+  hasChanges: boolean;
+  note: string;
+};
+
+/** Compare verified bytes, not guessed semantic changes or generated claims. */
+export function summarizeSkillChanges(root: string, skill: WorkbenchSkill): SkillChangeSummary {
+  safe(root, skill.sourcePath);
+  const validation = validateWorkbenchSkill(skill);
+  if (!validation.valid) throw new Error(validation.errors.join('\n'));
+  const baseline = listLibraryReleases(root, skill.name, { verifyPayload: false })[0];
+  const prior = baseline ? localRelease(root, baseline.directory).manifest.files : undefined;
+  return summarizeFileChanges(validation.files, baseline && prior ? { version: baseline.version, files: prior } : undefined);
+}
+
+/** Pure comparison of inventories already obtained through guarded validation.
+ * This does not itself establish file or package integrity. */
+export function summarizeFileChanges(files: FileDigest[], baseline?: { version: string; files: FileDigest[] }): SkillChangeSummary {
+  const current = new Map(files.filter(file => !file.path.endsWith('/')).map(file => [file.path, file]));
+  const result: SkillChangeSummary = {
+    ...(baseline ? { baselineVersion: baseline.version } : {}),
+    added: [], changed: [], removed: [], unchanged: 0, hasChanges: false,
+    note: baseline ? `Compared with the saved release ${baseline.version}. This lists file changes, not a claim about behavior.` : 'First saved release in this workspace. Original imported packages remain preserved.'
   };
-  const previous = versions.filter(value => semver.test(value)).sort(compare).at(-1);
-  if (!previous || compare(declared, previous) > 0) return declared;
-  const parts = previous.split(/[.+-]/).slice(0, 3);
-  return `${parts[0]}.${parts[1]}.${BigInt(parts[2]) + 1n}`;
+  const prior = new Map((baseline ? baseline.files : [])
+    .filter(file => !file.path.endsWith('/')).map(file => [file.path, file]));
+  for (const [name, file] of current) {
+    const previous = prior.get(name);
+    if (!previous) result.added.push(name);
+    else if (previous.sha256 !== file.sha256 || previous.size !== file.size) result.changed.push(name);
+    else result.unchanged++;
+  }
+  for (const name of prior.keys()) if (!current.has(name)) result.removed.push(name);
+  result.added.sort(); result.changed.sort(); result.removed.sort();
+  result.hasChanges = result.added.length + result.changed.length + result.removed.length > 0;
+  return result;
 }

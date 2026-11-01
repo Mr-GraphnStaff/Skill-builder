@@ -1,23 +1,29 @@
-# SkillJetty by DAF-TECH
+# SkillJetty — Agent Skills Studio
+
+Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
+
+Release **0.12.0** promotes the tested preview workflow to stable. Stable uses the work folder you select and your configured stable directories. Preview work remains separate beneath `.skilljetty-prerelease`; switching channels does not automatically migrate drafts, history, packages or repository connections. Import a package explicitly when you want to copy a skill between channels.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
-**Agent Skills Studio — Build it. Version it. Ship it.**
+**Agent Skills Studio — Build it. Improve it. Share it.**
 
 Create, edit, check and publish Agent Skills from one guided VS Code workbench.
 
-**One connected repository. One folder per skill. Source, a valid `.skill` package and a changelog for every version.**
+Focus on what your skill should do. SkillJetty reads its declared identity, manages release numbers and prepares factual file-change notes. Save an installable package locally without a repository, or connect one when you want to share for review.
+
+Activity acknowledges clicks and explains what is happening. Each new skill starts a fresh history, while its checks and submission stay together. Expensive local checks run in the background; routine saves no longer reopen every saved release. See [performance measurements and feedback behavior](docs/performance-and-feedback.md).
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar. It opens the guided workbench directly. You can also run **SkillJetty: Open Workbench** from the Command Palette; that is the only normal public command you need.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. Confirm the **Release 0.12.0** descriptor. For troubleshooting, run **SkillJetty: Show Performance Log** from the Command Palette; production keeps timing diagnostics without a workbench log button. Use a separate VS Code profile when evaluating the preview alongside stable.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
 1. **Start:** choose **Create a new skill**, **Open a .skill file**, or **Open a skill folder**. You can also resume saved work. A repository connection is needed only when you are ready to publish.
 2. **Edit:** write the skill's instructions and edit its supporting files in the workbench. Add text files or copy existing assets. Changes save locally.
-3. **Check:** see problems with links to the files that need attention. Fix them, then check again. Checking does not upload anything, and a passed structural check does not establish model behavior.
-4. **Submit:** connect the repository once if needed, confirm the version, enter what changed, and choose **Upload & create PR**. For GitHub.com, sign in through VS Code when prompted. You can optionally choose a reviewer; requesting review notifies that person.
+3. **Sanity check:** check required metadata, identity and package structure. Fix structural problems before continuing. Security scanning is not performed by SkillJetty; use dedicated scanners for detailed content and execution-risk review.
+4. **Submit:** review the detected file changes and managed release number. Add optional context, then save a package on this computer. To share through GitHub, connect a repository and choose **Upload & create PR**. You can optionally choose a reviewer; requesting review notifies that person. A manual release-number override is available under Advanced.
 5. **Done:** open the pull request or the source, `.skill` and changelog links. Use **Check status** to refresh review progress. Choose **Work on another skill** when finished.
 
 No terminal commands or Git branch names are needed for normal use. The extension detects the repository's actual default branch. Git credentials and repository access still need to work on your machine.
@@ -45,13 +51,15 @@ Only existing supporting folders are included. Complex nested files and binary a
 
 For GitHub.com, submission uploads a **review branch** and creates a **pull request**, reusing an existing matching PR when retried. Review and merge follow your repository's rules. Approval alone does not put the skill on the default branch; the workbench never merges automatically. It does not upload the skill into an AI application or publish this extension to the Marketplace.
 
+Choose **Merge PR and delete branch** when the submission is ready. SkillJetty verifies the exact uploaded commit and GitHub merge rules, confirms the merge, then deletes only that unchanged submission branch using a Git SHA lease. If cleanup cannot finish, the verified merge remains recorded and the branch is retained for retry.
+
 Use **Check PRs** from Start to refresh saved submissions, including uploads made with older SkillJetty versions. If an older upload has no PR, choose **Create PR**. Refreshing status never creates a PR or requests a reviewer. Status shows awaiting review, changes requested, approved, merged, or closed without merge. If GitHub cannot be reached, the workbench shows the error and last verified status rather than guessing.
 
 This review flow supports **GitHub.com**. Other Git destinations retain branch uploads; their review process must be completed in the hosting service. Additional repository services are a future discussion.
 
-## Portable skills and application checks
+## Portable skills and application guidance
 
-The default is the [open Agent Skills format](https://agentskills.io/specification): `SKILL.md` plus optional supporting files. You can select Portable, Claude, ChatGPT/Codex, Gemini CLI or GitHub Copilot for compatibility guidance. Application-specific files such as `agents/openai.yaml` are preserved. Compatibility checks do not promise identical behavior across applications, install the skill, or run a model.
+The default is the [open Agent Skills format](https://agentskills.io/specification): `SKILL.md` plus optional supporting files. Application-specific files such as `agents/openai.yaml` are preserved. The guided sanity check verifies structure; it does not verify application compatibility, resolve every link, run a model or perform security scanning. Your selected application is context for your work. Dedicated scanners should inspect the complete package, including preserved originals, before sharing or execution.
 
 ## Your work stays recoverable
 

@@ -17,7 +17,7 @@ function fixture(t) {
     return core.registerSkillFolder(root, source);
   }
   const skill = draft();
-  const commands = new Map(); const memory = new Map(); const executions = [];
+  const commands = new Map(); const memory = new Map(); const memoryReads = []; const executions = [];
   const picks = []; const inputs = []; const confirmations = [];
   const pickOptions = []; const inputOptions = []; const documents = []; const errors = []; const progress = [];
   const counts = { repositories: 0, prepared: 0, pushed: 0, disposed: 0 };
@@ -65,11 +65,22 @@ function fixture(t) {
       return load.call(this, id, parent, main);
     };
     require(modulePath).activateWorkbench({ subscriptions: [], workspaceState: {
-      get(key) { return memory.get(key); }, async update(key, value) { memory.set(key, value); }
+      get(key) { memoryReads.push(key); return memory.get(key); }, async update(key, value) { memory.set(key, value); }
     } }, { getRoot: async () => root, createSkill: async () => undefined });
   } finally { Module._load = load; }
-  return { root, skill, draft, commands, memory, picks, inputs, confirmations, pickOptions, inputOptions, documents, errors, progress, counts, repository, provider, executions };
+  return { root, skill, draft, commands, memory, memoryReads, picks, inputs, confirmations, pickOptions, inputOptions, documents, errors, progress, counts, repository, provider, executions };
 }
+
+test('public prerelease does not read or reuse the stable repository preference', async t => {
+  const f = fixture(t);
+  const stable = { repository: 'https://github.com/example/StableOnly.git', baseBranch: 'stable' };
+  f.memory.set('skillBuilder.defaultRepository', stable);
+  await f.commands.get('skillBuilder.workbenchAssociateRepository')({ skill: f.skill });
+  assert(f.memoryReads.includes('skillBuilder.prerelease.defaultRepository'));
+  assert(!f.memoryReads.includes('skillBuilder.defaultRepository'));
+  assert.deepEqual(f.memory.get('skillBuilder.defaultRepository'), stable);
+  assert(!f.pickOptions[0].items.some(item => item.repository === stable.repository));
+});
 
 test('guided workbench owns its activity container while retained native commands remain internal', async t => {
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
@@ -80,7 +91,7 @@ test('guided workbench owns its activity container while retained native command
   assert.equal(manifest.contributes.views.skillBuilder[0].type, 'webview');
   assert.equal(manifest.contributes.views.explorer, undefined);
   const hidden = manifest.contributes.menus.commandPalette;
-  assert(manifest.contributes.commands.every(item => item.command === 'skillBuilder.openWorkbench' || hidden.some(rule => rule.command === item.command && rule.when === 'false')));
+  assert(manifest.contributes.commands.every(item => ['skillBuilder.openWorkbench', 'skillBuilder.showPerformanceLog'].includes(item.command) || hidden.some(rule => rule.command === item.command && rule.when === 'false')));
   const declared = new Set(manifest.contributes.commands.map(item => item.command));
   for (const item of Object.values(manifest.contributes.menus).flat()) assert(declared.has(item.command), `Menu references undeclared command ${item.command}`);
   const f = fixture(t);
@@ -88,14 +99,14 @@ test('guided workbench owns its activity container while retained native command
   assert.deepEqual(f.executions, ['workbench.view.extension.skillBuilder', 'skillBuilder.workbenchView.focus']);
 });
 
-test('native lifecycle tree separates drafts and library with Edit, Check, Publish as dominant draft actions', async t => {
+test('native lifecycle tree separates drafts and library with Edit, Sanity check, Publish as dominant draft actions', async t => {
   const f = fixture(t);
   const top = await f.provider.getChildren();
   assert.equal(top[0].label, 'Create a new skill…');
   assert.deepEqual(top.filter(node => node.kind === 'group').map(node => node.label), ['Drafts', 'Published / library']);
   const draft = (await f.provider.getChildren(top.find(node => node.group === 'drafts')))[0];
   const children = await f.provider.getChildren(draft);
-  assert.deepEqual(children.slice(0, 3).map(node => node.label), ['Edit skill', 'Check skill', 'Publish…']);
+  assert.deepEqual(children.slice(0, 3).map(node => node.label), ['Edit skill', 'Sanity check', 'Publish…']);
   assert(children.some(node => node.kind === 'tools'));
 });
 
@@ -106,7 +117,7 @@ test('confirmed repository association is remembered, cancellation is not, and l
   f.picks.push(items => items.find(item => item.repository)); f.inputs.push('main');
   await f.commands.get('skillBuilder.workbenchAssociateRepository')({ skill: f.skill });
   assert.equal(f.inputOptions.at(-1).value, 'main');
-  assert.deepEqual(f.memory.get('skillBuilder.defaultRepository'), { repository: f.repository, baseBranch: 'main' });
+  assert.deepEqual(f.memory.get('skillBuilder.prerelease.defaultRepository'), { repository: f.repository, baseBranch: 'main' });
   const second = f.draft('second');
   f.inputs.push('1.0.0', 'Initial second skill.');
   const repositoryCalls = f.counts.repositories;
@@ -122,7 +133,7 @@ test('confirmed repository association is remembered, cancellation is not, and l
 
 test('a verified upload stays in the library and Edit next version prepares a new version instead of republishing v1', async t => {
   const f = fixture(t);
-  f.memory.set('skillBuilder.defaultRepository', { repository: f.repository, baseBranch: 'main' });
+  f.memory.set('skillBuilder.prerelease.defaultRepository', { repository: f.repository, baseBranch: 'main' });
   f.inputs.push('1.0.0', 'Initial publication.'); f.confirmations.push('Push Release Branch');
   await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
@@ -159,7 +170,7 @@ test('stale prepared snapshots are not offered when the current draft has change
   const f = fixture(t);
   core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Prepared old draft.');
   fs.appendFileSync(path.join(f.skill.sourcePath, 'SKILL.md'), '\nChanged after preparation.\n');
-  f.memory.set('skillBuilder.defaultRepository', { repository: f.repository, baseBranch: 'main' });
+  f.memory.set('skillBuilder.prerelease.defaultRepository', { repository: f.repository, baseBranch: 'main' });
   f.inputs.push(undefined);
   await f.commands.get('skillBuilder.workbenchPublishRelease')({ skill: f.skill });
   assert.deepEqual(f.errors, []);
@@ -175,7 +186,7 @@ test('checks use readable Markdown and block repository work for an invalid draf
   assert.equal(f.counts.repositories, 0); assert.equal(f.counts.prepared, 0);
   const report = f.documents.at(-1);
   assert.equal(report.language, 'markdown');
-  assert.match(report.content, /Local validation needs attention/);
+  assert.match(report.content, /Structural checks need attention/);
   assert.match(report.content, /## Errors/);
   assert.doesNotMatch(report.content, /"report"\s*:/);
 });

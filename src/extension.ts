@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { promisify } from 'node:util';
 import AdmZip from 'adm-zip';
 import * as vscode from 'vscode';
+import { stableWorkspaceRoot, stableDataDirectory } from './stable-workspace.js';
 import { analyzeSkill, parseEvalSuite, runEvalPreflight, type SkillFile } from './skill-analysis.js';
 import { activateWorkbench } from './workbench-view.js';
 import { activateGuidedWorkbench } from './guided-workbench.js';
@@ -134,9 +135,10 @@ export function activate(context: vscode.ExtensionContext) {
     const root = getWorkspaceRoot();
     if (!root) return undefined;
     const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
-    // A skill workspace is the folder the user opened. Never silently switch
-    // into a nested extension-source repository just because it has AGENTS.md.
-    return configured ? path.resolve(root, configured) : root;
+    // Stable uses the explicitly selected work folder and never adopts preview data.
+    const selected = configured ? path.resolve(root, configured) : root;
+    if (selected.split(/[\\/]/).some(segment => segment.toLowerCase() === '.codex')) return undefined;
+    return stableWorkspaceRoot(root, configured);
   } });
 
   context.subscriptions.push(
@@ -3027,16 +3029,7 @@ async function getProjectRoot(): Promise<string | undefined> {
   }
 
   const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
-  if (configured) {
-    return path.resolve(workspaceRoot, configured);
-  }
-
-  if (await looksLikeSkillBuilderRoot(workspaceRoot)) {
-    return workspaceRoot;
-  }
-
-  const childRoot = await findChildSkillBuilderRoot(workspaceRoot);
-  return childRoot ?? workspaceRoot;
+  return stableWorkspaceRoot(workspaceRoot, configured);
 }
 
 async function findChildSkillBuilderRoot(workspaceRoot: string): Promise<string | undefined> {
@@ -3106,12 +3099,12 @@ async function listGitRemotes(root: string): Promise<GitRemoteSummary[]> {
 
 function getSkillsDirectory(root: string): string {
   const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('skillsDirectory', 'skills');
-  return path.resolve(root, configured);
+  return stableDataDirectory(root, configured, 'skills');
 }
 
 function getDistDirectory(root: string): string {
   const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('distDirectory', 'dist');
-  return path.resolve(root, configured);
+  return stableDataDirectory(root, configured, 'dist');
 }
 
 function getClaudeCodeSkillsDirectory(root: string): string {

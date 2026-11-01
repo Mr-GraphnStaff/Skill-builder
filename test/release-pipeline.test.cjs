@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const AdmZip = require('adm-zip');
-const { sha256, inspectVsix, verifyArtifact, hasApproval, marketplaceVersions } = require('../scripts/ci/release.cjs');
+const { sha256, inspectVsix, verifyArtifact, hasApproval, marketplaceVersions, verifyPublicPayload } = require('../scripts/ci/release.cjs');
 
 function archive(manifest = {}, extra = {}) {
   const zip = new AdmZip();
@@ -37,6 +37,17 @@ test('release receipt binds package bytes and originating build', t => {
   assert.throws(() => verifyArtifact(directory, { sourceRevision: 'b'.repeat(40) }), /sourceRevision mismatch/);
   fs.appendFileSync(path.join(directory, receipt.file), 'tamper');
   assert.throws(() => verifyArtifact(directory), /SHA-256/);
+});
+
+test('production public payload verification permits only installer metadata changes and rejects preview/private payloads', () => {
+  const expected = archive({}, { 'extension/out/extension.js': 'reviewed bytes' });
+  assert.equal(verifyPublicPayload(expected, expected).exactPackageBytesMatch, true);
+  const metadata = archive({ __metadata: { installedTimestamp: 123 } }, { 'extension/out/extension.js': 'reviewed bytes' });
+  assert.equal(verifyPublicPayload(expected, metadata).installedPayloadMatches, true);
+  assert.throws(() => verifyPublicPayload(expected, archive({}, { 'extension/out/extension.js': 'changed' })), /payload differs/);
+  for (const name of ['.skilljetty-prerelease/draft.json', 'dist/state.json', 'docs/software-team/context.md', 'timings.log']) {
+    assert.throws(() => inspectVsix(archive({}, { [`extension/${name}`]: 'private' })), /excluded|log file/);
+  }
 });
 test('publication requires enabled configured approval and usable registry metadata', () => {
   const check = { type: { name: 'Approval' }, settings: { minRequiredApprovers: 1, approvers: [{ id: '11111111-2222-3333-4444-555555555555' }] } };

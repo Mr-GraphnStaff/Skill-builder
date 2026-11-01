@@ -5,17 +5,18 @@ import { randomUUID } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import {
   registerSkillFolder, listWorkbenchSkills, updateSkillRepository, validateWorkbenchSkill,
-  prepareSkillRelease, listSkillReleases, verifySkillRelease, completeWorkbenchSkill,
-  type WorkbenchSkill, type WorkbenchRelease
+  prepareSkillRelease, findSkillRelease, verifySkillRelease, completeWorkbenchSkill,
+  type WorkbenchSkill, type WorkbenchRelease, type FileDigest
 } from './skill-workbench.js';
 import { listLibraryReleases, recordLibraryPublication, recordLibraryReview, type LibraryRelease } from './workbench-library.js';
 import { githubRepository, GitHubReviewService, type GitHubRunner, type ReviewContext } from './github-review.js';
 import type { PullRequestRecord } from './guided-contract.js';
 import { resolveRepositoryDefaultBranch, verifyRepositoryBranchCommit, prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview } from './repository-publisher.js';
+import { measureWorkbenchPhase, currentWorkbenchMetrics } from './workbench-metrics.js';
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
 const MAX_TEXT = 16 * 1024 * 1024;
-export type WorkspaceConnection = { repository: string; baseBranch: string };
+export type WorkspaceConnection = { repository: string; baseBranch: string; localPath?: string };
 export type GuidedFile = { path: string; size: number; text: boolean };
 export type GuidedPublication = {
   release: WorkbenchRelease;
@@ -57,7 +58,9 @@ export function getWorkspaceConnection(root: string): WorkspaceConnection | unde
   if (value.format !== 1 || typeof value.repository !== 'string' || typeof value.baseBranch !== 'string'
     || !value.baseBranch || /[\s~^:?*\[\\\0]/.test(value.baseBranch) || value.baseBranch.startsWith('-')
     || value.baseBranch.includes('..') || value.baseBranch.includes('@{')) throw new Error('The saved repository connection needs reconnecting.');
-  return { repository: validateRepository(value.repository), baseBranch: value.baseBranch };
+  if (value.localPath !== undefined && (typeof value.localPath !== 'string' || !path.isAbsolute(value.localPath) || /[\r\n\0]/.test(value.localPath))) throw new Error('Choose an absolute local skills project folder.');
+  return { repository: validateRepository(value.repository), baseBranch: value.baseBranch,
+    ...(value.localPath ? { localPath: path.resolve(value.localPath) } : {}) };
 }
 
 /** Preserve conflicting webview edits outside distributable skill contents. */
@@ -73,29 +76,89 @@ export function saveGuidedRecovery(root: string, skill: WorkbenchSkill, relative
   return file;
 }
 
-export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
-  repository = validateRepository(repository);
-  const baseBranch = await resolveRepositoryDefaultBranch(repository);
+/** Earlier file contents live outside the skill; they are never packaged or uploaded. */
+export function listGuidedHistory(root: string, skill: WorkbenchSkill, relative: string): { id: string; path: string; at: string }[] {
+  fileTarget(skill, relative);
+  const directory = path.join(path.resolve(root), '.skill-workbench', 'recovery', skill.id);
+  ensureSafe(root, directory);
+  if (!fs.existsSync(directory)) return [];
+  const history: { id: string; path: string; at: string }[] = [];
+  const candidates = fs.readdirSync(directory, { withFileTypes: true })
+    .filter(entry => entry.isFile() && /^[a-f0-9-]{36}\.json$/i.test(entry.name))
+    .map(entry => { const file = path.join(directory, entry.name); ensureSafe(root, file); return { name: entry.name, file, stat: fs.statSync(file) }; })
+    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs).slice(0, 200);
+  let bytesRead = 0;
+  for (const entry of candidates) {
+    const file = entry.file;
+    if (entry.stat.size > MAX_TEXT * 6 + 4096) continue;
+    bytesRead += entry.stat.size;
+    if (bytesRead > MAX_TEXT * 6 + 4096) break;
+    try {
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (saved.skillId === skill.id && saved.path === relative && typeof saved.content === 'string'
+        && Buffer.byteLength(saved.content, 'utf8') <= MAX_TEXT && typeof saved.at === 'string' && Number.isFinite(Date.parse(saved.at))) {
+        history.push({ id: entry.name.slice(0, -5), path: relative, at: saved.at });
+      }
+    } catch { /* One damaged history record must not hide the editable draft. */ }
+  }
+  return history.sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50);
+}
+
+export function restoreGuidedEdit(root: string, skill: WorkbenchSkill, relative: string, id: string): void {
+  if (typeof id !== 'string' || !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('Choose an earlier edit from this file’s history.');
+  const active = listWorkbenchSkills(root).find(item => item.id === skill.id && path.resolve(item.sourcePath) === path.resolve(skill.sourcePath));
+  if (!active) throw new Error('This draft is no longer active. No file was changed.');
+  fileTarget(active, relative);
+  const file = path.join(path.resolve(root), '.skill-workbench', 'recovery', active.id, `${id}.json`);
+  ensureSafe(root, file);
+  if (fs.statSync(file).size > MAX_TEXT * 6 + 4096) throw new Error('The earlier edit exceeds the recovery limit.');
+  const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (saved.skillId !== active.id || saved.path !== relative || typeof saved.content !== 'string'
+    || Buffer.byteLength(saved.content, 'utf8') > MAX_TEXT) throw new Error('This earlier edit does not belong to the selected skill file.');
+  const current = readGuidedFile(active, relative);
+  if (current === saved.content) return;
+  saveGuidedRecovery(root, active, relative, current);
+  writeGuidedFile(active, relative, saved.content);
+}
+
+function saveWorkspaceConnection(root: string, connection: WorkspaceConnection): void {
   const file = connectionPath(root);
   fs.mkdirSync(path.dirname(file), { recursive: true }); ensureSafe(root, file);
   const temporary = `${file}.${randomUUID()}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify({ format: 1, repository, baseBranch }, null, 2) + '\n', { flag: 'wx' });
+  fs.writeFileSync(temporary, JSON.stringify({ format: 1, ...connection }, null, 2) + '\n', { flag: 'wx' });
   try { fs.renameSync(temporary, file); }
   finally { if (fs.existsSync(temporary)) { ensureSafe(root, temporary); fs.unlinkSync(temporary); } }
+}
+export function setWorkspaceRepositoryFolder(root: string, localPath: string): WorkspaceConnection {
+  const connection = getWorkspaceConnection(root);
+  if (!connection) throw new Error('Register the remote skills repository before choosing its local folder.');
+  if (typeof localPath !== 'string' || !path.isAbsolute(localPath) || /[\r\n\0]/.test(localPath)
+      || localPath.split(/[\\/]/).some(part => part.toLowerCase() === '.codex')) throw new Error('Choose the actual local skills project folder, outside Codex internal directories.');
+  const updated = { ...connection, localPath: path.resolve(localPath) };
+  saveWorkspaceConnection(root, updated); return updated;
+}
+export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
+  repository = validateRepository(repository);
+  const baseBranch = await resolveRepositoryDefaultBranch(repository);
+  let previous: WorkspaceConnection | undefined;
+  try { previous = getWorkspaceConnection(root); } catch { /* Reconnection can repair damaged metadata. */ }
+  const connection: WorkspaceConnection = { repository, baseBranch,
+    ...(previous?.localPath && sameRepository(previous.repository, repository) ? { localPath: previous.localPath } : {}) };
+  saveWorkspaceConnection(root, connection);
   // Repair matching old per-skill branch selections such as "makeitfire".
   // Other associated destinations are left alone until that draft is published
   // through this workspace's explicitly selected single repository.
   for (const skill of listWorkbenchSkills(root)) {
     if (skill.repository && sameRepository(skill.repository, repository)) updateSkillRepository(root, skill.id, repository, baseBranch);
   }
-  return { repository, baseBranch };
+  return connection;
 }
 
-export async function migrateAssociation(root: string): Promise<WorkspaceConnection | undefined> {
+export async function migrateAssociation(root: string, verifiedReleases?: LibraryRelease[]): Promise<WorkspaceConnection | undefined> {
   const saved = getWorkspaceConnection(root);
   if (saved) return saved;
   const repositories = listWorkbenchSkills(root).flatMap(skill => skill.repository ? [skill.repository] : []);
-  try { repositories.push(...listLibraryReleases(root).flatMap(release => release.repository ? [release.repository] : [])); }
+  try { repositories.push(...(verifiedReleases ?? listLibraryReleases(root)).flatMap(release => release.repository ? [release.repository] : [])); }
   catch { /* A corrupt historic snapshot must not prevent editing active drafts. */ }
   const unique = repositories.filter((repository, index) => repositories.findIndex(other => sameRepository(repository, other)) === index);
   return unique.length === 1 ? connectWorkspaceRepository(root, unique[0]) : undefined;
@@ -145,6 +208,16 @@ export function listGuidedFiles(skill: WorkbenchSkill): GuidedFile[] {
   visit(skill.sourcePath, '');
   return output.sort((a, b) => (a.path === 'SKILL.md' ? -1 : b.path === 'SKILL.md' ? 1 : a.path.localeCompare(b.path)));
 }
+/** Inspect only the file selected in the editor, without rereading sibling assets. */
+export function openGuidedFile(skill: WorkbenchSkill, relative: string): GuidedFile & { content?: string } {
+  if (typeof relative !== 'string' || relative.includes('\\') || relative.split('/').some(part => part === 'node_modules')) throw new Error('Choose a file belonging to this skill.');
+  const target = fileTarget(skill, relative);
+  const stat = fs.lstatSync(target);
+  if (!stat.isFile()) throw new Error('Choose a regular file belonging to this skill.');
+  const bytes = stat.size <= MAX_TEXT ? fs.readFileSync(target) : undefined;
+  const text = !!bytes && isUtf8(bytes) && !bytes.includes(0);
+  return { path: relative, size: stat.size, text, ...(text ? { content: bytes!.toString('utf8') } : {}) };
+}
 export function readGuidedFile(skill: WorkbenchSkill, relative: string): string {
   const target = fileTarget(skill, relative); const stat = fs.lstatSync(target);
   if (!stat.isFile() || stat.size > MAX_TEXT) throw new Error('This file is not editable text. Its bytes remain preserved in the skill.');
@@ -187,7 +260,7 @@ function sameFiles(left: { path: string; size: number; sha256: string }[], right
 }
 
 /** Called only from the guided screen's explicit Publish version action. */
-export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: (message: string) => void, options: { deferCleanup?: boolean } = {}): Promise<GuidedPublication> {
+export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: import('./guided-contract.js').GuidedProgress, options: { deferCleanup?: boolean; expectedFiles?: FileDigest[] } = {}): Promise<GuidedPublication> {
   const saved = getWorkspaceConnection(root);
   if (!saved) throw new Error('Connect your skill repository first.');
   const skill = listWorkbenchSkills(root).find(item => item.id === id);
@@ -196,38 +269,47 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
   // Resolve again immediately before publishing. A saved base branch is not
   // trusted after remote configuration changes, and never comes from a name box.
   const connection = await connectWorkspaceRepository(root, saved.repository);
+  onProgress?.('Connected repository verified.', 'succeeded');
   updateSkillRepository(root, skill.id, connection.repository, connection.baseBranch);
-  const validation = validateWorkbenchSkill(skill);
+  onProgress?.('Checking the draft against the reviewed file summary…');
+  const validation = measureWorkbenchPhase('skillValidation', currentWorkbenchMetrics(), () => validateWorkbenchSkill(skill));
   if (!validation.valid) throw new Error(`Fix the skill check errors before publishing: ${validation.errors.join('; ')}`);
-  const previous = listSkillReleases(root, skill.id).find(item => item.version === version);
+  if (options.expectedFiles && !sameFiles(validation.files, options.expectedFiles)) throw new Error('The draft changed after the sharing summary was reviewed. Check it and review a fresh summary before submitting. Nothing was uploaded.');
+  onProgress?.('Preparing the selected version package and version notes…');
+  const previous = findSkillRelease(root, skill.id, version);
   let release: WorkbenchRelease;
   if (previous) {
-    release = verifySkillRelease(previous.directory);
+    release = measureWorkbenchPhase('releaseVerification', currentWorkbenchMetrics(), () => verifySkillRelease(previous.directory));
     const changed = !sameFiles(validation.files, release.manifest.files)
       || fs.readFileSync(path.join(release.directory, 'CHANGELOG.md'), 'utf8').trim() !== changelog.trim();
-    if (changed) release = prepareSkillRelease(root, skill.id, version, changelog, true);
-    const receipt = listLibraryReleases(root, skill.name).find(item => item.directory === release.directory && item.status === 'uploaded');
+    if (changed) release = measureWorkbenchPhase('releasePreparation', currentWorkbenchMetrics(), () => prepareSkillRelease(root, skill.id, version, changelog, true));
+    const receipt = listLibraryReleases(root, skill.name, { verifyPayload: false }).find(item => item.directory === release.directory && item.status === 'uploaded');
     if (!changed && receipt?.commit && receipt.branch && receipt.repository) {
       onProgress?.('Checking the previously uploaded version.');
       if (sameRepository(receipt.repository, connection.repository)
           && await verifyRepositoryBranchCommit(receipt.repository, receipt.branch, receipt.commit)) {
         let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
-        try { if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory); }
+        try { if (!options.deferCleanup) cleanup = measureWorkbenchPhase('localCleanup', currentWorkbenchMetrics(), () => completeWorkbenchSkill(root, skill.id, release.directory)); }
         catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
         return { release, publication: { repository: receipt.repository, branch: receipt.branch, commit: receipt.commit }, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
       }
       // A removed/replaced branch or a different selected repository is a
       // fresh upload of the user's chosen version, with prior receipts retained.
-      release = prepareSkillRelease(root, skill.id, version, changelog, true);
+      release = measureWorkbenchPhase('releasePreparation', currentWorkbenchMetrics(), () => prepareSkillRelease(root, skill.id, version, changelog, true));
     }
-  } else release = prepareSkillRelease(root, skill.id, version, changelog);
-  const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress, true);
+  } else release = measureWorkbenchPhase('releasePreparation', currentWorkbenchMetrics(), () => prepareSkillRelease(root, skill.id, version, changelog));
+  onProgress?.('Version package and notes prepared.', 'succeeded');
+  if (options.expectedFiles && !sameFiles(release.manifest.files, options.expectedFiles)) throw new Error('The prepared release differs from the reviewed sharing summary. The local files are preserved and nothing was uploaded. Review a fresh summary.');
+  const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress, true, { localPath: connection.localPath });
   try {
     const publication = await pushPreparedRelease(preview, onProgress);
+    onProgress?.('Upload commit confirmed by the destination repository.', 'succeeded');
     let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
     try {
-      recordLibraryPublication(root, release.directory, { ...publication, baseBranch: connection.baseBranch });
-      if (!options.deferCleanup) cleanup = completeWorkbenchSkill(root, skill.id, release.directory);
+      onProgress?.('Saving the verified upload receipt…');
+      measureWorkbenchPhase('receiptRecording', currentWorkbenchMetrics(), () => recordLibraryPublication(root, release.directory, { ...publication, baseBranch: connection.baseBranch }));
+      onProgress?.('Upload receipt saved.', 'succeeded');
+      if (!options.deferCleanup) { onProgress?.('Finishing local draft cleanup…'); cleanup = measureWorkbenchPhase('localCleanup', currentWorkbenchMetrics(), () => completeWorkbenchSkill(root, skill.id, release.directory)); onProgress?.('Local draft cleanup finished.', 'succeeded'); }
     } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); }
     return { release, publication, ...(cleanup ? { cleanup } : {}), ...(cleanupError ? { cleanupError } : {}) };
   } finally { await disposePublishPreview(preview, onProgress); }
@@ -240,7 +322,7 @@ function connectedRepository(root: string, repository: string): boolean {
 }
 
 export function connectedReviewReleases(root: string): LibraryRelease[] {
-  return listLibraryReleases(root).filter(item => item.status === 'uploaded' && !!item.repository && connectedRepository(root, item.repository));
+  return listLibraryReleases(root, undefined, { verifyPayload: false }).filter(item => item.status === 'uploaded' && !!item.repository && connectedRepository(root, item.repository));
 }
 
 export function libraryReviewContext(root: string, directory: string): { item: LibraryRelease; context: ReviewContext } {
@@ -248,24 +330,29 @@ export function libraryReviewContext(root: string, directory: string): { item: L
   const item = connectedReviewReleases(root).find(release => path.resolve(release.directory) === path.resolve(directory));
   const connection = getWorkspaceConnection(root);
   if (!item?.repository || !item.branch || !item.commit || !connection) throw new Error('This version has no verified upload in the connected repository. Connect its recorded repository before checking or creating its PR.');
+  verifySkillRelease(item.directory);
   return { item, context: { repository: item.repository, baseBranch: item.baseBranch ?? connection.baseBranch, branch: item.branch, commit: item.commit, skillName: item.skillName, version: item.version } };
 }
 
-export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer', reviewer?: string, runner?: GitHubRunner): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
-  const { item, context } = libraryReviewContext(root, directory);
-  const service = new GitHubReviewService(root, runner);
-  let pr = action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
+export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer' | 'merge', reviewer?: string, runner?: GitHubRunner, onProgress?: import('./guided-contract.js').GuidedProgress): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
+  onProgress?.('Checking the saved upload and pull request identity…');
+  const { item, context } = measureWorkbenchPhase('reviewPreparation', currentWorkbenchMetrics(), () => libraryReviewContext(root, directory));
+  const service = new GitHubReviewService(root, runner, onProgress);
+  let pr = action === 'merge' ? item.pr ? await service.merge(context, item.pr) : { supported: true, status: 'uploaded' as const, mergeError: 'Create and verify this upload’s PR before merging.' } : action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
     ? item.pr ? await service.requestReviewer(context, item.pr, reviewer ?? '') : { supported: !!githubRepository(context.repository), status: 'uploaded' as const, reviewRequestError: 'Create the PR before requesting a reviewer.' }
     : await service.check(context, item.pr);
   // Confirm the PR receipt on disk before any optional notification or cleanup.
-  pr = recordLibraryReview(root, item.directory, pr);
+  onProgress?.('Saving the pull request result locally…');
+  pr = measureWorkbenchPhase('receiptRecording', currentWorkbenchMetrics(), () => recordLibraryReview(root, item.directory, pr, action === 'create' ? { repairHistoricalNumber: item.pr?.number } : {}));
+  onProgress?.(pr.error || pr.creationUncertain ? 'Pull request outcome needs attention; its available result was saved.' : 'Pull request result saved.', pr.error || pr.creationUncertain ? 'info' : 'succeeded');
   if (action === 'create' && reviewer && pr.number && pr.identityVerified) {
-    pr = recordLibraryReview(root, item.directory, await service.requestReviewer(context, pr, reviewer));
+    const requested = await service.requestReviewer(context, pr, reviewer);
+    pr = measureWorkbenchPhase('receiptRecording', currentWorkbenchMetrics(), () => recordLibraryReview(root, item.directory, requested));
   }
   let cleanupError: string | undefined;
   if (action !== 'check' && pr.number && pr.identityVerified) {
     const draft = listWorkbenchSkills(root).find(skill => skill.name === item.skillName);
-    if (draft) { try { completeWorkbenchSkill(root, draft.id, item.directory); } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); } }
+    if (draft) { try { onProgress?.('Preserving the submitted version and finishing local draft cleanup…'); measureWorkbenchPhase('localCleanup', currentWorkbenchMetrics(), () => completeWorkbenchSkill(root, draft.id, item.directory)); onProgress?.('Local draft cleanup finished.', 'succeeded'); } catch (error) { cleanupError = error instanceof Error ? error.message : String(error); onProgress?.('Local cleanup needs attention; the upload receipt is retained.', 'info'); } }
   }
   return { pr, ...(cleanupError ? { cleanupError } : {}) };
 }

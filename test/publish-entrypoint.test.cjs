@@ -8,8 +8,9 @@ const AdmZip = require('adm-zip');
 const core = require('../out/skill-workbench.js');
 
 function fixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-entrypoint-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-entrypoint-'));
+  const root = path.join(sandbox, '.skilljetty-prerelease'); fs.mkdirSync(root);
+  t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }));
   const source = path.join(root, 'skills', 'sample');
   fs.mkdirSync(source, { recursive: true });
   const manifest = '---\nname: sample\ndescription: Prepare sample reports. Use when asked for a sample report.\n---\n\n# Sample\n\nInspect inputs and prepare the requested report.\n';

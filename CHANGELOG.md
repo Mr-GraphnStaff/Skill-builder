@@ -1,18 +1,97 @@
 # Changelog
 
-## 0.9.2 — 2026-10-29
+## 0.12.0 — 2026-11-01 (production)
+
+- Promote the tested 0.11.13 workflow: detailed Activity and focus feedback, per-skill history, structural Sanity check, repository data reuse and fewer repeated release checks.
+- Preserve explicit stable work folders and settings without migrating preview or local-UAT data.
+- Keep local performance recording and **SkillJetty: Show Performance Log** in the Command Palette; hide the workbench log button.
+- Retain import, identity, integrity, reviewed-content, recovery and repository-conflict protections. The bug-fix-only release freeze remains in effect.
+
+## 0.11.13 — 2026-10-31 (public pre-release bug fix)
+
+- Start a fresh Activity list for each new skill workflow instead of carrying history across skills.
+- Keep the current skill's check, package and submission steps together, including when returning to the same draft.
+- Preserve the opening operation's real import details and retain earlier history when opening is canceled or fails.
+- Reset the history reading position for a new skill while preserving it within the same workflow.
+
+## 0.11.12 — 2026-10-31 (public pre-release)
+
+- Make Open performance log available in Activity from the first screen, including before choosing a workspace and while an operation is running.
+- Keep startup and earlier timings available without advancing the skill workflow or opening repository settings.
+
+## 0.11.11 — 2026-10-31 (public pre-release)
+
+- Focus the workbench Activity area when advancing a step and show a scrolling history of actual work, waiting, success and errors without repeatedly taking focus.
+- Reuse the configured local repository's downloaded data for isolated submissions and fetch destination changes; preserve local edits, staged files and repository settings.
+- List historical releases from metadata and verify the selected release when used, rather than repeatedly reopening every package.
+- Reuse inventories within packaging and verified Git tree identities during publication while retaining reviewed-content, destination and conflict checks.
+- Reduce unnecessary Git configuration subprocesses and add timings and activity messages around packaging, PR preparation, receipts and cleanup.
+
+## 0.11.10 — 2026-10-30 (public pre-release)
+
+- Rename the guided Check step to Sanity check and limit it to structural metadata, identity and package integrity.
+- Remove detailed security detections, quality wording heuristics, direct-reference notices, mandatory evaluation filenames and per-binary warnings from guided validation and original-package verification.
+- State explicitly that the sanity check does not perform security scanning; use dedicated scanners for content and execution risk review.
+- Preserve archive/path/link/expansion limits, safe file handling, immutable originals, recovery and explicit upload/review behavior.
+
+## 0.11.9 — 2026-10-30 (public pre-release)
+
+- Keep operation status visible from the top of the workbench while scrolling, with distinct waiting, working and completion feedback.
+- Put the skill task first and explain workflow actions and optional repository settings where they are used.
+- Separate local Git, remote Git, managed GitHub authentication and API timings using bounded diagnostics without credentials, paths or repository names.
+- Identify background jobs and their phases so snapshot and release preparation delays can be investigated.
+
+## 0.11.8
+
+- Match pull requests to the current upload commit when a skill/version branch is reused; preserve historical PR receipts during repair.
+- Recover a mismatched numbered PR from Check PRs without another upload.
+- Add an explicit Merge PR and delete branch action with exact commit verification, merge checks, confirmed merge readback and protected/default branch guards.
+
+## 0.11.7 — 2026-10-29
+
+- Add pre-release-only privacy-safe phase diagnostics and an always-available performance log action.
+- Reuse validated import bytes for the editor, create each extraction directory once, and read only the selected editor file.
+- Separate file-picker waiting time from processing time.
+- Require an explicit local skills repository folder and verify local/remote identity and sync status at startup without blocking local editing.
+
+
+## 0.11.6 — 2026-10-29
 
 - Let users import a duplicate skill and publish their chosen version over the existing Git version folder. Preserve previous local drafts, packages and receipts in recovery copies and keep prior remote contents in Git history.
 - Add a separate Git pull action for the registered repository before skill work. SkillJetty manages the checkout, fast-forwards it when possible and lets users open a pulled skill folder.
 - Preserve ignored local files during pulls, prevent custom merge-driver/filesystem-monitor execution, and keep repeated same-version sessions recoverable.
 
 
-## 0.9.1
+## 0.11.5 (public pre-release)
 
 - Show immediate action feedback, the current operation stage and elapsed time in the workbench.
 - Monitor extension responses and explain when an operation may be stalled without claiming task completion or allowing duplicate submissions.
 - Retain completion timing and actionable errors; distinguish waiting for a VS Code dialog from processing.
 - Record action timings without skill contents, paths or credentials.
+
+## 0.11.4 (public pre-release preparation)
+
+- Prepare the existing `DavidFarris.skill-builder` Marketplace identity with production command, setting and view names, preserving the established listing and icon.
+- Identify the public preview and version inside the workbench. Keep its work data under `.skilljetty-prerelease` with a channel-specific repository preference; do not automatically migrate stable or local-beta state.
+- Confine inherited skills and export directory settings to the preview data tree, using safe defaults for absolute or escaping values.
+- Preserve the original local UAT and production checkouts. Packaging, publication, native smoke checks and human UAT are distinct evidence; this preparation does not claim they passed.
+
+## 0.11.1 (local beta / UAT)
+
+- Acknowledge step clicks immediately with action-specific activity messages and an indeterminate indicator; explain long waits and canceled selections.
+- Update progress without rebuilding the editor; preserve focus and outgoing edits, prevent duplicate actions, and stop queued submission after a failed save.
+- Remove release-library verification and full-file rescans from debounced saves. Run expensive local validation, package import/preparation and library verification in trusted background workers.
+- Bind sharing summaries to the exact files shown, and reject asynchronous external changes before accepting a package or uploading it.
+- Add a local Performance output channel containing operation labels, duration and outcome only; no skill contents, paths or credentials.
+
+
+## 0.11.0 (pre-release candidate)
+
+- Detect a submitted skill's declared version with provenance and visible conflict warnings; manage release numbers without a required Version field.
+- Show verified file changes and generate factual release notes, with optional human context and an advanced release-number override.
+- Save an installable package locally without connecting GitHub; identical content reuses the preserved release, while changed work receives the next number.
+- Preserve earlier text edits outside distributable skill contents and restore them without losing the content being replaced.
+- Retain exact imported originals, source metadata, binary assets, immutable release packages and explicit repository publication/reviewer actions.
 
 ## 0.9.0
 
@@ -194,3 +273,21 @@
 - Added Claude Code sync support.
 - Added free-form authoring prompt generation.
 - Added target-surface-aware starter skill generation.
+## 0.11.2 (local beta UAT)
+
+- Open the workbench without enumerating drafts, verifying release archives or migrating repository associations. Load skills explicitly; unload clears the displayed catalog. Other actions do not silently rescan it.
+- Separate waiting for a file selection from processing feedback. Add Open by file path as an alternative to the hanging native Windows chooser.
+- Record startup/action duration and shared extension-host heap/external memory in the local Performance output channel. No skill content or paths are logged.
+
+## 0.11.3 (local beta UAT)
+
+- Initialize connection metadata before the first workbench page; remove startup progress messages that could arrive after rendering and leave a stale Opening spinner.
+- Place Load skills before the create/open choices and show the running beta version in the header.
+
+## 0.11.4 (local beta UAT)
+
+- Give secondary buttons and form controls visible theme-aware boundaries, including transparent button themes; disabled controls retain a distinct dashed boundary.
+- Follow the selected VS Code theme for native control color scheme and high-contrast primary actions.
+- Preserve selected-file metadata and error-message text contrast; keep warning/error meaning in words alongside color.
+- Review the rendered workflow across light, dark, high-contrast dark/light and forced-colors variants, including narrow layouts.
+

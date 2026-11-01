@@ -1,40 +1,70 @@
 import * as vscode from 'vscode';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { currentWorkbenchMetrics, emitWorkbenchMetric, withWorkbenchMetrics, type WorkbenchMetric } from './workbench-metrics.js';
 import * as path from 'node:path';
+import { homedir } from 'node:os';
+import { getWorkspaceConnection } from './guided-workspace.js';
 import { readFileSync } from 'node:fs';
 import { GuidedWorkbenchController } from './guided-controller.js';
 import { renderGuidedWorkbench, renderGuidedLauncher } from './guided-workbench-html.js';
 import { GuidedMessage } from './guided-contract.js';
-import { activityForAction, actionNeedsInput } from './guided-activity.js';
 import { createGitHubSessionRunner } from './github-session.js';
+import { stableWorkspaceRoot } from './stable-workspace.js';
+import { activityForAction, actionNeedsInput } from './guided-activity.js';
 
 export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks: { getRoot(): Promise<string | undefined> }) {
   const brand = {
     productName: String(context.extension.packageJSON.displayName ?? 'SkillJetty').split(' — ')[0],
-    descriptor: 'Agent Skills Studio',
-    tagline: 'Build it. Version it. Ship it.',
+    descriptor: `Release ${String(context.extension.packageJSON.version ?? '')}`,
+    tagline: 'Build it. Improve it. Share it.',
     logoDataUri: `data:image/png;base64,${readFileSync(path.join(context.extensionPath, 'images', 'icon.png')).toString('base64')}`
   };
   let panel: vscode.WebviewPanel | undefined;
   let controller: GuidedWorkbenchController | undefined;
   let opening: Promise<void> | undefined;
   let handling: Promise<void> = Promise.resolve();
+  let operationTiming: { waitMs: number; waitingSince?: number } | undefined;
   const activityLog = vscode.window.createOutputChannel('SkillJetty — Performance');
   context.subscriptions.push(activityLog);
+  type MetricContext = { action: string; operationId: string };
+  const metricContexts = new WeakMap<GuidedWorkbenchController, MetricContext>();
+  const logMetric = (metric: WorkbenchMetric, context: MetricContext) => emitWorkbenchMetric(clean => {
+    activityLog.appendLine(JSON.stringify({ time: new Date().toISOString(), ...context, ...clean }));
+  }, metric);
+  context.subscriptions.push(vscode.commands.registerCommand('skillBuilder.showPerformanceLog', () => activityLog.show(true)));
   const nonce = () => randomBytes(24).toString('base64');
-  const render = () => { if (panel && controller) panel.webview.html = renderGuidedWorkbench(controller.state, nonce(), brand); };
+  const render = () => {
+    if (panel && controller) {
+      const started = performance.now();
+      panel.webview.html = renderGuidedWorkbench(controller.state, nonce(), brand);
+      logMetric({ stage: 'webviewRender', durationMs: performance.now() - started, outcome: 'ok' }, metricContexts.get(controller)!);
+    }
+  };
+  const pickerRoot = async (requested?: string): Promise<string> => {
+    let selected = requested;
+    if (!selected) {
+      const root = await hooks.getRoot();
+      try { selected = root ? getWorkspaceConnection(root)?.localPath : undefined; } catch { /* Setup UI reports invalid connection metadata. */ }
+    }
+    selected ??= vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return selected && !selected.split(/[\\/]/).some(part => part.toLowerCase() === '.codex') ? selected : homedir();
+  };
   const pick = async (kind: 'package' | 'folder' | 'file', initialPath?: string) => (await vscode.window.showOpenDialog({
     title: kind === 'package' ? 'Open a .skill package' : kind === 'folder' ? 'Open a skill folder' : 'Add a supporting file',
-    ...(initialPath ? { defaultUri: vscode.Uri.file(initialPath) } : {}),
+    defaultUri: vscode.Uri.file(await pickerRoot(initialPath)),
     canSelectMany: false, canSelectFiles: kind !== 'folder', canSelectFolders: kind === 'folder',
     ...(kind === 'package' ? { filters: { 'Skill packages': ['skill'] } } : {})
   }))?.[0]?.fsPath;
 
   const saveExternalEdits = async () => {
     const root = await hooks.getRoot(); if (!root) return;
+    let localRepository: string | undefined;
+    try { localRepository = getWorkspaceConnection(root)?.localPath; } catch { /* Invalid optional repository metadata must not block local editing. Pull validates it separately. */ }
+    const managedRoots = [path.join(root, 'skills'), ...(localRepository ? [localRepository] : [])];
     for (const document of vscode.workspace.textDocuments) {
-      const managedDocument = ['skills', path.join('.skill-workbench', 'repositories')].some(folder => {
-        const relative = path.relative(path.join(root, folder), document.uri.fsPath);
+      const managedDocument = managedRoots.some(folder => {
+        const relative = path.relative(folder, document.uri.fsPath);
         return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
       });
       if (document.isDirty && document.uri.scheme === 'file' && managedDocument) {
@@ -50,6 +80,10 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     const activePanel = panel;
     const activeController = controller;
     const started = Date.now();
+    operationTiming = { waitMs: 0 };
+    const metricContext = metricContexts.get(activeController)!;
+    metricContext.action = activityForAction(message.action); metricContext.operationId = randomUUID();
+    const memoryBefore = process.memoryUsage();
     const heartbeat = message.action === 'save' ? undefined : setInterval(() => {
       if (panel === activePanel && controller === activeController) {
         void activePanel.webview.postMessage({ type: 'heartbeat' }).then(() => undefined, () => undefined);
@@ -63,19 +97,26 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       }
       if (['pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPackage', 'openPackagePath'].includes(message.action)) await saveExternalEdits();
       if (panel !== activePanel || controller !== activeController) return;
-      await activeController.dispatch(message);
+      const operationContext = { ...metricContext };
+      await withWorkbenchMetrics(metric => logMetric(metric, operationContext), () => activeController.dispatch(message));
     } catch (error) { activeController.state.error = error instanceof Error ? error.message : String(error); }
     finally { clearInterval(heartbeat); }
     const elapsed = Date.now() - started;
-    // Record timing without skill names, paths, repository URLs or contents.
-    activityLog.appendLine(`${new Date().toISOString()} action=${activityForAction(message.action)} durationMs=${elapsed} outcome=${activeController.state.error ? 'error' : 'completed'}`);
+    const waitingMs = operationTiming.waitMs + (operationTiming.waitingSince === undefined ? 0 : Date.now() - operationTiming.waitingSince);
+    const processingMs = Math.max(0, elapsed - waitingMs);
+    operationTiming = undefined;
+    logMetric({ stage: 'pickerWait', durationMs: waitingMs, outcome: 'ok' }, metricContext);
+    logMetric({ stage: 'operationTotal', durationMs: elapsed, outcome: activeController.state.error ? 'error' : 'ok' }, metricContext);
+    // No skill names, contents, file paths, repository URLs or credentials.
+    const memoryAfter = process.memoryUsage();
+    activityLog.appendLine(`${new Date().toISOString()} action=${activityForAction(message.action)} durationMs=${processingMs} hostHeapUsedBytes=${memoryAfter.heapUsed} hostHeapDeltaBytes=${memoryAfter.heapUsed - memoryBefore.heapUsed} hostExternalBytes=${memoryAfter.external} outcome=${activeController.state.error ? 'error' : 'completed'} totalDurationMs=${elapsed} inputWaitMs=${waitingMs}`);
     if (panel !== activePanel || controller !== activeController) return;
     if (message.action === 'save') {
       await activePanel.webview.postMessage({ type: 'saved', notice: activeController.state.notice, error: activeController.state.error });
     } else {
-      const completion = activeController.state.error ? 'Needs attention. See the details below.' : `Finished in ${(elapsed / 1000).toFixed(1)} seconds.`;
+      const completion = activeController.state.error ? 'Needs attention. See the details below.' : `Finished in ${(processingMs / 1000).toFixed(1)} seconds.`;
       activeController.state.progress = completion;
-      await activePanel.webview.postMessage({ type: 'operationComplete', error: activeController.state.error, message: completion });
+      await activePanel.webview.postMessage({ type: 'operationComplete', error: activeController.state.error, message: completion, activity: activeController.state.activity, activityGeneration: activeController.state.activityGeneration });
       render();
     }
   };
@@ -88,40 +129,74 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     if (panel) { panel.reveal(vscode.ViewColumn.One); return; }
     if (opening) return opening;
     opening = (async () => {
+      const started = Date.now();
+      const memoryBefore = process.memoryUsage().heapUsed;
       const root = await hooks.getRoot();
       panel = vscode.window.createWebviewPanel('skillBuilder.guidedWorkbench', brand.productName, vscode.ViewColumn.One, {
         enableScripts: true, retainContextWhenHidden: true, localResourceRoots: []
       });
       const createdPanel = panel;
+      const createdMetrics: MetricContext = { action: 'startup', operationId: randomUUID() };
       const createdController = new GuidedWorkbenchController(root, {
+        onMetric: metric => logMetric(metric, createdMetrics),
         github: createGitHubSessionRunner(async () => {
           const session = await vscode.authentication.getSession('github', ['repo'], { createIfNone: true });
           return session.accessToken;
         }),
         connectGitHub: async () => {
-          const session = await vscode.authentication.getSession('github', ['repo'], { forceNewSession: { detail: 'Choose the GitHub account with access to your connected skill repository. This account is managed by VS Code.' }, clearSessionPreference: true });
-          return session.account.label;
+          const started = performance.now(); let outcome: 'ok' | 'error' = 'error';
+          try {
+            const session = await vscode.authentication.getSession('github', ['repo'], { forceNewSession: { detail: 'Choose the GitHub account with access to your connected skill repository. This account is managed by VS Code.' }, clearSessionPreference: true });
+            outcome = 'ok'; return session.account.label;
+          } finally { emitWorkbenchMetric(currentWorkbenchMetrics(), { stage: 'authentication', operation: 'switchSession', durationMs: performance.now() - started, outcome }); }
+        },
+        chooseRepositoryFolder: async current => (await vscode.window.showOpenDialog({
+          title: 'Choose the actual local skills repository folder', defaultUri: vscode.Uri.file(await pickerRoot(current)),
+          canSelectFiles: false, canSelectFolders: true, canSelectMany: false
+        }))?.[0]?.fsPath,
+        onRepositoryVerification: verification => {
+          if (panel === createdPanel && controller === createdController) void createdPanel.webview.postMessage({ type: 'repositoryVerification', verification }).then(() => undefined, () => undefined);
         },
         pickPackage: () => pick('package'), pickFolder: initialPath => pick('folder', initialPath), pickFile: () => pick('file'),
         chooseWorkspace: async () => {
-          const folder = (await vscode.window.showOpenDialog({ title: 'Choose your local skill work folder', canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
+          const folder = (await vscode.window.showOpenDialog({ title: 'Choose your local skill work folder', defaultUri: vscode.Uri.file(await pickerRoot()), canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
           if (folder) {
-            if (vscode.workspace.workspaceFolders?.length) await vscode.workspace.getConfiguration('skillBuilder').update('projectRoot', folder.fsPath, vscode.ConfigurationTarget.Workspace);
+            const selectedRoot = stableWorkspaceRoot(folder.fsPath);
+            if (vscode.workspace.workspaceFolders?.length) await vscode.workspace.getConfiguration('skillBuilder').update('projectRoot', selectedRoot, vscode.ConfigurationTarget.Workspace);
             else void vscode.commands.executeCommand('vscode.openFolder', folder, false);
           }
-          return folder?.fsPath;
+          return folder ? stableWorkspaceRoot(folder.fsPath) : undefined;
         },
         openLink: async url => { await vscode.env.openExternal(vscode.Uri.parse(url)); },
+        revealFile: async file => { await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(file)); },
         onState: state => {
+          if (operationTiming) {
+            if (state.waitingForInput && operationTiming.waitingSince === undefined) operationTiming.waitingSince = Date.now();
+            else if (!state.waitingForInput && operationTiming.waitingSince !== undefined) {
+              operationTiming.waitMs += Date.now() - operationTiming.waitingSince;
+              operationTiming.waitingSince = undefined;
+            }
+          }
           if (panel === createdPanel && controller === createdController) {
-            void createdPanel.webview.postMessage({ type: 'progress', message: state.progress ?? '', waitingForInput: state.waitingForInput === true }).then(() => undefined, () => undefined);
+            void createdPanel.webview.postMessage({ type: 'progress', message: state.progress ?? '', waitingForInput: state.waitingForInput === true, activity: state.activity, activityGeneration: state.activityGeneration }).then(() => undefined, () => undefined);
           }
         }
       });
+      metricContexts.set(createdController, createdMetrics);
       controller = createdController;
       context.subscriptions.push(panel.webview.onDidReceiveMessage(handle), panel.onDidDispose(() => { panel = undefined; controller = undefined; }));
+      // Initialize connection metadata before the first document. Startup has
+      // no scan and must not send progress that can arrive in a later document.
       await createdController.dispatch({ action: 'ready' });
-      if (panel === createdPanel && controller === createdController) render();
+      if (panel === createdPanel && controller === createdController) {
+        render();
+        // Initial repository verification runs after first paint and does not
+        // serialize or block local file opening/editing.
+        const verificationContext = { action: 'startupRepositoryVerification', operationId: randomUUID() };
+        void withWorkbenchMetrics(metric => logMetric(metric, verificationContext), () => createdController.verifyRepository());
+      }
+      const memory = process.memoryUsage();
+      activityLog.appendLine(`${new Date().toISOString()} action=OpenWorkbench durationMs=${Date.now() - started} hostHeapUsedBytes=${memory.heapUsed} hostHeapDeltaBytes=${memory.heapUsed - memoryBefore} hostExternalBytes=${memory.external} outcome=${createdController.state.error ? 'error' : 'completed'}`);
     })();
     try { await opening; } finally { opening = undefined; }
   };

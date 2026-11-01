@@ -162,5 +162,7 @@ test('guided controller completes a real local-repository version without asking
   await f.controller.dispatch({ action: 'startAnother' });
   assert.equal(f.controller.state.step, 'start'); assert.equal(f.controller.state.active, undefined);
   assert.equal(f.controller.state.connection.baseBranch, 'release-baseline');
+  assert.equal(f.controller.state.library.length, 0, 'returning to Start does not scan releases');
+  await f.controller.dispatch({ action: 'loadSkills' });
   assert.equal(f.controller.state.library.length, 1);
 });

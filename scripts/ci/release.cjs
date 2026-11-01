@@ -53,9 +53,40 @@ function inspectVsix(bytes) {
     assert(!(value.Id === 'Microsoft.VisualStudio.Code.PreRelease' && value.Value?.toLowerCase() === 'true'), 'Local beta/pre-release VSIX cannot use the stable publisher');
   }
   for (const item of zip.getEntries()) {
-    assert(!/^extension\/(?:\.git\/|\.vscode\/|\.skilljetty-beta\/|\.skill-workbench\/|workbench\/|releases\/|AGENTS\.md$|azure-pipelines\.yml$|scripts\/ci\/|docs\/delivery\.md$)/i.test(item.entryName), 'VSIX contains excluded development or user state');
+    assert(!/^extension\/(?:\.git\/|\.vscode\/|\.vscode-test\/|\.skilljetty-(?:beta|prerelease)\/|\.skill-workbench\/|workbench\/|releases\/|dist\/|src\/|test\/|AGENTS\.md$|azure-pipelines(?:-beta)?\.yml$|scripts\/ci\/|scripts\/benchmark-|docs\/software-team\/|docs\/(?:beta-|prerelease-)?delivery\.md$)/i.test(item.entryName), 'VSIX contains excluded development or user state');
+    assert(!/\.log$/i.test(item.entryName), 'VSIX contains a log file');
   }
   return manifest;
+}
+function payloadInventory(bytes) {
+  function canonical(value) {
+    return Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object'
+      ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+  }
+  const names = new Set();
+  return new AdmZip(bytes).getEntries().filter(entry => !entry.isDirectory && entry.entryName.startsWith('extension/')).map(entry => {
+    assert(!names.has(entry.entryName), 'Duplicate installed payload path'); names.add(entry.entryName);
+    let content = entry.getData();
+    if (entry.entryName === 'extension/package.json') {
+      const manifest = JSON.parse(content.toString('utf8')); delete manifest.__metadata;
+      content = Buffer.from(JSON.stringify(canonical(manifest)));
+    }
+    return { path: entry.entryName, sha256: sha256(content) };
+  }).sort((a, b) => a.path.localeCompare(b.path, 'en'));
+}
+function verifyPublicPayload(expectedBytes, publicBytes) {
+  const expected = inspectVsix(expectedBytes), actual = inspectVsix(publicBytes);
+  assert(actual.version === expected.version, 'Public version differs from reviewed production artifact');
+  assert(JSON.stringify(payloadInventory(expectedBytes)) === JSON.stringify(payloadInventory(publicBytes)), 'Public installed payload differs from reviewed production artifact');
+  return { publicSha256: sha256(publicBytes), exactPackageBytesMatch: sha256(expectedBytes) === sha256(publicBytes), installedPayloadMatches: true };
+}
+async function verifyPublicArtifact(artifact) {
+  const response = await fetch(`https://marketplace.visualstudio.com/_apis/public/gallery/publishers/DavidFarris/vsextensions/skill-builder/${encodeURIComponent(artifact.receipt.version)}/vspackage`, { signal: AbortSignal.timeout(30000) });
+  assert(response.ok, `Public production download returned HTTP ${response.status}`);
+  assert(Number(response.headers.get('content-length') || 0) <= 32 * 1024 * 1024, 'Unexpected public package size');
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert(bytes.length <= 32 * 1024 * 1024, 'Unexpected public package size');
+  return verifyPublicPayload(fs.readFileSync(artifact.packagePath), bytes);
 }
 function verifyArtifact(directory, expected = {}) {
   const receipt = JSON.parse(fs.readFileSync(path.join(directory, 'release.json'), 'utf8'));
@@ -139,8 +170,9 @@ async function main() {
     assert(!marketplaceVersions(metadata).includes(artifact.receipt.version), 'Version is already public; select a new reviewed release version');
     runVsce(['publish', '--packagePath', artifact.packagePath]);
     await waitForPublishedVersion(artifact.receipt.version);
+    console.log(JSON.stringify(await verifyPublicArtifact(artifact)));
     console.log(`Marketplace reports ${ID}@${artifact.receipt.version}. Native critical-action UAT remains a separate acceptance check.`);
   } else throw new Error('Expected prepare, verify, check-gate or publish');
 }
-module.exports = { sha256, inspectVsix, verifyArtifact, hasApproval, marketplaceVersions, waitForPublishedVersion };
+module.exports = { sha256, inspectVsix, verifyArtifact, hasApproval, marketplaceVersions, waitForPublishedVersion, payloadInventory, verifyPublicPayload, verifyPublicArtifact };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

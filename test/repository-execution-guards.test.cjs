@@ -71,9 +71,9 @@ test('managed Git pull disables a configured repository-relative fsmonitor comma
   f.git(f.target, 'add', '.'); f.git(f.target, 'commit', '-m', 'Initial repository');
   fs.appendFileSync(f.config, '[core]\n fsmonitor = node guard-probe.cjs\n');
   const work = path.join(f.root, 'work'); fs.mkdirSync(work);
-  const first = await pullManagedRepository(work, f.target);
+  const first = await pullManagedRepository(work, f.target, undefined, path.join(f.root, 'selected-repository'));
   assert.equal(fs.existsSync(f.marker), false, 'initial checkout/reset/status/pull must not execute a remote script');
-  const second = await pullManagedRepository(work, f.target);
+  const second = await pullManagedRepository(work, f.target, undefined, path.join(f.root, 'selected-repository'));
   assert.equal(second.path, first.path);
   assert.equal(second.commit, first.commit);
   assert.equal(fs.existsSync(f.marker), false, 'pulling the existing checkout must not execute a remote script');

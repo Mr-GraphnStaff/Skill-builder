@@ -61,7 +61,7 @@ test('native workbench exposes named keyboard-addressable actions and nested bin
   const drafts = top.find(node => node.group === 'drafts');
   const skill = (await f.provider.getChildren(drafts)).find(node => node.kind === 'skill');
   const children = await f.provider.getChildren(skill);
-  assert.deepEqual(children.slice(0, 3).map(node => node.label), ['Edit skill', 'Check skill', 'Publish…']);
+  assert.deepEqual(children.slice(0, 3).map(node => node.label), ['Edit skill', 'Sanity check', 'Publish…']);
   const tools = children.find(node => node.kind === 'tools');
   assert.ok((await f.provider.getChildren(tools)).some(node => node.label === 'Playground — manual test cases'));
   const assets = children.find(node => node.label === 'assets');

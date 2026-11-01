@@ -137,12 +137,12 @@ test('managed pull preserves an ignored local file when the remote starts tracki
   fs.writeFileSync(path.join(remote, '.gitignore'), 'notes/personal.local\n');
   fs.writeFileSync(path.join(remote, 'notes/SKILL.md'), skillText);
   git(remote, 'add', '.'); git(remote, 'commit', '-m', 'Ignore local work');
-  const checkout = await pullManagedRepository(f.root, remote);
+  const checkout = await pullManagedRepository(f.root, remote, undefined, path.join(f.base, 'selected-repository'));
   const localFile = path.join(checkout.path, 'notes/personal.local');
   fs.writeFileSync(localFile, 'Only local content.');
   fs.writeFileSync(path.join(remote, 'notes/personal.local'), 'Remote content.');
   git(remote, 'add', '-f', 'notes/personal.local'); git(remote, 'commit', '-m', 'Track formerly ignored path');
-  await assert.rejects(pullManagedRepository(f.root, remote), /local changes|ignored/);
+  await assert.rejects(pullManagedRepository(f.root, remote, undefined, path.join(f.base, 'selected-repository')), /local changes|ignored/);
   assert.equal(fs.readFileSync(localFile, 'utf8'), 'Only local content.');
   assert.equal(git(checkout.path, 'rev-parse', 'HEAD'), checkout.commit);
 });

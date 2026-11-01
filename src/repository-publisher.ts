@@ -4,6 +4,8 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
+import { currentWorkbenchMetrics, emitWorkbenchMetric } from './workbench-metrics.js';
 import { verifySkillRelease } from './skill-workbench.js';
 
 const execute = promisify(execFile);
@@ -58,7 +60,7 @@ export function runPublisherProcess(command: string, args: string[], options: { 
     child.on('close', (code, signal) => {
       void termination.then(() => {
         if (stopReason) done(new Error(stopReason));
-        else if (code !== 0) done(new Error(`Command exited with code ${String(code)}${signal ? ` (${signal})` : ''}.`));
+        else if (code !== 0) done(Object.assign(new Error(`Command exited with code ${String(code)}${signal ? ` (${signal})` : ''}.`), { exitCode: code }));
         else done();
       });
     });
@@ -101,17 +103,35 @@ export type PublishPreview = {
 };
 
 async function git(cwd: string, args: string[]): Promise<string> {
+  const started = performance.now();
+  let outcome: 'ok' | 'error' = 'error', timedOut = false, exitCode: number | undefined;
+  // Skip Git global options and their values. Never log arguments, URLs or output.
+  let index = 0;
+  while (index < args.length && args[index].startsWith('-')) index += ['-c', '-C', '--git-dir', '--work-tree'].includes(args[index]) ? 2 : 1;
+  const operation = args[index] ?? 'other';
   try {
     const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', ...args], {
       cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
-    return result.stdout;
+    outcome = 'ok'; exitCode = 0; return result.stdout;
   } catch (error) {
-    const detail = error as Error & { stderr?: string };
+    const detail = error as Error & { stderr?: string; exitCode?: number };
+    exitCode = detail.exitCode;
+    timedOut = /timed out/i.test(detail.message);
     // Git errors can include remote URLs containing credentials.
     const message = `${detail.message}${detail.stderr ? `\n${detail.stderr}` : ''}`.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, '$1[redacted]@');
     throw new Error(`Git operation failed: ${message.trim()}`);
+  } finally {
+    emitWorkbenchMetric(currentWorkbenchMetrics(), { stage: ['ls-remote', 'fetch', 'pull', 'push', 'clone'].includes(operation) ? 'gitRemote' : 'gitLocal', operation, durationMs: performance.now() - started, outcome, timedOut, exitCode });
   }
+}
+
+async function githubCli(args: string[], options: { cwd: string; encoding: 'utf8'; windowsHide: boolean; timeout: number; maxBuffer: number }) {
+  const started = performance.now(); let outcome: 'ok' | 'error' = 'error', exitCode: number | undefined, timedOut = false;
+  const operation = args[0] === 'api' ? 'account' : args[1] === 'list' ? 'repositoryList' : args[1] === 'create' ? 'repositoryCreate' : 'repositoryView';
+  try { const result = await execute('gh', args, options); outcome = 'ok'; exitCode = 0; return result; }
+  catch (error) { const detail = error as { code?: unknown; killed?: boolean }; if (typeof detail.code === 'number') exitCode = detail.code; timedOut = detail.killed === true; throw error; }
+  finally { emitWorkbenchMetric(currentWorkbenchMetrics(), { stage: 'githubCli', operation, durationMs: performance.now() - started, outcome, exitCode, timedOut }); }
 }
 
 export async function listRepositoryChoices(workspaceRoot: string): Promise<RepositoryChoice[]> {
@@ -125,7 +145,7 @@ export async function listRepositoryChoices(workspaceRoot: string): Promise<Repo
     }
   } catch { /* A new workbench need not already be a Git repository. */ }
   try {
-    const result = await execute('gh', ['repo', 'list', '--limit', '100', '--json', 'nameWithOwner,url'], {
+    const result = await githubCli(['repo', 'list', '--limit', '100', '--json', 'nameWithOwner,url'], {
       cwd: workspaceRoot, encoding: 'utf8', windowsHide: true, timeout: 15_000,
       maxBuffer: 2 * 1024 * 1024
     });
@@ -149,17 +169,17 @@ export async function createGitHubRepository(
   }
   if (visibility !== 'private' && visibility !== 'public') throw new Error('Choose private or public repository visibility.');
   const options = { cwd: workspaceRoot, encoding: 'utf8' as const, windowsHide: true, timeout: 60_000, maxBuffer: 2 * 1024 * 1024 };
-  const account = await execute('gh', ['api', 'user', '--jq', '.login'], options);
+  const account = await githubCli(['api', 'user', '--jq', '.login'], options);
   const owner = account.stdout.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(owner)) throw new Error('GitHub CLI did not return a signed-in account. Sign in using your normal GitHub CLI setup.');
   const nameWithOwner = `${owner}/${name}`;
   try {
-    await execute('gh', ['repo', 'create', nameWithOwner, `--${visibility}`, '--add-readme', '--description', 'Versioned skill packages, editable source and changelogs.'], options);
+    await githubCli(['repo', 'create', nameWithOwner, `--${visibility}`, '--add-readme', '--description', 'Versioned skill packages, editable source and changelogs.'], options);
   } catch {
     // Do not retry a possibly completed external creation automatically.
     throw new Error(`Repository creation did not confirm success. Check ${nameWithOwner} in GitHub before retrying, or select it from existing repositories.`);
   }
-  const metadata = await execute('gh', ['repo', 'view', nameWithOwner, '--json', 'nameWithOwner,url,visibility,defaultBranchRef'], options);
+  const metadata = await githubCli(['repo', 'view', nameWithOwner, '--json', 'nameWithOwner,url,visibility,defaultBranchRef'], options);
   const repo = JSON.parse(metadata.stdout);
   if (repo.nameWithOwner?.toLowerCase() !== nameWithOwner.toLowerCase()
       || typeof repo.url !== 'string' || repo.visibility?.toLowerCase() !== visibility
@@ -219,7 +239,8 @@ async function verifyGitBlobs(preview: PublishPreview, committed = false): Promi
 
 /** Prepare a reviewable commit in the destination repository's own history. */
 export async function prepareRepositoryPublish(
-  releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false
+  releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false,
+  options: { localPath?: string } = {}
 ): Promise<PublishPreview> {
   report(onProgress, 'Validating the prepared release.');
   validateRepository(repository);
@@ -241,8 +262,24 @@ export async function prepareRepositoryPublish(
     const emptyHooks = path.join(temp, 'empty-hooks');
     await fs.mkdir(emptyTemplate); await fs.mkdir(emptyHooks);
     await git(temp, ['check-ref-format', '--branch', baseBranch]);
-    report(onProgress, 'Downloading the destination repository; this operation has a 120-second deadline.');
-    await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
+    if (options.localPath) {
+      // Reuse downloaded objects without changing the author's files, index,
+      // branch, configuration or hooks. No alternates/hardlinks tie the owned
+      // publication checkout to subsequent GC or edits in the selected repo.
+      const { validateProjectRepositoryForPublish } = await import('./managed-repository.js');
+      const local = await validateProjectRepositoryForPublish(repository, options.localPath);
+      report(onProgress, 'Reusing your local repository to prepare an isolated submission…');
+      await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--', local, checkoutPath]);
+      await git(checkoutPath, ['remote', 'set-url', 'origin', repository]);
+      report(onProgress, 'Fetching the latest destination branch; existing downloaded data is reused…');
+      await git(checkoutPath, ['fetch', '--no-tags', '--refmap=', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
+      // Point HEAD at the fetched base without checking out content before
+      // the conversion/filter overrides below have been installed.
+      await git(checkoutPath, ['update-ref', '--no-deref', 'HEAD', `refs/remotes/origin/${baseBranch}`]);
+    } else {
+      report(onProgress, 'Downloading the destination repository for this submission…');
+      await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
+    }
     report(onProgress, 'Preparing the destination checkout.');
     // Prevent user/repository filters and line-ending conversions from running or
     // altering a release. info/attributes takes precedence over tracked attributes.
@@ -258,7 +295,7 @@ export async function prepareRepositoryPublish(
       const advertised = await git(checkoutPath, ['ls-remote', '--heads', 'origin', `refs/heads/${branch}`]);
       if (advertised.trim()) {
         await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${branch}:refs/remotes/origin/skilljetty-upload`]);
-        await git(checkoutPath, ['switch', '-c', branch, 'refs/remotes/origin/skilljetty-upload']);
+        await git(checkoutPath, ['switch', '-C', branch, 'refs/remotes/origin/skilljetty-upload']);
         // Pull the latest base into an existing review branch before replacing
         // the selected version. A conflict stops before any remote write.
         await git(checkoutPath, ['fetch', '--no-tags', 'origin', `refs/heads/${baseBranch}`]);
@@ -271,8 +308,8 @@ export async function prepareRepositoryPublish(
           // conflicts are resolved by the incoming copy; other conflicts stop.
         }
         pulledPaths = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(file => file && !file.startsWith(`${relativePath}/`)).sort();
-      } else await git(checkoutPath, ['switch', '-c', branch]);
-    } else await git(checkoutPath, ['switch', '-c', branch]);
+      } else await git(checkoutPath, ['switch', '-C', branch]);
+    } else await git(checkoutPath, ['switch', '-C', branch]);
     const destination = path.join(checkoutPath, relativePath);
     // The target path must not traverse a symlink already present in the target repository.
     for (const part of [manifest.skillName]) {
@@ -327,7 +364,9 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   // Retrying an unsuccessful push reuses the existing commit instead of duplicating it.
   if (staged.length > 0) {
     if (JSON.stringify(staged) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Unexpected staged files; publication stopped.');
-    await verifyGitBlobs(preview);
+    // This exact index tree was byte-verified during preparation. Its immutable
+    // identity above plus the fresh file inventory avoids rereading every file
+    // merely to prove the same indexed blob identities.
     const emptyHooks = path.join(path.dirname(preview.checkoutPath), 'empty-hooks');
     await fs.mkdir(emptyHooks, { recursive: true });
     report(onProgress, 'Creating the release commit.');
@@ -336,7 +375,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   const commit = (await git(preview.checkoutPath, ['rev-parse', 'HEAD'])).trim();
   const actual = preview.changedFiles?.length === 0 ? [] : (await git(preview.checkoutPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', `${commit}^`, commit])).split('\0').filter(Boolean).sort();
   if (preview.changedFiles?.length !== 0 && JSON.stringify(actual) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Commit contents differ from the reviewed release.');
-  await verifyGitBlobs(preview, true);
+  if ((await git(preview.checkoutPath, ['rev-parse', 'HEAD^{tree}'])).trim() !== expected.indexTree) throw new Error('Committed tree differs from the reviewed release.');
   report(onProgress, 'Pushing the release branch to the selected repository.');
   await git(preview.checkoutPath, ['push', '--porcelain', 'origin', `HEAD:refs/heads/${preview.branch}`]);
   report(onProgress, 'Confirming the published commit on the remote repository.');

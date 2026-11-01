@@ -1,0 +1,119 @@
+# The local-beta branch retains its own build-only definition at this path.
+trigger:
+  branches:
+    include: [codex/public-prerelease]
+pr: none
+
+parameters:
+- name: publishMarketplace
+  displayName: Publish reviewed public pre-release VSIX
+  type: boolean
+  default: false
+- name: reconcilePublishedBuildId
+  displayName: Read-only verification of an original published build ID
+  type: string
+  default: ''
+
+pool:
+  vmImage: ubuntu-24.04
+
+stages:
+- stage: Build
+  condition: and(succeeded(), ${{ eq(parameters.reconcilePublishedBuildId, '') }})
+  jobs:
+  - job: PublicPreRelease
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/codex/public-prerelease')
+    timeoutInMinutes: 25
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: false
+    - task: UseNode@1
+      inputs:
+        version: 22.x
+    - script: npm ci
+      displayName: Install locked dependencies
+    - script: node scripts/ci/prerelease-release.cjs check-gate
+      displayName: Verify readable public pre-release approval configuration
+      condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+      env:
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+    - script: npm test
+      displayName: Compile and test promoted public identity
+    - script: npm audit --omit=dev
+      displayName: Audit production dependencies
+    - script: npm audit --audit-level=high
+      displayName: Audit packaging and publishing tools
+    - script: npm run ci:prerelease-package
+      displayName: Package and verify public pre-release VSIX
+    - publish: dist/prerelease-ci
+      artifact: skilljetty-prerelease-vsix
+      displayName: Retain reviewed public pre-release VSIX and receipt
+
+- stage: Publish
+  dependsOn: Build
+  condition: and(succeeded(), ${{ eq(parameters.reconcilePublishedBuildId, '') }}, ${{ eq(parameters.publishMarketplace, true) }}, eq(variables['Build.SourceBranch'], 'refs/heads/codex/public-prerelease'), eq(variables['Build.Reason'], 'Manual'))
+  jobs:
+  - deployment: PublicPreReleaseMarketplace
+    environment: skilljetty-marketplace-prerelease
+    timeoutInMinutes: 15
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - download: none
+          - checkout: self
+            clean: true
+            persistCredentials: false
+          - task: UseNode@1
+            inputs:
+              version: 22.x
+          - script: npm ci --ignore-scripts
+            displayName: Install locked verifier and publisher
+          - download: current
+            artifact: skilljetty-prerelease-vsix
+          - script: node scripts/ci/prerelease-release.cjs publish
+            displayName: Verify exact artifact and gate; publish once and verify public payload
+            env:
+              PRERELEASE_ARTIFACT_DIR: $(Pipeline.Workspace)/skilljetty-prerelease-vsix
+              SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+              VSCE_PAT: $(VSCE_PAT)
+
+- stage: Reconcile
+  dependsOn: []
+  condition: and(${{ ne(parameters.reconcilePublishedBuildId, '') }}, eq(variables['Build.SourceBranch'], 'refs/heads/codex/public-prerelease'), eq(variables['Build.Reason'], 'Manual'))
+  jobs:
+  - job: VerifyOriginalPublishedArtifact
+    timeoutInMinutes: 15
+    steps:
+    - checkout: self
+      clean: true
+      persistCredentials: false
+    - task: UseNode@1
+      inputs:
+        version: 22.x
+    - script: npm ci --ignore-scripts
+      displayName: Install locked read-only verifier dependencies
+    - script: node --test test/prerelease-release-pipeline.test.cjs test/release-pipeline.test.cjs
+      displayName: Test current verification and source-binding code
+    - script: node scripts/ci/prerelease-release.cjs check-reconcile-request
+      displayName: Validate original build ID before artifact download
+      env:
+        RECONCILE_PUBLISHED_BUILD_ID: ${{ parameters.reconcilePublishedBuildId }}
+    - task: DownloadPipelineArtifact@2
+      displayName: Download exact original public pre-release artifact
+      inputs:
+        buildType: specific
+        project: $(System.TeamProjectId)
+        definition: $(System.DefinitionId)
+        buildVersionToDownload: specific
+        pipelineId: ${{ parameters.reconcilePublishedBuildId }}
+        allowFailedBuilds: true
+        artifactName: skilljetty-prerelease-vsix
+        targetPath: $(Pipeline.Workspace)/original-prerelease
+    - script: node scripts/ci/prerelease-release.cjs reconcile-public
+      displayName: Verify original source, validation visibility and exact public payload without upload
+      env:
+        PRERELEASE_ARTIFACT_DIR: $(Pipeline.Workspace)/original-prerelease
+        RECONCILE_PUBLISHED_BUILD_ID: ${{ parameters.reconcilePublishedBuildId }}
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)

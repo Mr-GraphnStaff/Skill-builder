@@ -53,12 +53,20 @@ test('startup sends no automatic skill load and explicit load shows immediate ac
   assert.match(h.posted[0].label, /Loading and checking saved skills/);
 });
 
+test('open by path sends the explicit path directly as a processing action', () => {
+  const h = harness(); h.submitPath();
+  assert.equal(h.posted.length, 1);
+  assert.equal(h.posted[0].message.action, 'openPackagePath');
+  assert.equal(h.posted[0].message.payload.path, 'C:\\Downloads\\example.skill');
+  assert.equal(h.posted[0].spinning, true);
+  assert.equal(h.elements.get('operation-status').dataset.waitingForInput, 'false');
+});
 
 test('step clicks show specific feedback before host work and reject a duplicate request', () => {
   const h = harness(); h.click('check'); h.click('check');
   assert.equal(h.posted.length, 1);
   assert.equal(h.posted[0].message.action, 'check');
-  assert.equal(h.posted[0].label, 'Checking your skill files…');
+  assert.equal(h.posted[0].label, 'Running a structural sanity check…');
   assert.equal(h.posted[0].spinning, true);
   assert.equal(h.main.attributes['aria-busy'], 'true');
   assert.equal(h.buttons[0].disabled, true);
@@ -113,6 +121,13 @@ test('an explicit human-input phase stops an already-running processing delay wi
   assert.equal(h.elements.get('progress-message').textContent, 'A decision is needed.');
 });
 
+test('initial human-input render has no processing indicator or slow warning', () => {
+  const h = harness({ busy: true, waitingForInput: true, progress: 'Choose a skill package.' });
+  assert.equal(h.elements.get('operation-indicator').hidden, true);
+  assert.equal(h.timers.size, 0);
+  assert.match(h.html, /data-working="false" data-waiting-for-input="true"/);
+  assert.match(h.html, /<progress[^>]*hidden/);
+});
 
 test('incremental host stages and completion use inert text without replacing editor content', () => {
   const h = harness(); h.click('savePackage');
@@ -153,7 +168,7 @@ test('successful autosave resumes exactly one queued action with its own progres
   h.receive({ type: 'saved' });
   assert.equal(h.posted.length, 2);
   assert.equal(h.posted[1].message.action, 'check');
-  assert.equal(h.posted[1].label, 'Checking your skill files…');
+  assert.equal(h.posted[1].label, 'Running a structural sanity check…');
   assert.equal(h.posted[1].spinning, true);
 });
 
@@ -182,4 +197,15 @@ test('elapsed time survives stage updates and host silence is distinguished from
   assert.equal(h.elements.get('progress-message').textContent, 'Finished in 17.0 seconds.');
   assert.equal(h.elements.get('activity-details').textContent, '');
   assert.equal(h.timers.size, 0);
+});
+
+
+test('elapsed processing time excludes time spent choosing a package', () => {
+  const h = harness(); h.click('openPackage');
+  h.receive({ type: 'progress', message: 'Choose a package.', waitingForInput: true });
+  h.advance(65000);
+  h.receive({ type: 'progress', message: 'Opening the selected package.', waitingForInput: false });
+  assert.match(h.elements.get('activity-details').textContent, /^0s elapsed/);
+  h.advance(2000); h.fire(1000);
+  assert.match(h.elements.get('activity-details').textContent, /^2s elapsed/);
 });
