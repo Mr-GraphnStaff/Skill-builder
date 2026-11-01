@@ -1,8 +1,10 @@
 # SkillJetty — Agent Skills Studio
 
+[User guides, channel status and release notes](https://github.com/Mr-GraphnStaff/Skill-builder/wiki)
+
 Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-Release **0.12.0** promotes the tested preview workflow to stable. Stable uses the work folder you select and your configured stable directories. Preview work remains separate beneath `.skilljetty-prerelease`; switching channels does not automatically migrate drafts, history, packages or repository connections. Import a package explicitly when you want to copy a skill between channels.
+Release **0.12.1** includes the tested stable workflow and fixes a false publication mismatch when unchanged files move. Stable uses the work folder you select and your configured stable directories. Preview work remains separate beneath `.skilljetty-prerelease`; switching channels does not automatically migrate drafts, history, packages or repository connections. Import a package explicitly when you want to copy a skill between channels.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -16,7 +18,7 @@ Activity acknowledges clicks and explains what is happening. Each new skill star
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. Confirm the **Release 0.12.0** descriptor. For troubleshooting, run **SkillJetty: Show Performance Log** from the Command Palette; production keeps timing diagnostics without a workbench log button. Use a separate VS Code profile when evaluating the preview alongside stable.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. Confirm the **Release 0.12.1** descriptor. For troubleshooting, run **SkillJetty: Show Performance Log** from the Command Palette; production keeps timing diagnostics without a workbench log button. Use a separate VS Code profile when evaluating the preview alongside stable.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
