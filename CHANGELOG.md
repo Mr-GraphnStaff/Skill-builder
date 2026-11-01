@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.1 — 2026-11-01 (bug fix)
+
+- Fix a false "Commit contents differ from the reviewed release" failure when replacing a version moves unchanged files. Compare literal changed paths consistently before and after the commit, independent of Git rename settings.
+- Preserve file inventory, index tree, committed tree and outside-path protections; no change to automatic merge behavior.
+
 ## 0.12.0 — 2026-11-01 (production)
 
 - Promote the tested 0.11.13 workflow: detailed Activity and focus feedback, per-skill history, structural Sanity check, repository data reuse and fewer repeated release checks.

@@ -80,6 +80,39 @@ test('replacement does not resolve conflicts outside the selected version or mut
   assert.equal(fs.readFileSync(path.join(f.skill.sourcePath, 'SKILL.md'), 'utf8'), skillText);
 });
 
+for (const renameMode of ['true', 'false', 'copies']) {
+test(`replacement can move identical content with diff.renames=${renameMode}`, async t => {
+  const f = fixture(t); commitIdentity(t);
+  const configKeys = ['GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0'];
+  const previousConfig = Object.fromEntries(configKeys.map(key => [key, process.env[key]]));
+  Object.assign(process.env, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'diff.renames', GIT_CONFIG_VALUE_0: renameMode });
+  t.after(() => { for (const key of configKeys) { if (previousConfig[key] === undefined) delete process.env[key]; else process.env[key] = previousConfig[key]; } });
+  const target = path.join(f.base, 'renamed-target'); fs.mkdirSync(target);
+  git(target, 'init', '-b', 'main');
+  git(target, 'config', 'user.name', 'Independent QA');
+  git(target, 'config', 'user.email', 'qa@example.invalid');
+  fs.mkdirSync(path.join(target, 'sample/1.0.0'), { recursive: true });
+  fs.writeFileSync(path.join(target, 'sample/1.0.0/old-SKILL.md'), skillText);
+  fs.writeFileSync(path.join(target, 'outside.txt'), 'Unrelated content.\n');
+  git(target, 'add', '.'); git(target, 'commit', '-m', 'Previous layout');
+  const baseHead = git(target, 'rev-parse', 'HEAD');
+  const remote = path.join(f.base, 'renamed-target.git');
+  git(f.base, 'clone', '--bare', target, remote);
+  let preview;
+  try {
+    preview = await publisher.prepareRepositoryPublish(f.release.directory, remote, 'main', undefined, true);
+    assert.ok(preview.changedFiles.includes('sample/1.0.0/old-SKILL.md'));
+    assert.ok(preview.changedFiles.includes('sample/1.0.0/source/sample/SKILL.md'));
+    const result = await publisher.pushPreparedRelease(preview);
+    assert.equal(git(remote, 'show', `${result.commit}:sample/1.0.0/source/sample/SKILL.md`), skillText.trim());
+    assert.equal(git(remote, 'show', `${result.commit}:outside.txt`), 'Unrelated content.');
+    assert.equal(git(remote, 'rev-parse', 'refs/heads/main'), baseHead);
+    assert.equal(git(remote, 'rev-parse', `refs/heads/${result.branch}`), result.commit);
+    assert.throws(() => git(remote, 'cat-file', '-e', `${result.commit}:sample/1.0.0/old-SKILL.md`));
+  } finally { if (preview) await publisher.disposePublishPreview(preview); }
+});
+}
+
 function session(root, content) {
   const folder = path.join(root, 'workbench/sample'); fs.mkdirSync(folder, { recursive: true });
   fs.writeFileSync(path.join(folder, 'session-note.txt'), content);
