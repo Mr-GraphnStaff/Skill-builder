@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "SkillJetty — Agent Skills Studio",
   "description": "Create, edit, version and publish portable Agent Skills with SkillJetty by DAF-TECH. Build it. Version it. Ship it.",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -53,6 +53,31 @@
       {
         "command": "skillBuilder.showPerformanceLog",
         "title": "SkillJetty (Pre-release): Show Performance Log"
+      },
+      {
+        "command": "skillBuilder.openSettings",
+        "title": "SkillJetty: Open Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "skillBuilder.connectGitHub",
+        "title": "SkillJetty: Connect GitHub Account"
+      },
+      {
+        "command": "skillBuilder.verifyRepository",
+        "title": "SkillJetty: Verify Skills Repository"
+      },
+      {
+        "command": "skillBuilder.pullRepository",
+        "title": "SkillJetty: Pull Skills Repository"
+      },
+      {
+        "command": "skillBuilder.openRepositorySkill",
+        "title": "SkillJetty: Open Skill from Repository"
+      },
+      {
+        "command": "skillBuilder.createRepository",
+        "title": "SkillJetty: Create GitHub Repository"
       }
     ],
     "configuration": {
@@ -61,22 +86,41 @@
         "skillBuilder.skillsDirectory": {
           "type": "string",
           "default": "skills",
-          "description": "Relative subdirectory inside the isolated prerelease work folder. Absolute or escaping inherited values use the safe default."
+          "order": 100,
+          "description": "Advanced legacy integration: discovery directory, confined to the preview work folder. This does not move guided drafts, which use the work folder's skills directory."
         },
         "skillBuilder.projectRoot": {
           "type": "string",
           "default": "",
-          "description": "Optional work folder. Public pre-release work is isolated in a .skilljetty-prerelease child folder; stable data is not migrated."
+          "order": 10,
+          "scope": "window",
+          "description": "Work folder for drafts and saved local versions, not the local sharing repository. Leave blank to use the opened folder. Preview uses a .skilljetty-prerelease child; existing data is not moved. After changing folders, save your draft and reopen SkillJetty."
+        },
+        "skillBuilder.prerelease.repositoryUrl": {
+          "type": "string",
+          "default": "",
+          "order": 20,
+          "scope": "window",
+          "description": "Sharing repository address for this pre-release, for example https://github.com/your-org/skills.git. Use Workspace settings for this project. An explicitly empty value disconnects sharing; Reset preserves an existing saved connection. The default branch is detected when you verify or submit. Use VS Code Accounts or SkillJetty: Connect GitHub Account to sign in. No credentials belong here."
+        },
+        "skillBuilder.prerelease.localRepositoryPath": {
+          "type": "string",
+          "default": "",
+          "order": 30,
+          "scope": "window",
+          "description": "Absolute path to the local Git sharing repository, for example C:/AI-Work/Skills-Repository. Choose its top folder containing .git, not .git itself or your draft work folder. An explicitly empty value disables local reuse; upload can use a temporary download. Verify, Pull and Open Skill from Repository are separate SkillJetty commands. Saving this value does not clone or pull."
         },
         "skillBuilder.distDirectory": {
           "type": "string",
           "default": "dist",
-          "description": "Relative subdirectory inside the isolated prerelease work folder. Absolute or escaping inherited values use the safe default."
+          "order": 110,
+          "description": "Advanced legacy integration: ZIP-export directory, confined to the preview work folder. Guided .skill packages instead use releases/<skill>/<version>; this setting does not relocate them."
         },
         "skillBuilder.claudeCodeSkillsDirectory": {
           "type": "string",
           "default": "",
-          "description": "Directory used by 'Sync to Claude Code'. Leave empty to use ~/.claude/skills."
+          "order": 120,
+          "description": "Advanced legacy integration: destination used by Sync to Claude Code. Leave empty for ~/.claude/skills. This does not select a Git repository or install packages from the current guided workflow."
         }
       }
     },
@@ -110,7 +154,7 @@
     "test": "npm run compile && node --test test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npm run package:pre-release",
-    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.13.0.vsix",
+    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.13.1.vsix",
     "ci:package": "node scripts/ci/release.cjs prepare",
     "ci:beta-package": "node scripts/ci/beta-release.cjs prepare",
     "import-skill": "node scripts/import-skill.mjs",

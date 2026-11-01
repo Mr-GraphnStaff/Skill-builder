@@ -21,15 +21,15 @@ function fixture(t) {
   git(remote, 'add', '.'); git(remote, 'commit', '-m', 'Initial skill');
   return { base, root, remote };
 }
-test('Git pull is available for a registered repository before a skill is opened', () => {
-  const state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable', connection: { repository: 'https://github.com/example/skills.git', baseBranch: 'trunk' } };
+test('registered repository is read-only with ordinary skill opening and native settings access', () => {
+  const state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable', connection: { repository: 'https://github.com/example/skills.git', localPath: 'P:/Skills', baseBranch: 'trunk' } };
   const html = renderGuidedWorkbench(state, 'managedRepositoryNonce123');
-  assert.match(html, /data-action="pullRepository"[^>]*>Git pull<\/button>/);
+  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/skills.git<\/dd>/);
+  assert.match(html, /data-action="openSettings"/);
   assert.match(html, /data-action="openRepositorySkill"/);
-  assert.match(html, /repository actions are optional before starting skill work/i);
-  assert.match(html, /id="pull-repository"/);
   assert.match(html, /id="open-repository-skill"/);
-  assert.doesNotMatch(renderGuidedWorkbench({ ...state, connection: undefined }, 'managedRepositoryNonce123'), /data-action="pullRepository"/);
+  assert.doesNotMatch(html, /data-action="pullRepository"|data-action="verifyRepository"|data-action="setRepositoryFolder"/);
+  assert.doesNotMatch(renderGuidedWorkbench({ ...state, connection: undefined }, 'managedRepositoryNonce123'), /data-action="openRepositorySkill"/);
 });
 test('managed Git pull downloads latest skills before work, then fast-forwards and protects local edits', async t => {
   const f = fixture(t);

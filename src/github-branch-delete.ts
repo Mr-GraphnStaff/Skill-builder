@@ -18,7 +18,7 @@ async function noLinks(target: string): Promise<void> {
 }
 /** Only the recorded head may be deleted. Git compares the lease atomically on
  * the server; an intervening push is retained even after the final metadata read. */
-export async function deleteBranchWithLease(workspaceRoot: string, context: ReviewContext, runner: BranchDeleteRunner = runPublisherProcess): Promise<void> {
+export async function deleteBranchWithLease(workspaceRoot: string, context: ReviewContext, runner: BranchDeleteRunner = runPublisherProcess, beforeWrite?: () => void): Promise<void> {
   const repo = githubRepository(context.repository);
   if (!repo || !safeBranch(context.branch) || !safeBranch(context.baseBranch) || context.branch === context.baseBranch || typeof context.commit !== 'string' || !/^[a-f0-9]{40,64}$/i.test(context.commit)
       || typeof workspaceRoot !== 'string' || !path.isAbsolute(workspaceRoot)) throw new Error('The exact repository, upload branch and commit must be verified before branch cleanup.');
@@ -35,6 +35,7 @@ export async function deleteBranchWithLease(workspaceRoot: string, context: Revi
     const ref = `refs/heads/${context.branch}`;
     // Canonical HTTPS URL has no credentials, executable transport, remote alias
     // or repository-configured push URL. Never add a force flag without this lease.
+    beforeWrite?.();
     await runner('git', [...args, 'push', '--porcelain', `--force-with-lease=${ref}:${context.commit}`, '--', `https://github.com/${repo.fullName}.git`, `:${ref}`], { cwd: bare, timeoutMs: 30_000, env: environment });
   } finally {
     const relative = path.relative(control, path.resolve(temporary));

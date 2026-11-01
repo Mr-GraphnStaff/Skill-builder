@@ -5,6 +5,12 @@
 David Farris has declared a release freeze: bug fixes only, no new features.
 The feature set is frozen after 0.11.12; only bug-fix releases may follow. Preserve this scope in team handoffs;
 the lead decides when the freeze ends and when production promotion proceeds.
+On November 1 the owner explicitly authorized one scoped exception: consolidate
+configuration in VS Code Extension Settings, keep only a read-only workbench
+summary plus gear, and publish this as a new pre-release after finishing the wiki.
+This does not authorize changing production or unrelated features. Preserve
+existing connections, drafts and channel isolation, and verify settings-change
+races at the final Git/GitHub write boundaries before publication.
 The owner's November 1 decision supersedes the earlier diagnostics restriction:
 production retains local recording and its Command Palette command, hides the
 Activity log button, and adds no diagnostics opt-in setting. Keep Activity itself.

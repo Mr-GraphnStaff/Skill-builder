@@ -27,6 +27,10 @@ export type GuidedState = {
   error?: string;
   notice?: string;
   hasWorkspace: boolean;
+  workFolder?: string;
+  configuredRepository?: string;
+  configuredLocalRepository?: string;
+  configurationError?: string;
   connection?: { repository: string; baseBranch: string; localPath?: string };
   repositoryVerification?: RepositoryCheckState;
   repositoryCheckout?: { path: string; branch?: string; commit?: string };
@@ -53,7 +57,7 @@ export type GuidedState = {
   form?: Record<string, string>;
 };
 
-export type GuidedAction = 'ready' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
+export type GuidedAction = 'ready' | 'openSettings' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
   | 'verifyRepository' | 'setRepositoryFolder' | 'pullRepository' | 'openRepositorySkill' | 'showCreate' | 'createSkill' | 'openPackage' | 'openPackagePath' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
   | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage';

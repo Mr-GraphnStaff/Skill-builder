@@ -41,13 +41,13 @@ function remoteIdentity(repository: string): string {
   try { if (new URL(repository).password) throw new Error('Repository credentials must not be embedded in its URL.'); } catch (error) { if (error instanceof Error && error.message.startsWith('Repository credentials')) throw error; }
   return repository.replace(/[\\/]$/, '');
 }
-async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skilljetty-disabled-hooks-${randomUUID()}`)): Promise<string> {
+async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skilljetty-disabled-hooks-${randomUUID()}`), beforeWrite?: () => void): Promise<string> {
   const base = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${hooks}`, '-c', 'submodule.recurse=false'];
   // Metadata/object transport cannot apply worktree clean/smudge filters. Avoid
   // a second Git process for those commands, but discover drivers immediately
   // before every content operation so a newly configured driver is disabled too.
   if (metadataOnlyCommands.has(args[0])) {
-    try { return await repositoryGit(cwd, [...base, ...args]); }
+    try { beforeWrite?.(); return await repositoryGit(cwd, [...base, ...args]); }
     catch (error) {
       if (/spawn git.*ENOENT/i.test(String(error))) throw new Error('Setup required: Git is not installed or is unavailable on PATH. The selected folder was preserved.');
       throw error;
@@ -60,6 +60,7 @@ async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skillje
     if (/dubious ownership|safe\.directory|spawn git/i.test(String(error))) throw error;
   }
   for (const key of new Set(configuration.trim().split(/\r?\n/).filter(Boolean).map(key => key.slice(0, key.lastIndexOf('.'))))) base.push('-c', `${key}.process=`, '-c', `${key}.smudge=`, '-c', `${key}.clean=`, '-c', `${key}.required=false`);
+  beforeWrite?.();
   return repositoryGit(cwd, [...base, ...args]);
 }
 async function advertised(cwd: string, repository: string): Promise<{ branch: string; commit: string }> {
@@ -122,11 +123,11 @@ async function rejectControlPaths(checkout: string, ref: string, run = git): Pro
   if (files.some(isControl)) throw new Error('The remote contains private workbench control paths. Pull stopped to preserve local controls.');
 }
 /** Only the explicit user-selected project folder receives a checkout. */
-export async function pullProjectRepository(workspaceRoot: string, repository: string, localPath: string, progress?: (message: string) => void): Promise<{ path: string; branch: string; commit: string }> {
+export async function pullProjectRepository(workspaceRoot: string, repository: string, localPath: string, progress?: (message: string) => void, beforeWrite?: () => void): Promise<{ path: string; branch: string; commit: string }> {
   const checkout = projectPath(localPath); remoteIdentity(repository); await guard(checkout);
   const runtime = path.join(path.resolve(workspaceRoot), '.skill-workbench', 'git-control'); await guard(runtime);
   const hooks = path.join(runtime, `disabled-hooks-${randomUUID()}`);
-  const run = (cwd: string, args: string[]) => git(cwd, args, hooks);
+  const run = (cwd: string, args: string[]) => git(cwd, args, hooks, ['fetch', 'merge'].includes(args[0]) ? beforeWrite : undefined);
   let entries: string[] = [];
   try { entries = await fs.readdir(checkout); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   if (entries.length && !entries.includes('.git')) throw new Error('Setup required: this nonempty folder is not a Git repository. Its files were preserved.');
@@ -147,7 +148,9 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
         await run(staging, ['reset', '--hard', 'HEAD']);
         await fs.mkdir(checkout, { recursive: true });
         if ((await fs.readdir(checkout)).length) throw new Error('The chosen folder changed while cloning; no files were overwritten.');
-        for (const entry of await fs.readdir(staging)) await renameCloneEntry(path.join(staging, entry), path.join(checkout, entry));
+        const stagedEntries = await fs.readdir(staging);
+        beforeWrite?.();
+        for (const entry of stagedEntries) await renameCloneEntry(path.join(staging, entry), path.join(checkout, entry));
       } finally { await fs.rm(staging, { recursive: true, force: true }); }
     }
     await identity(checkout, repository);
@@ -155,8 +158,10 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
     if (branch !== remote.branch) throw new Error('The local checkout is on a different branch. Preserve changes and switch to the default branch before pulling.');
     if (await dirty(checkout)) throw new Error('The local checkout has local changes or ignored files. Preserve, commit or move them before pulling; your files were kept.');
     progress?.('Checking incoming changes before pulling the selected Skills repository…');
+    beforeWrite?.();
     await run(checkout, ['fetch', '--no-tags', '--refmap=', 'origin', `refs/heads/${branch}`]);
     await rejectControlPaths(checkout, 'FETCH_HEAD', run);
+    beforeWrite?.();
     await run(checkout, ['merge', '--ff-only', '--no-edit', 'FETCH_HEAD']);
     return { path: checkout, branch, commit: (await run(checkout, ['rev-parse', 'HEAD'])).trim() };
   } finally { await fs.rm(hooks, { recursive: true, force: true }); }

@@ -3,9 +3,9 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { renderGuidedWorkbench } = require('../out/guided-workbench-html.js');
 
-function harness({ saved = {}, step = 'edit', activity = [], activityGeneration = 0 } = {}) {
+function harness({ saved = {}, step = 'edit', activity = [], activityGeneration = 0, busy = false } = {}) {
   const state = { step, active: { id: 'sample', name: 'sample' }, hasWorkspace: true,
-    repositories: [], drafts: [], library: [], files: [], target: 'portable', activity, activityGeneration };
+    repositories: [], drafts: [], library: [], files: [], target: 'portable', activity, activityGeneration, busy };
   const html = renderGuidedWorkbench(state, 'activityUiNonce');
   const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)[1];
   const nodes = new Map(), handlers = new Map(), windowHandlers = new Map(), posted = [], timers = new Map();
@@ -13,7 +13,7 @@ function harness({ saved = {}, step = 'edit', activity = [], activityGeneration 
   const document = { activeElement: null,
     getElementById: id => nodes.get(id) ?? null,
     createElement: tag => node(undefined, { tag }),
-    querySelectorAll: selector => selector === 'button' ? [nodes.get('primary-action')] : [],
+    querySelectorAll: selector => selector === 'button' ? [nodes.get('primary-action'), nodes.get('open-settings')] : [],
     querySelector: () => null,
     addEventListener: (name, handler) => handlers.set(name, handler) };
   function node(id, overrides = {}) {
@@ -28,7 +28,8 @@ function harness({ saved = {}, step = 'edit', activity = [], activityGeneration 
     if (id) nodes.set(id, element);
     return element;
   }
-  node('main-content', { dataset: { step, activeId: 'sample', busy: 'false' } });
+  node('main-content', { dataset: { step, activeId: 'sample', busy: String(busy) } });
+  node('open-settings', { dataset: { settings: 'true' } });
   for (const id of ['operation-status', 'operation-indicator', 'progress-message', 'activity-details', 'activity-history', 'client-error', 'save-status', 'retry-save', 'reload-file', 'stepHeading', 'feedback', 'primary-action']) node(id);
   document.activeElement = nodes.get('primary-action');
   vm.runInNewContext(script, { document,
@@ -134,4 +135,16 @@ test('ordinary secondary actions do not move focus to Activity', () => {
   h.click('refreshHistory');
   assert.equal(h.focusCalls.length, before);
   assert.equal(h.scrollCalls(), 0);
+});
+
+test('settings gear opens native settings immediately while busy without changing operation focus', () => {
+  const h = harness({ saved: { step: 'edit', activeId: 'sample' }, busy: true });
+  assert.equal(h.nodes.get('primary-action').disabled, true);
+  assert.equal(h.nodes.get('open-settings').disabled, false);
+  const before = h.focusCalls.length;
+  h.click('openSettings');
+  assert.equal(h.posted.length, 1);
+  assert.deepEqual(Object.keys(h.posted[0]), ['action']);
+  assert.equal(h.posted[0].action, 'openSettings');
+  assert.equal(h.focusCalls.length, before);
 });

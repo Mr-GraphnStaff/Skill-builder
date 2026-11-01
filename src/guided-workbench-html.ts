@@ -38,23 +38,18 @@ function textField(id: string, label: string, value: string, attributes = '', hi
 }
 function stepHelp(state: GuidedState): string {
   const help: Record<GuidedStep, [string, string][]> = {
-    start: [['Create / Open', 'Start a new draft, copy a .skill package, or copy a folder containing SKILL.md. Work happens in your local workspace.'], ['Load skills', 'Read drafts and saved releases when you want to continue earlier work. Unload only clears the displayed list.'], ['Repository settings', 'Connect a sharing destination when you are ready. Creating and editing a draft do not require GitHub sign-in.']],
+    start: [['Create / Open', 'Start a new draft, copy a .skill package, or copy a folder containing SKILL.md. Work happens in your local workspace.'], ['Load skills', 'Read drafts and saved releases when you want to continue earlier work. Unload only clears the displayed list.'], ['Settings', 'Use the gear to open SkillJetty settings in VS Code. Work folders and repository addresses are edited there. Local skill work does not require GitHub sign-in.']],
     edit: [['Save now', 'Changes save automatically after you pause typing. Save now writes the current text immediately.'], ['Intended application', 'Choose the tool you plan to use, or Portable for general Agent Skills. This records your intended use; it does not test compatibility or run a model.'], ['Supporting files', 'Add an existing file or create a text file inside this draft. Binary assets are preserved. Earlier edits lets you restore saved text.'], ['Sanity check', 'Save your current text and check required metadata, skill identity and package structure before preparing a version.']],
     check: [['Errors', 'Correct structural errors before submitting. A Fix button opens the affected file.'], ['Structural notes', 'Read any non-blocking notes about the package structure.'], ['Continue to submission', 'Compare the files and prepare a release summary. Nothing is uploaded by continuing.']],
     publish: [['Release number & notes', 'Review the managed version, file changes and notes. Advanced options let you choose a release number explicitly.'], ['Save package on this computer', 'Prepare a .skill file locally for your chosen tool or manual sharing.'], ['Upload & create PR', 'Upload this version to the connected repository and create a pull request for review. An optional reviewer selection sends that person a notification.'], ['Merge', 'Uploading and creating a PR leave the merge decision with you. Review the exact submission before choosing Merge PR and delete branch.']],
     done: [['Saved locally / Uploaded', 'The receipt tells you which action was verified and links to its result.'], ['Check status', 'Read the latest PR state without uploading the version again.'], ['Continue improving', 'Resume a draft or start from a saved release to prepare your next version.']]
   };
   if (state.publish?.reviewSupported === false) help.publish = help.publish.filter(([label]) => label !== 'Upload & create PR' && label !== 'Merge').concat([['Upload version', 'Upload this version to your connected repository. Complete review in that repository service; this destination has no automatic PR or reviewer action.']]);
-  if (!state.connection) help.publish = help.publish.filter(([label]) => label !== 'Upload & create PR' && label !== 'Merge');
+  if (!state.connection || state.configurationError) help.publish = help.publish.filter(([label]) => label !== 'Upload & create PR' && label !== 'Merge');
   if (state.receipt?.local) help.done = help.done.filter(([label]) => label !== 'Check status');
   if (state.form?.mode === 'create') help.start = [['Skill name', 'Use a short lowercase name with hyphens. This identifies your skill folder.'], ['Purpose & instructions', 'Describe when the skill should be used, then give repeatable steps and an expected result. Create draft opens the complete files for editing.']];
-  if (state.form?.mode === 'repository') help.start = [['Connect repository', 'Register an existing sharing destination. The default branch is detected; no skill is uploaded now.'], ['Find my repositories', 'List repositories available to your signed-in GitHub CLI account. You can also paste an existing repository address.'], ['Create a repository', 'Create a new GitHub repository in your signed-in account. Choose private or public before creating it.']];
   if (state.form?.mode === 'reviews') help.start = [['Refresh PR statuses', 'Read the connected repository’s recorded submissions. Refreshing does not create PRs or merge anything.'], ['Create PR / Check status', 'Create a missing PR for an existing upload, or read its current state. An approved PR still needs a merge.'], ['Merge PR and delete branch', 'Merge the exact uploaded commit after identity checks. The submission branch is removed only after GitHub confirms the merge.']];
   return `<details id="step-help" class="optional step-help" data-persist-open><summary>Help with this step</summary><dl class="action-help">${help[state.step].map(([label, description]) => `<dt>${escape(label)}</dt><dd>${escape(description)}</dd>`).join('')}</dl><p class="hint">While an action runs, its status stays at the top of this workbench. If it asks for a selection, use the VS Code dialog; cancelling returns you to your work.</p></details>`;
-}
-function gitHubAccount(state: GuidedState): string {
-  if (!state.hasWorkspace) return '';
-  return `<section class="account-strip" aria-label="GitHub account"><div><strong>GitHub account</strong><p>${state.githubAccount ? escape(state.githubAccount) : 'Not selected in this workbench'}</p></div>${secondary('connectGitHub', state.githubAccount ? 'Switch GitHub account' : 'Connect GitHub account', 'aria-describedby="github-account-help"')}<p class="hint" id="github-account-help">Optional for local editing. VS Code manages sign-in and asks you to allow repository access. Cancel keeps your draft unchanged. After switching accounts, load eligible reviewers and choose again.</p></section>`;
 }
 function repositoryStatusLabel(status?: string): string {
   switch (status) {
@@ -66,21 +61,18 @@ function repositoryStatusLabel(status?: string): string {
     default: return 'Not yet verified';
   }
 }
-function repositoryTools(state: GuidedState): string {
-  if (!state.hasWorkspace || !state.connection) return '';
-  const local = state.connection.localPath;
-  const unavailable = local ? '' : 'disabled data-unavailable="true"';
+function configurationSummary(state: GuidedState): string {
+  const invalid = !!state.configurationError;
+  // A rejected setting may contain credentials. Show only a previously accepted
+  // connection in that case, never the invalid value or raw error text.
+  const repository = invalid ? state.connection?.repository : state.configuredRepository ?? state.connection?.repository;
+  const local = invalid ? state.connection?.localPath : state.configuredLocalRepository ?? state.connection?.localPath;
   const verification = state.repositoryVerification;
-  return `<section class="card" aria-labelledby="registered-repository-heading"><h2 id="registered-repository-heading">Skills repository</h2>
-    <p><strong>Local project:</strong> <span id="local-repository-path">${escape(local ?? 'Choose the local skills project folder')}</span></p>
-    <p><strong>Registered remote:</strong> ${escape(state.connection.repository)}</p>
-    <p id="repository-verification" role="status" aria-live="polite" data-status="${escape(verification?.status ?? 'setupRequired')}">${escape(verification?.message ?? 'Local and remote repository verification has not completed yet.')}</p>
-    <div class="repository-actions">
-      <div>${secondary('setRepositoryFolder', local ? 'Change local folder…' : 'Choose local project folder…', 'id="set-repository-folder" aria-describedby="repository-folder-help"')}<p class="hint" id="repository-folder-help">Choose the actual local Git repository folder used for sharing. This does not move your drafts.</p></div>
-      <div>${secondary('verifyRepository', 'Verify local and remote', 'id="verify-repository" aria-describedby="repository-verify-help"')}<p class="hint" id="repository-verify-help">Read the Git origin, branch, local changes and remote commit. Verification does not download changes.</p></div>
-      <div>${secondary('pullRepository', 'Git pull', `id="pull-repository" aria-describedby="pull-repository-help" ${unavailable}`)}<p class="hint" id="pull-repository-help">Download incoming changes into the local project folder above. Local changes or setup problems may require attention first.</p></div>
-      <div>${secondary('openRepositorySkill', 'Open skill from project…', `id="open-repository-skill" aria-describedby="repository-open-help" ${unavailable}`)}<p class="hint" id="repository-open-help">Choose a skill from that project to copy into an editable draft.</p></div>
-    </div><p class="hint">These repository actions are optional before starting skill work; local editing remains available.</p></section>`;
+  return `<section id="workbench-configuration" class="configuration-summary" aria-labelledby="configuration-heading" data-configuration-error="${invalid}">
+    <div class="configuration-heading"><h2 id="configuration-heading">Configuration</h2><button type="button" id="open-settings" class="secondary settings-gear" data-action="openSettings" data-settings="true" aria-label="Open SkillJetty settings" title="Open SkillJetty settings" aria-describedby="settings-help"><span aria-hidden="true">⚙</span></button></div>
+    <dl class="configuration-values"><div><dt>Work folder</dt><dd id="active-work-folder">${escape(state.workFolder ?? 'Not selected')}</dd></div><div><dt>Local repository</dt><dd id="local-repository-path">${escape(local || 'Not configured')}</dd></div><div><dt>Repository</dt><dd id="configured-repository">${escape(repository || 'Not configured')}</dd></div>${state.githubAccount ? `<div><dt>GitHub account</dt><dd>${escape(state.githubAccount)}</dd></div>` : ''}<div><dt>Connection</dt><dd id="repository-settings-state">${invalid ? 'Needs attention' : repositoryStatusLabel(verification?.status)}</dd></div></dl>
+    <p id="repository-verification" class="hint" role="status" aria-live="polite" data-status="${invalid ? 'error' : escape(verification?.status ?? 'setupRequired')}">${invalid ? 'Settings need attention. Open SkillJetty settings to correct your folders or repository. Any saved connection shown above is not a verification of the new settings.' : escape(verification?.message ?? 'Repository verification has not completed. Local skill work is available without a repository.')}</p>
+    <p id="settings-help" class="hint">Edit folders and repository settings in VS Code using the gear. Repository actions and GitHub sign-in are available in the Command Palette.</p></section>`;
 }
 function reviewLabel(pr?: PullRequestRecord): string {
   if (!pr) return 'Uploaded — PR not checked';
@@ -120,38 +112,10 @@ function pullRequestPanel(pr: PullRequestRecord | undefined, directory: string |
 }
 function reviews(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
   return { title: 'Check PRs', hint: 'Check the connected repository’s uploaded versions. Refreshing status does not create PRs, request reviews, or merge anything.',
-    html: `${state.connection ? `<p class="connection">Repository: <strong>${escape(state.connection.repository)}</strong></p>` : '<p class="warning">Connect a repository on Start before checking its PRs.</p>'}
+    html: `${state.connection ? `<p class="connection">Repository: <strong>${escape(state.connection.repository)}</strong></p>` : '<p class="warning">Set a repository in SkillJetty settings before checking its PRs.</p>'}
       ${state.reviewQueueError ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(state.reviewQueueError)}</p>` : ''}
       ${(state.reviewQueue ?? []).length ? (state.reviewQueue ?? []).map(item => `<article class="review-item"><h2>${escape(item.skillName)} <span class="hint">${escape(item.version)}</span></h2>${pullRequestPanel(item.pr, item.directory)}</article>`).join('') : '<section class="card"><p>No uploaded versions are listed for this connected repository yet. Versions prepared only on this computer are not PR submissions.</p></section>'}`,
     primary: { label: 'Refresh PR statuses', action: 'checkPullRequests' } };
-}
-function repositoryForm(state: GuidedState, main = false): string {
-  const connection = state.connection;
-  const repository = state.form?.repository ?? connection?.repository ?? '';
-  return `<section class="card repository-card">
-    <h2>${connection ? 'Repository connection' : 'Connect your repository once'}</h2>
-    ${connection ? `<p class="connection"><span aria-hidden="true">✓</span> Connected to <strong>${escape(connection.repository)}</strong></p><p class="hint">The repository’s default branch is detected automatically. Future skills use this connection.</p>` : '<p>Choose where submitted skills should go. You can use an existing repository or create one below.</p>'}
-    <form id="repository-form" action="#" method="post" data-form-action="connectRepository">
-      <fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Connect an existing repository</legend>
-      ${state.repositories.length ? `<div class="field"><label for="repository-choice">Available repositories</label><select id="repository-choice" name="repository-choice"><option value="">Choose a repository or enter its address below</option>${state.repositories.map(item => `<option value="${escape(item.repository)}" ${item.repository === repository ? 'selected' : ''}>${escape(item.label)}</option>`).join('')}</select></div>` : ''}
-      ${field('repository', 'Repository address (required)', repository, 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'Paste a GitHub repository URL or use a detected repository. No branch name is required.')}
-      <div class="button-row">${secondary('discoverRepositories', state.repositories.length ? 'Refresh available repositories' : 'Find my repositories')}${!main ? '<button type="submit" class="secondary">Connect repository</button>' : ''}</div>
-      </fieldset>
-    </form>
-    <details class="optional"><summary>Create a new GitHub repository instead</summary>
-      <form id="create-repository-form" action="#" method="post" data-form-action="createRepository">
-        <fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Create a repository</legend>
-        ${field('repositoryName', 'New repository name (required)', state.form?.repositoryName ?? state.form?.name ?? '', 'required maxlength="100" pattern="[A-Za-z0-9_.\\-]+" autocomplete="off" autocapitalize="off" spellcheck="false"', 'For example Skills. This creates a repository in your signed-in GitHub account.')}
-        <fieldset class="visibility"><legend>Repository visibility</legend>
-          <label for="visibility-private"><input id="visibility-private" type="radio" name="visibility" value="private" ${state.form?.visibility !== 'public' ? 'checked' : ''} data-persist> Private — only people you grant access can see it</label>
-          <label for="visibility-public"><input id="visibility-public" type="radio" name="visibility" value="public" ${state.form?.visibility === 'public' ? 'checked' : ''} data-persist> Public — anyone can see the repository and skills you submit</label>
-        </fieldset>
-        <p class="hint">Creating the repository connects it to this workspace. No skill is uploaded at this step.</p>
-        <button type="submit" class="secondary" id="create-repository-button">Create private repository</button>
-        </fieldset>
-      </form>
-    </details>
-  </section>`;
 }
 function savedWork(state: GuidedState): string {
   if (!state.skillsLoaded) return `<section class="saved-work"><h2>Continue saved work</h2><p>Your saved skills load only when you ask. You can create or open a skill without loading this list.</p>${secondary('loadSkills', 'Load skills', 'aria-describedby="load-skills-help"')}<p class="hint" id="load-skills-help">Reads drafts and checks saved release packages in this workspace. Large collections can take time.</p></section>`;
@@ -166,9 +130,9 @@ function savedWork(state: GuidedState): string {
 }
 function start(state: GuidedState): { title: string; hint: string; html: string; primary?: Primary } {
   if (!state.hasWorkspace) return {
-    title: 'Choose where your work belongs', hint: 'Choose a folder once. SkillJetty keeps your drafts, original packages, and release history together.',
-    html: '<section class="card"><h2>Your skills stay in your workspace</h2><p>Choose an existing folder or an empty folder for this work. You can connect a repository later, before submitting a version.</p></section>',
-    primary: { label: 'Choose workspace folder', action: 'chooseWorkspace' }
+    title: 'Choose where your work belongs', hint: 'Open a folder in VS Code, or set SkillJetty’s project root in Settings, then reopen the workbench.',
+    html: '<section class="card"><h2>Your skills stay in your work folder</h2><p>Use an existing folder or an empty folder for your drafts. Open it in VS Code or set an absolute Project Root in SkillJetty settings, then reopen the workbench. Repository setup is optional for local work.</p></section>',
+    primary: undefined
   };
   if (state.form?.mode === 'reviews') return reviews(state);
   if (state.form?.mode === 'create') return {
@@ -180,19 +144,15 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
       </fieldset></form></section>`,
     primary: { label: 'Create draft', form: 'create-form' }
   };
-  if (state.form?.mode === 'repository') return {
-    title: 'Connect your repository', hint: 'Set the submission destination once. The workbench detects its default branch for you.',
-    html: repositoryForm(state, true) + savedWork(state), primary: { label: 'Connect repository', form: 'repository-form' }
-  };
   return {
     title: 'What would you like to improve?', hint: 'Bring an existing skill or start with an idea. Work locally; SkillJetty handles the release numbering when you are ready to share.',
     html: `${savedWork(state)}<section class="card start-card"><h2>Choose how to start</h2><p>No repository connection is needed to create, open, or edit a skill.</p><div class="start-choices">
       <div class="start-option">${secondary('showCreate', 'Create a new skill', 'aria-describedby="create-choice-help"')}<p class="hint" id="create-choice-help">Start from an idea. Write the name, purpose, and instructions.</p></div>
       <div class="start-option">${secondary('openPackage', 'Open a .skill file', 'aria-describedby="package-choice-help"')}<p class="hint" id="package-choice-help">Its instructions and supporting files become an editable draft. The original package stays preserved.</p></div>
       <div class="start-option">${secondary('openFolder', 'Open a skill folder', 'aria-describedby="folder-choice-help"')}<p class="hint" id="folder-choice-help">Choose a folder containing SKILL.md and any supporting files.</p></div>
+      ${state.connection?.localPath ? `<div class="start-option">${secondary('openRepositorySkill', 'Open skill from project…', 'id="open-repository-skill" aria-describedby="repository-open-help"')}<p class="hint" id="repository-open-help">Copy a skill from your configured local repository into an editable draft.</p></div>` : ''}
       </div><details class="optional"><summary>Open by file path</summary><p class="hint">If the file chooser is unavailable, paste the full path to a .skill package.</p><form id="package-path-form" action="#" method="post" data-form-action="openPackagePath"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Open a package by file path</legend>${field('packagePath', 'Full package path (required)', state.form?.path ?? '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'Use the complete path, including the .skill filename.')}<button type="submit" class="secondary">Open this package</button></fieldset></form></details></section>
-      ${state.connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submission destination: <strong>${escape(state.connection.repository)}</strong></span></section><section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">Ready to upload later? Connect a repository below or at the Submit step.</p>'}
-      <details class="optional" ${state.repositories.length ? 'open' : ''}><summary>${state.connection ? 'Change the connected repository' : 'Connect a repository for submitting'}</summary>${repositoryForm(state)}</details>`,
+      ${state.connection ? `<section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">To upload later, set your repository in SkillJetty settings using the gear above.</p>'}`,
     primary: undefined
   };
 }
@@ -245,24 +205,24 @@ function check(state: GuidedState): { title: string; hint: string; html: string;
   };
 }
 function publish(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
+  const connection = state.configurationError ? undefined : state.connection;
   const details = state.publish;
   const reviewSupported = details?.reviewSupported !== false;
   const version = details?.version ?? '1.0.0';
   const override = state.form?.version ?? '';
   const changelog = state.form?.changelog ?? details?.changelog ?? '';
   return {
-    title: !state.connection ? 'Your skill is ready to take with you' : reviewSupported ? 'Ready to share your improvements?' : 'Ready to upload your skill?', hint: !state.connection ? 'Save an installable package on this computer. SkillJetty handles the release number and notes. No repository or sign-in is needed.' : reviewSupported ? 'Review what changed and where it will go. SkillJetty manages release numbering and prepares the package and notes. Upload & create PR opens a pull request; nothing is merged automatically.' : 'Review what changed and where it will go. SkillJetty manages release numbering, packaging and notes. This destination supports a Git upload; GitHub PRs and reviewer requests are unavailable.',
-    html: `${state.connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submitting to <strong>${escape(state.connection.repository)}</strong></span></section>` : '<p class="hint">Keep the package locally, install it in your chosen tool, or share it yourself.</p>'}
+    title: !connection ? 'Your skill is ready to take with you' : reviewSupported ? 'Ready to share your improvements?' : 'Ready to upload your skill?', hint: !connection ? 'Save an installable package on this computer. SkillJetty handles the release number and notes. No repository or sign-in is needed.' : reviewSupported ? 'Review what changed and where it will go. SkillJetty manages release numbering and prepares the package and notes. Upload & create PR opens a pull request; nothing is merged automatically.' : 'Review what changed and where it will go. SkillJetty manages release numbering, packaging and notes. This destination supports a Git upload; GitHub PRs and reviewer requests are unavailable.',
+    html: `${connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submitting to <strong>${escape(connection.repository)}</strong></span></section>` : '<p class="hint">Keep the package locally, install it in your chosen tool, or share it yourself.</p>'}
       ${skillIdentity(state)}<section class="card managed-release"><h2>Release details, handled</h2><p>Release number <strong id="managed-version">${escape(version)}</strong></p><p class="hint">${escape(details?.versionSource ?? 'Chosen automatically to preserve earlier releases. You do not need to choose a number.')}</p>${details?.versionWarning ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(details.versionWarning)}</p>` : ''}<p class="hint">This number identifies the package being prepared. A declared version in the draft is shown separately above.</p></section>
-      ${changeSummary(state)}<section class="card"><form id="publish-form" action="#" method="post" data-form-action="${state.connection ? 'publish' : 'savePackage'}"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Share this skill</legend>
+      ${changeSummary(state)}<section class="card"><form id="publish-form" action="#" method="post" data-form-action="${connection ? 'publish' : 'savePackage'}"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Share this skill</legend>
       ${textField('releaseChangelog', 'Anything else people should know? (optional)', changelog, 'rows="4"', 'Add the purpose of your changes, a testing note, or guidance for the next person. Leave blank to use the automatic release notes.')}
       <details class="optional" ${override ? 'open' : ''}><summary>Advanced: choose a release number</summary>${field('releaseVersion', 'Release number override (optional)', override, 'autocomplete="off" autocapitalize="off" spellcheck="false"', `Leave blank to let SkillJetty use ${version}. Only override this when you need a particular release number; Using an existing number replaces that version’s folder in Git. Earlier contents remain in Git history and local recovery copies.`)}</details>
-      ${state.connection && reviewSupported ? reviewerPicker(state) : ''}
-      ${state.connection ? '<div class="button-row"><button type="submit" class="secondary" data-submit-action="savePackage">Save package on this computer</button></div><p class="hint">Saving locally does not upload anything or notify a reviewer. Your draft stays available for editing.</p>' : ''}
+      ${connection && reviewSupported ? reviewerPicker(state) : ''}
+      ${connection ? '<div class="button-row"><button type="submit" class="secondary" data-submit-action="savePackage">Save package on this computer</button></div><p class="hint">Saving locally does not upload anything or notify a reviewer. Your draft stays available for editing.</p>' : ''}
       </fieldset></form></section>
-      <section class="card"><h2>${state.connection ? 'What will be submitted' : 'What you will get'}</h2><ul class="package-summary"><li><span aria-hidden="true">✓</span><span><strong>Editable source</strong> — ${details?.fileCount ?? state.files.length} files with their existing folder structure</span></li><li><span aria-hidden="true">✓</span><span><strong>Installable .skill package</strong> — rebuilt and checked against this source</span></li><li><span aria-hidden="true">✓</span><span><strong>CHANGELOG.md</strong> — automatic release notes and any context you add</span></li></ul><p class="hint">Original packages and replaced local versions remain available in recovery copies. Git keeps earlier contents in commit history. ${!state.connection ? 'Your package and notes stay on this computer. Connecting a repository below is optional.' : reviewSupported ? 'A successful GitHub submission creates a pull request; merging is a separate repository decision. Selecting a reviewer sends that person a review request when you submit.' : 'This upload does not create a PR or notify a reviewer.'}</p></section>
-      <details class="optional" ${state.error && state.connection ? 'open' : ''}><summary>${state.connection ? 'Change or reconnect the repository' : 'Optional: share through a repository'}</summary>${repositoryForm(state)}</details>`,
-    primary: { label: state.connection ? reviewSupported ? 'Upload & create PR' : 'Upload version' : 'Save package on this computer', form: 'publish-form', disabled: !details }
+      <section class="card"><h2>${connection ? 'What will be submitted' : 'What you will get'}</h2><ul class="package-summary"><li><span aria-hidden="true">✓</span><span><strong>Editable source</strong> — ${details?.fileCount ?? state.files.length} files with their existing folder structure</span></li><li><span aria-hidden="true">✓</span><span><strong>Installable .skill package</strong> — rebuilt and checked against this source</span></li><li><span aria-hidden="true">✓</span><span><strong>CHANGELOG.md</strong> — automatic release notes and any context you add</span></li></ul><p class="hint">Original packages and replaced local versions remain available in recovery copies. Git keeps earlier contents in commit history. ${!connection ? 'Your package and notes stay on this computer. You can optionally configure a repository in SkillJetty settings using the gear above.' : reviewSupported ? 'A successful GitHub submission creates a pull request; merging is a separate repository decision. Selecting a reviewer sends that person a review request when you submit.' : 'This upload does not create a PR or notify a reviewer.'}</p></section>`,
+    primary: { label: connection ? reviewSupported ? 'Upload & create PR' : 'Upload version' : 'Save package on this computer', form: 'publish-form', disabled: !details }
   };
 }
 function verifiedLink(url: string | undefined, label: string): string {
@@ -294,6 +254,7 @@ function done(state: GuidedState): { title: string; hint: string; html: string; 
 }
 
 const styles = `
+  .configuration-summary { border: 1px solid var(--vscode-panel-border, GrayText); border-radius: .35rem; padding: .6rem .8rem; margin-block: 0 1rem; min-inline-size: 0; } .configuration-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; } .configuration-heading h2 { margin: 0; font-size: 1rem; } .settings-gear { flex: none; min-inline-size: 2.6rem; padding: .35rem .6rem; font-size: 1.15em; } .configuration-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: .4rem 1rem; margin-block: .5rem; } .configuration-values > div { min-inline-size: 0; } .configuration-values dt { font-size: .85em; color: var(--vscode-descriptionForeground, GrayText); } .configuration-values dd { margin: 0; overflow-wrap: anywhere; } .configuration-summary .hint { margin-block: .35rem 0; } .configuration-summary[data-configuration-error="true"] { border-inline-start: .25rem solid var(--vscode-inputValidation-errorBorder, #be3f3f); }
   .activity-status { position: sticky; inset-block-start: 0; z-index: 3; display: flex; align-items: center; gap: .7rem; min-block-size: 3rem; padding: .6rem .8rem; margin-block: 0 1rem; border: 1px solid var(--vscode-panel-border, GrayText); border-radius: .35rem; background: var(--vscode-editor-background, Canvas); overflow-wrap: anywhere; } .activity-status[data-working="true"] { border-color: var(--vscode-focusBorder, Highlight); } .activity-indicator { flex: none; appearance: none; inline-size: 1.15rem; block-size: 1.15rem; border: .16rem solid var(--vscode-panel-border, GrayText); border-block-start-color: var(--vscode-focusBorder, Highlight); border-radius: 50%; background: transparent; animation: activity-spin 1s linear infinite; } .activity-indicator::-webkit-progress-bar { display: none; } .activity-indicator::-webkit-progress-value { display: none; } .activity-indicator::-moz-progress-bar { display: none; } @keyframes activity-spin { to { transform: rotate(1turn); } } @media (prefers-reduced-motion: reduce) { .activity-indicator { animation: none; border-style: dotted; } } @media (forced-colors: active) { .activity-status[data-working="true"] { border-color: Highlight; } .activity-indicator { border-color: CanvasText; border-block-start-color: Highlight; } }
   .activity-status { display: block; } .activity-current { display: flex; align-items: center; gap: .7rem; } .activity-current > div { min-inline-size: 0; } .activity-heading { margin: 0 0 .35rem; font-size: .85rem; } .activity-history { max-block-size: min(8rem, 22vh); overflow-y: auto; overscroll-behavior: contain; padding-inline-start: 1.5rem; margin-block: .5rem 0; font-size: .85rem; scrollbar-gutter: stable; } .activity-history li { padding: .2rem .3rem; overflow-wrap: anywhere; } .activity-history li[data-status="succeeded"] { border-inline-start: 2px solid var(--vscode-testing-iconPassed, #55a66a); } .activity-history li[data-status="failed"] { border-inline-start: 2px solid var(--vscode-errorForeground, #be3f3f); } .activity-history li[data-status="running"], .activity-history li[data-status="waiting"] { border-inline-start: 2px solid var(--vscode-focusBorder, Highlight); } #operation-status:focus-visible, .activity-history:focus-visible { outline: 3px solid var(--vscode-focusBorder, Highlight); outline-offset: 2px; } @media (max-height: 500px) { .activity-history { max-block-size: 4rem; } } #activity-details { font-size: .85rem; color: var(--vscode-descriptionForeground, GrayText); } .repository-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .75rem 1.2rem; } .repository-actions .hint { margin-block: .4rem 0; } .action-help { margin-block: .3rem .7rem; } .action-help dt { font-weight: 650; } .action-help dd { margin: .2rem 0 .8rem; } .step-help { border: 1px solid var(--vscode-panel-border, GrayText); border-radius: .35rem; padding-inline: .8rem; } .setup-tools { margin-block: .5rem 1rem; }
   .identity-strip { border-inline-start: .25rem solid var(--vscode-focusBorder, Highlight); padding: .2rem 1rem; margin-block: 0 1.2rem; overflow-wrap: anywhere; } .identity-strip p { margin-block: .3rem; } .managed-release strong { font-variant-numeric: tabular-nums; } .release-notes { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: var(--vscode-textBlockQuote-background, var(--vscode-editor-inactiveSelectionBackground, ButtonFace)); padding: .75rem; border-radius: .25rem; } .change-files { padding-inline-start: 1.4rem; } .change-files li { overflow-wrap: anywhere; } .edit-history .work-list { max-block-size: 20rem; overflow: auto; }
@@ -341,6 +302,7 @@ const script = `
   let activityMessage = '';
   let activityStarted;
   let lastHostResponse;
+  let configurationChanged = false;
   let activityTick;
   const activityDetails = document.getElementById('activity-details');
   const activityStatus = document.getElementById('operation-status');
@@ -456,7 +418,7 @@ const script = `
   document.addEventListener('blur', event => syncValidity(event.target), true);
   function lockActions(locked) {
     actionPending = locked;
-    document.querySelectorAll('button').forEach(button => { if (button.dataset.diagnostics === 'true') return; button.disabled = locked || button.dataset.unavailable === 'true'; });
+    document.querySelectorAll('button').forEach(button => { if (button.dataset.diagnostics === 'true' || button.dataset.settings === 'true') return; button.disabled = locked || button.dataset.unavailable === 'true'; });
     if (locked) {
       document.querySelectorAll('input,select,textarea').forEach(control => {
         if (!lockedControls.has(control)) lockedControls.set(control, { disabled: control.disabled, readOnly: control.readOnly });
@@ -525,15 +487,12 @@ const script = `
     if (activityStatus) activityStatus.dataset.waitingForInput = 'false';
   }
   function post(action, payload = {}, focusStatus = false) {
+    if (action === 'openSettings') { vscode.postMessage({ action }); return; }
     if (action === 'openPerformanceLog') { vscode.postMessage({ action }); return; }
     if (actionPending) return;
+    if (action === 'publish' && configurationChanged) { clientError('Settings changed. Return to the previous step and review a fresh submission summary before uploading.'); return; }
     persist();
     const messageBuffer = action === 'reloadFile' ? {} : buffer();
-    if (action === 'connectGitHub') {
-      document.querySelectorAll('select[name="reviewer"]').forEach(element => { element.value = ''; });
-      for (const key of Object.keys(saved.fields || {})) if (key.endsWith(':reviewer')) delete saved.fields[key];
-      vscode.setState(saved);
-    }
     clearTimeout(saveTimer);
     const moveToStatus = action !== 'save' && (focusStatus || ['check', 'preparePublish', 'publish', 'savePackage'].includes(action));
     if (action !== 'save' && savePending) { queuedAction = { action, payload, focusStatus }; lockActions(true); beginActivity('Saving your current edit before continuing…'); if (moveToStatus) focusActivity(); return; }
@@ -557,11 +516,6 @@ const script = `
     saveTimer = setTimeout(() => post('save'), 500);
   }
   function fieldValue(id) { const element = document.getElementById(id); return element ? element.value : ''; }
-  function updateRepositoryCreateLabel() {
-    const button = document.getElementById('create-repository-button');
-    const selected = document.querySelector('input[name="visibility"]:checked');
-    if (button) button.textContent = 'Create ' + (selected ? selected.value : 'private') + ' repository';
-  }
   document.querySelectorAll('form[data-form-action]').forEach(form => form.addEventListener('submit', event => {
     event.preventDefault();
     if (event.isComposing || actionPending) return;
@@ -569,8 +523,6 @@ const script = `
     clientError('');
     const action = event.submitter?.dataset.submitAction || form.dataset.formAction;
     let payload = {};
-    if (action === 'connectRepository') payload = { repository: fieldValue('repository') };
-    if (action === 'createRepository') payload = { name: fieldValue('repositoryName'), visibility: document.querySelector('input[name="visibility"]:checked').value, confirmed: true };
     if (action === 'createSkill') payload = { name: fieldValue('skillName'), description: fieldValue('skillDescription'), instructions: fieldValue('skillInstructions') };
     if (action === 'openPackagePath') payload = { path: fieldValue('packagePath') };
     if (action === 'addFile') payload = { path: fieldValue('addFilePath') };
@@ -596,14 +548,41 @@ const script = `
     if (event.target.validity && event.target.validity.valid) event.target.removeAttribute('aria-invalid');
     if (event.target === editor && !editor.readOnly) { document.getElementById('save-status').textContent = 'Unsaved changes'; scheduleSave(); }
   });
-  document.addEventListener('change', () => { updateRepositoryCreateLabel(); persist(); });
+  document.addEventListener('change', () => persist());
   document.addEventListener('focusin', () => persist());
-  const repositoryChoice = document.getElementById('repository-choice');
-  if (repositoryChoice) repositoryChoice.addEventListener('change', () => { if (repositoryChoice.value) document.getElementById('repository').value = repositoryChoice.value; persist(); });
   const target = document.getElementById('target');
   if (target) target.addEventListener('change', () => post('setTarget', { target: target.value }));
   window.addEventListener('message', event => {
     const message = event.data || {};
+    if (message.type === 'configurationChanged' && message.display && typeof message.display === 'object') {
+      const display = message.display;
+      configurationChanged = true;
+      const configuration = document.getElementById('workbench-configuration');
+      if (configuration) configuration.dataset.configurationError = String(display.invalid === true);
+      for (const [id, key, fallback] of [['active-work-folder', 'workFolder', 'Not selected'], ['local-repository-path', 'localRepository', 'Not configured'], ['configured-repository', 'repository', 'Not configured']]) {
+        const output = document.getElementById(id);
+        if (output) output.textContent = typeof display[key] === 'string' && display[key] ? display[key] : fallback;
+      }
+      const summary = document.getElementById('repository-settings-state');
+      if (summary) summary.textContent = display.invalid === true ? 'Needs attention' : 'Not yet verified';
+      const status = document.getElementById('repository-verification');
+      const uploadForm = document.getElementById('publish-form');
+      const staleUpload = step === 'publish' && uploadForm?.dataset.formAction === 'publish';
+      if (status) {
+        status.dataset.status = display.invalid === true ? 'error' : 'unverified';
+        status.textContent = (typeof display.notice === 'string' ? display.notice : 'Settings changed. Reopen the workbench to use a different work folder.') + (staleUpload ? ' Return to the previous step and review a fresh submission summary before uploading.' : '');
+      }
+      if (staleUpload) {
+        const upload = document.getElementById('primary-action');
+        if (upload) { upload.disabled = true; upload.dataset.unavailable = 'true'; }
+      }
+      return;
+    }
+    if (message.type === 'captureEditorBuffer' && typeof message.requestId === 'string') {
+      persist();
+      vscode.postMessage(Object.assign({ action: 'editorBufferCaptured', requestId: message.requestId }, buffer()));
+      return;
+    }
     if (message.type === 'progress') {
       lastHostResponse = Date.now();
       updateActivityHistory(message.activity, message.activityGeneration);
@@ -612,6 +591,7 @@ const script = `
     if (message.type === 'repositoryVerification') {
       const status = document.getElementById('repository-verification');
       const summaryStatus = document.getElementById('repository-settings-state');
+      if (document.getElementById('workbench-configuration')?.dataset.configurationError === 'true') return;
       const verification = message.verification;
       if (verification && typeof verification.message === 'string') {
         if (status) {
@@ -653,7 +633,6 @@ const script = `
       if (queuedAction && !message.error) { const next = queuedAction; queuedAction = undefined; lockActions(false); finishActivity(); post(next.action, next.payload, next.focusStatus); }
     }
   });
-  updateRepositoryCreateLabel();
   if (actionPending) { lockActions(true); beginActivity(activityOutput?.textContent || 'Working on your request…', main.dataset.waitingForInput === 'true'); }
   const previousStep = saved.step;
   const previousActive = saved.activeId;
@@ -677,11 +656,11 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
     <div id="operation-status" class="activity-status" role="region" aria-labelledby="activity-heading" tabindex="-1" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><h2 id="activity-heading" class="activity-heading">Activity</h2><div class="activity-current"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message" role="status" aria-live="polite" aria-atomic="true">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div><ol id="activity-history" class="activity-history" aria-label="Activity history" aria-live="off" tabindex="0" ${state.activity?.length ? '' : 'hidden'}>${(state.activity ?? []).slice(-100).map(entry => `<li data-status="${escape(entry.status)}"><strong>${escape(({ running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' })[entry.status])}: </strong><span>${escape(entry.message)}</span></li>`).join('')}</ol><div class="button-row">${secondary('openPerformanceLog', 'Open performance log', 'id="open-performance-log" data-diagnostics="true" aria-describedby="performance-log-help"')}</div><p class="hint" id="performance-log-help">Open local timing details, including startup and earlier steps. Available while work is running.</p></div>
     <header>${brandHeader(brand)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
 
+    ${configurationSummary(state)}
     <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-waiting-for-input="${!!state.waitingForInput}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>
       <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="client-error" class="error-message" hidden></p></div>
       ${stepHelp(state)}
-      ${state.hasWorkspace ? `<details id="repository-settings" class="optional setup-tools" data-persist-open ${state.repositoryVerification?.status === 'error' || state.repositoryVerification?.status === 'setupRequired' ? 'open' : ''}><summary>Repository &amp; GitHub settings — <span id="repository-settings-state" role="status" aria-live="polite" aria-atomic="true">${repositoryStatusLabel(state.repositoryVerification?.status)}</span></summary><p class="hint">Optional for local drafts. Use these settings to choose where you share skills and which GitHub account you use for sharing and PR actions.</p>${gitHubAccount(state)}${repositoryTools(state)}</details>` : ''}
       ${screen.html}
       ${state.step !== 'edit' && state.editor ? `<textarea id="bufferContent" hidden data-editor-path="${escape(state.editor.path)}" ${state.editor.readOnly ? 'readonly data-read-only="true"' : ''}>${escape(state.editor.content)}</textarea>` : ''}
       ${primary ? `<footer class="action-bar"><button type="button" class="secondary" data-action="back" ${backDisabled ? 'disabled data-unavailable="true"' : ''}>← Back</button><button id="primary-action" class="primary" type="${primary.form ? 'submit' : 'button'}" ${primary.form ? `form="${primary.form}"` : `data-action="${primary.action}"`} ${primary.id ? `data-id="${escape(primary.id)}"` : ''} ${state.busy || primary.disabled ? 'disabled' : ''} ${primary.disabled ? 'data-unavailable="true"' : ''}>${state.busy ? 'Working…' : escape(primary.label)} <span aria-hidden="true">→</span></button></footer>` : ''}

@@ -14,8 +14,12 @@ import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState, type Gui
 import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
 import type { ValidationReport } from './skill-workbench.js';
 import { activityForAction, actionNeedsInput, nextActivityMessage } from './guided-activity.js';
+import { selectRepositorySettings, repositoryIdentity, RepositoryConfigurationChangedError, type RepositorySettings } from './repository-settings.js';
 
 export type GuidedHooks = {
+  getRepositorySettings?(): RepositorySettings;
+  captureConfigurationGeneration?(): number;
+  assertConfigurationGeneration?(generation: number): void;
   onMetric?: WorkbenchMetricSink;
   chooseRepositoryFolder?(currentPath?: string): Promise<string | undefined>;
   onRepositoryVerification?(state: RepositoryCheckState): void;
@@ -33,10 +37,62 @@ export type GuidedHooks = {
 export class GuidedWorkbenchController {
   private pending: Promise<void> = Promise.resolve();
   private previewInventory?: string;
+  private previewDestination?: string;
+  private previewConfigurationGeneration?: number;
   private activitySequence = 0;
   private operationActivity?: number;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
-  constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; }
+  constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; this.refreshRepositorySettings(); }
+  private savedConnection(settings: RepositorySettings) {
+    try { return this.root ? getWorkspaceConnection(this.root) : undefined; }
+    catch (error) { if (settings.repositoryUrl !== undefined) return undefined; throw error; }
+  }
+  private repositorySelection() {
+    const settings = this.hooks.getRepositorySettings?.() ?? {};
+    return selectRepositorySettings(settings, this.savedConnection(settings));
+  }
+  private destinationFingerprint(): string {
+    const selected = this.repositorySelection();
+    return JSON.stringify([selected.repository ? repositoryIdentity(selected.repository) : null, selected.localPath ?? null]);
+  }
+  /** Read-only projection. Saving native settings never connects or rewrites state. */
+  refreshRepositorySettings(): void {
+    const previous = JSON.stringify(this.state.connection);
+    this.state.workFolder = this.root;
+    this.state.hasWorkspace = !!this.root;
+    let saved: ReturnType<typeof getWorkspaceConnection>;
+    try {
+      const settings = this.hooks.getRepositorySettings?.() ?? {};
+      saved = this.savedConnection(settings);
+      const selected = selectRepositorySettings(settings, saved);
+      this.state.configuredRepository = selected.repository;
+      this.state.configuredLocalRepository = selected.localPath;
+      this.state.configurationError = undefined;
+      this.state.connection = selected.repository ? {
+        repository: selected.repository,
+        baseBranch: saved && repositoryIdentity(saved.repository) === repositoryIdentity(selected.repository) ? saved.baseBranch : '',
+        ...(selected.localPath ? { localPath: selected.localPath } : {})
+      } : undefined;
+    } catch (error) {
+      // Keep accepted historical context available, but never use it as a
+      // fallback for a malformed explicit native setting in an operation.
+      this.state.connection = saved;
+      this.state.configuredRepository = undefined; this.state.configuredLocalRepository = undefined;
+      this.state.configurationError = error instanceof Error ? error.message : 'Correct the repository settings before sharing.';
+    }
+    if (previous !== JSON.stringify(this.state.connection) || this.state.configurationError) {
+      ++this.verificationSequence; this.state.repositoryVerification = undefined; this.state.repositoryCheckout = undefined;
+      this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
+    }
+  }
+  private async resolveRepositoryConnection(beforeSave: () => void, requireLocal = false) {
+    const selected = this.repositorySelection();
+    if (!selected.repository) throw new Error('Set the repository address in SkillJetty Settings before sharing. Your local draft is retained.');
+    if (requireLocal && !selected.localPath) throw new Error('Set the local repository folder in SkillJetty Settings before this repository action.');
+    const connection = await connectWorkspaceRepository(this.workspace(), selected.repository, { localPath: selected.localPath, beforeSave });
+    this.refreshRepositorySettings();
+    return connection;
+  }
   private async runJob<J extends WorkbenchJob>(job: J) {
     const phases: Record<string, string> = {
       archiveRead: 'Package bytes read.', archiveDecode: 'Package contents decoded.',
@@ -62,7 +118,10 @@ export class GuidedWorkbenchController {
   async verifyRepository(): Promise<void> {
     const sequence = ++this.verificationSequence, root = this.root;
     let connection: ReturnType<typeof getWorkspaceConnection>;
-    try { connection = root ? getWorkspaceConnection(root) : undefined; }
+    try {
+      const selected = this.repositorySelection();
+      connection = selected.repository ? { repository: selected.repository, localPath: selected.localPath, baseBranch: this.state.connection?.baseBranch ?? '' } : undefined;
+    }
     catch { this.state.repositoryVerification = { status: 'setupRequired', message: 'Reconnect the remote repository and choose its local skills project folder.' }; this.hooks.onRepositoryVerification?.(this.state.repositoryVerification); return; }
     const identity = JSON.stringify([root, connection?.repository, connection?.localPath]);
     const update = (state: RepositoryCheckState) => {
@@ -82,14 +141,7 @@ export class GuidedWorkbenchController {
     return skill;
   }
   private refreshConnection() {
-    if (!this.root) return;
-    const previousConnection = JSON.stringify(this.state.connection);
-    this.state.hasWorkspace = true;
-    try { this.state.connection = getWorkspaceConnection(this.root); }
-    catch { this.state.connection = undefined; this.state.notice = 'Your repository connection needs reconnecting. Saved drafts are still available.'; }
-    if (previousConnection !== JSON.stringify(this.state.connection)) {
-      ++this.verificationSequence; this.state.repositoryVerification = undefined; this.state.repositoryCheckout = undefined;
-    }
+    this.refreshRepositorySettings();
   }
   private async loadSkills() {
     if (!this.root) return;
@@ -97,7 +149,7 @@ export class GuidedWorkbenchController {
     this.state.drafts = listWorkbenchSkills(this.root).map(({ id, name }) => ({ id, name }));
     try {
       const releases = await this.runJob({ kind: 'library', root: this.root });
-      if (!this.state.connection) this.state.connection = await migrateAssociation(this.root, releases);
+      if (!this.hooks.getRepositorySettings && !this.state.connection) this.state.connection = await migrateAssociation(this.root, releases);
       this.state.library = releases.map(({ skillName, version, directory, status, pr }) => ({ skillName, version, directory, status, ...(pr ? { pr } : {}) }));
       if (this.state.reviewQueue !== undefined) await this.refreshReviews();
       this.state.libraryError = undefined;
@@ -189,6 +241,9 @@ export class GuidedWorkbenchController {
       section('Added', summary.added), section('Updated', summary.changed), section('Removed', summary.removed),
       !summary.hasChanges ? 'No skill file changes.' : '', 'Generated from file comparisons; skill behavior has not been tested.'].filter(Boolean).join('\n');
     const version = identity.declaredVersion ?? matching?.version ?? suggestReleaseVersion(skill, versions.map(item => item.version));
+    // The worker can yield while native settings change. Bind the displayed
+    // destination to the current projection, not the one before the await.
+    this.refreshRepositorySettings();
     return { details: { version, changelog: matching ? fs.readFileSync(path.join(matching.directory, 'CHANGELOG.md'), 'utf8').trim() : '',
       repository: this.state.connection?.repository, fileCount: inventory.length,
       reviewSupported: !!githubRepository(this.state.connection?.repository ?? ''),
@@ -250,6 +305,19 @@ export class GuidedWorkbenchController {
   }
   private async execute(message: GuidedMessage): Promise<GuidedState> {
     if (this.state.busy) return this.state;
+    const generation = this.hooks.captureConfigurationGeneration?.();
+    let originalSettings: string | undefined;
+    let settingsReadError: unknown;
+    try { originalSettings = JSON.stringify(this.hooks.getRepositorySettings?.() ?? null); }
+    catch (error) { settingsReadError = error; }
+    const operationRoot = this.root;
+    const beforeWrite = () => {
+      if (settingsReadError) throw settingsReadError;
+      if (operationRoot !== this.root || originalSettings !== JSON.stringify(this.hooks.getRepositorySettings?.() ?? null)) throw new RepositoryConfigurationChangedError();
+      try { if (generation !== undefined) this.hooks.assertConfigurationGeneration?.(generation); }
+      catch (error) { throw new RepositoryConfigurationChangedError(error instanceof Error ? error.message : undefined); }
+    };
+    const remoteGuard = this.hooks.getRepositorySettings || this.hooks.captureConfigurationGeneration || this.hooks.assertConfigurationGeneration ? beforeWrite : undefined;
     const payload = message.payload ?? {};
     const previousForm = this.state.form;
     const reviewMode = this.state.form?.mode === 'reviews';
@@ -287,7 +355,9 @@ export class GuidedWorkbenchController {
           else this.state.notice = 'Folder selection canceled. Your saved work is still available.';
           break;
         }
-        case 'verifyRepository': await this.verifyRepository(); break;
+        case 'verifyRepository':
+          if (this.hooks.getRepositorySettings) await this.resolveRepositoryConnection(beforeWrite, true);
+          await this.verifyRepository(); break;
         case 'setRepositoryFolder': {
           this.refreshConnection();
           const connection = this.state.connection;
@@ -302,16 +372,16 @@ export class GuidedWorkbenchController {
         }
         case 'pullRepository': {
           this.refreshConnection();
-          const connection = this.state.connection;
+          const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite, true) : this.state.connection;
           if (!connection?.localPath) throw new Error('Choose the actual local skills project folder before Git pull.');
-          this.state.repositoryCheckout = await pullProjectRepository(this.workspace(), connection.repository, connection.localPath, message => this.progress(message));
+          this.state.repositoryCheckout = await pullProjectRepository(this.workspace(), connection.repository, connection.localPath, message => this.progress(message), remoteGuard);
           await this.verifyRepository();
           this.state.notice = 'Git pull complete in the selected local skills project folder.';
           break;
         }
         case 'openRepositorySkill': {
           this.refreshConnection();
-          const connection = this.state.connection;
+          const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite, true) : this.state.connection;
           if (!connection?.localPath) throw new Error('Choose the actual local skills project folder first.');
           const folder = await this.hooks.pickFolder?.(connection.localPath);
           if (folder) {
@@ -332,9 +402,14 @@ export class GuidedWorkbenchController {
           if (payload.confirmed !== true) throw new Error('Confirm the repository name and visibility before creating it.');
           const visibility = payload.visibility === 'public' ? 'public' : 'private';
           this.state.busy = true; this.progress('Creating your repository…');
-          const created = await createGitHubRepository(this.workspace(), string('name'), visibility);
-          this.state.connection = await connectWorkspaceRepository(this.workspace(), created.repository);
-          this.state.notice = 'Repository created and connected. Select its local skills project folder.'; void this.verifyRepository(); break;
+          const created = await createGitHubRepository(this.workspace(), string('name'), visibility, remoteGuard);
+          if (this.hooks.getRepositorySettings) {
+            this.state.notice = `Repository created: ${created.repository}. Set its address in SkillJetty Settings when you want to use it. Your existing destination was preserved.`;
+          } else {
+            this.state.connection = await connectWorkspaceRepository(this.workspace(), created.repository);
+            this.state.notice = 'Repository created and connected. Select its local skills project folder.'; void this.verifyRepository();
+          }
+          break;
         }
         case 'showCreate': this.workspace(); this.state.step = 'start'; this.state.form = { mode: 'create' }; break;
         case 'createSkill': {
@@ -420,14 +495,19 @@ export class GuidedWorkbenchController {
         case 'edit': this.state.step = 'edit'; break;
         case 'preparePublish': {
           if (!await this.check()) break;
+          this.refreshRepositorySettings();
           this.state.step = 'publish';
           const preview = await this.publicationDetails();
           this.state.publish = preview.details;
           this.previewInventory = JSON.stringify(preview.inventory);
+          try { this.previewDestination = this.destinationFingerprint(); }
+          catch { this.previewDestination = undefined; }
+          this.previewConfigurationGeneration = this.hooks.captureConfigurationGeneration?.();
           break;
         }
         case 'savePackage': case 'publish': {
           if (this.state.step !== 'publish') throw new Error('Check this skill and review the publication screen first.');
+          this.refreshRepositorySettings();
           const preview = await this.publicationDetails(string('changelog').trim() || undefined);
           const details = preview.details;
           const override = string('version').trim();
@@ -454,18 +534,26 @@ export class GuidedWorkbenchController {
               note: 'Package saved on this computer. No repository was contacted and nothing was uploaded. Your editable draft and earlier edits are retained.' };
             this.state.step = 'done'; break;
           }
-          if (!this.state.connection) throw new Error('Connect your repository before publishing.');
+          beforeWrite();
+          const destination = this.destinationFingerprint();
+          if (this.previewDestination !== destination || this.previewConfigurationGeneration !== generation) {
+            this.state.publish = details; this.previewDestination = destination;
+            this.previewConfigurationGeneration = generation;
+            throw new Error('The repository settings changed since this sharing summary was shown. Review the updated destination and submit again. Nothing was uploaded.');
+          }
+          const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite) : this.state.connection;
+          if (!connection) throw new Error('Connect your repository before publishing.');
           this.state.step = 'publish';
           this.state.busy = true; this.progress('Sanity checking and packaging this version…');
-          const supported = !!githubRepository(this.state.connection.repository);
+          const supported = !!githubRepository(connection.repository);
           const priorUpload = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: this.active().name })).find(item => item.version === version && item.status === 'uploaded');
-          if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(this.state.connection.repository); }
-          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, (message, status) => this.progress(message, false, status), { deferCleanup: supported, expectedFiles: preview.inventory });
+          if (supported && !priorUpload) { this.progress('Confirming GitHub pull request access before uploading…'); await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(connection.repository); }
+          const result = await publishGuidedSkill(this.workspace(), this.active().id, version, changelog, (message, status) => this.progress(message, false, status), { deferCleanup: supported, expectedFiles: preview.inventory, connection, beforeWrite: remoteGuard });
           this.state.receipt = receiptFor(result);
           if (supported) {
             this.progress('Upload verified. Creating or finding its pull request…');
             try {
-              const reviewed = await reviewLibraryRelease(this.workspace(), result.release.directory, 'create', string('reviewer'), this.hooks.github, (message, status) => this.progress(message, false, status));
+              const reviewed = await reviewLibraryRelease(this.workspace(), result.release.directory, 'create', string('reviewer'), this.hooks.github, (message, status) => this.progress(message, false, status), remoteGuard);
               this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError ?? result.cleanupError;
               this.state.receipt.note = reviewed.pr.error ? reviewed.pr.number && reviewed.pr.identityVerified ? 'PR created; the latest review status is unavailable. Open or check the recorded PR; the upload is retained.' : 'Uploaded — PR not created or verified. The uploaded version and draft remain recoverable; retry from Check PRs.' : reviewed.pr.reviewRequestError ? 'PR created — review request failed or remains uncertain. Check the recorded PR without uploading another version.' : 'Uploaded with a recorded PR. Use Merge PR and delete branch when this submission is ready.';
             } catch {
@@ -484,11 +572,13 @@ export class GuidedWorkbenchController {
         }
         case 'loadReviewers': {
           this.state.busy = true; this.progress('Finding eligible collaborator reviewers…');
-          const connection = getWorkspaceConnection(this.workspace());
+          const selected = this.repositorySelection();
+          const connection = selected.repository ? { repository: selected.repository } : undefined;
           this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
           try {
             if (!connection || !githubRepository(connection.repository)) throw new Error('unsupported');
             this.state.reviewers = await new GitHubReviewService(this.workspace(), this.hooks.github).reviewers(connection.repository);
+            beforeWrite();
             this.state.reviewersLoaded = true;
           } catch (error) { this.state.reviewersError = connection && githubRepository(connection.repository) ? githubError(error) : 'Reviewer selection is available for GitHub.com only. No reviewer was selected.'; }
           break;
@@ -517,7 +607,7 @@ export class GuidedWorkbenchController {
           if (message.action === 'requestReviewer' && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request first.');
           if (message.action === 'createPullRequest' && string('reviewer') && payload.confirmed !== true) throw new Error('Explicitly confirm the selected reviewer before creating a PR with a review request.');
           this.state.busy = true; this.progress(message.action === 'mergePullRequest' ? 'Verifying this submission, merging it and cleaning up its branch…' : message.action === 'checkPullRequest' ? 'Checking this recorded PR…' : message.action === 'createPullRequest' ? 'Finding or creating the PR for the existing upload…' : 'Requesting the selected eligible reviewer…');
-          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'mergePullRequest' ? 'merge' : message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github, (message, status) => this.progress(message, false, status));
+          const reviewed = await reviewLibraryRelease(this.workspace(), string('directory'), message.action === 'mergePullRequest' ? 'merge' : message.action === 'checkPullRequest' ? 'check' : message.action === 'createPullRequest' ? 'create' : 'reviewer', string('reviewer'), this.hooks.github, (message, status) => this.progress(message, false, status), remoteGuard);
           if (this.state.receipt?.directory === string('directory')) { this.state.receipt.pr = reviewed.pr; this.state.receipt.cleanupError = reviewed.cleanupError; }
           if (message.action === 'mergePullRequest') {
             if (reviewed.pr.mergeError) this.state.error = reviewed.pr.mergeError;

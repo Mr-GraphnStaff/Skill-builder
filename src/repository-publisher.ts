@@ -162,7 +162,7 @@ export async function listRepositoryChoices(workspaceRoot: string): Promise<Repo
 
 /** Creates only the repository selected and confirmed by the UI; never overwrites one. */
 export async function createGitHubRepository(
-  workspaceRoot: string, name: string, visibility: 'private' | 'public' = 'private'
+  workspaceRoot: string, name: string, visibility: 'private' | 'public' = 'private', beforeWrite?: () => void
 ): Promise<CreatedRepository> {
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(name) || name === '.' || name === '..') {
     throw new Error('Enter a repository name using letters, numbers, dots, underscores and hyphens.');
@@ -173,6 +173,7 @@ export async function createGitHubRepository(
   const owner = account.stdout.trim();
   if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(owner)) throw new Error('GitHub CLI did not return a signed-in account. Sign in using your normal GitHub CLI setup.');
   const nameWithOwner = `${owner}/${name}`;
+  beforeWrite?.();
   try {
     await githubCli(['repo', 'create', nameWithOwner, `--${visibility}`, '--add-readme', '--description', 'Versioned skill packages, editable source and changelogs.'], options);
   } catch {
@@ -356,7 +357,7 @@ export async function prepareRepositoryPublish(
 }
 
 /** Commit/push only after the caller has shown the preview and obtained the user's action. */
-export async function pushPreparedRelease(preview: PublishPreview, onProgress?: Progress): Promise<{ commit: string; branch: string; repository: string }> {
+export async function pushPreparedRelease(preview: PublishPreview, onProgress?: Progress, beforeWrite?: () => void): Promise<{ commit: string; branch: string; repository: string }> {
   report(onProgress, 'Verifying the reviewed release before publication.');
   const expected = previews.get(preview.checkoutPath);
   if (!expected) throw new Error('Publication preview expired; prepare it again.');
@@ -380,6 +381,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   if (preview.changedFiles?.length !== 0 && JSON.stringify(actual) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Commit contents differ from the reviewed release.');
   if ((await git(preview.checkoutPath, ['rev-parse', 'HEAD^{tree}'])).trim() !== expected.indexTree) throw new Error('Committed tree differs from the reviewed release.');
   report(onProgress, 'Pushing the release branch to the selected repository.');
+  beforeWrite?.();
   await git(preview.checkoutPath, ['push', '--porcelain', 'origin', `HEAD:refs/heads/${preview.branch}`]);
   report(onProgress, 'Confirming the published commit on the remote repository.');
   const remote = await git(preview.checkoutPath, ['ls-remote', '--heads', 'origin', `refs/heads/${preview.branch}`]);

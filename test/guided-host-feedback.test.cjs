@@ -10,7 +10,8 @@ function deferred() {
 }
 
 function fixture(options = {}) {
-  const panels = [], controllers = [], commands = new Map(), events = [], dispatchHooks = new Map();
+  const panels = [], controllers = [], commands = new Map(), events = [], dispatchHooks = new Map(), settings = new Map(), updates = [];
+  let configurationListener;
   const disposable = () => ({ dispose() {} });
   class Controller {
     constructor(root, hooks) {
@@ -19,21 +20,25 @@ function fixture(options = {}) {
       controllers.push(this);
     }
     async verifyRepository() { events.push({ type: 'repository-check', controller: this }); }
+    refreshRepositorySettings() { events.push({ type: 'settings-refresh', controller: this }); }
     async dispatch(message) {
-      events.push({ type: 'dispatch', action: message.action, controller: this });
+      events.push({ type: 'dispatch', action: message.action, message, controller: this });
       return dispatchHooks.has(message.action) ? dispatchHooks.get(message.action)(this, message) : this.state;
     }
   }
   const vscode = {
     ViewColumn: { One: 1 },
-    commands: { registerCommand(id, handler) { commands.set(id, handler); return disposable(); }, async executeCommand() {} },
-    workspace: { textDocuments: [], workspaceFolders: [], onDidSaveTextDocument: disposable },
+    ConfigurationTarget: { Workspace: 2 },
+    commands: { registerCommand(id, handler) { commands.set(id, handler); return disposable(); }, async executeCommand(...args) { events.push({ type: 'native-command', args }); } },
+    workspace: { textDocuments: [], workspaceFolders: [], onDidSaveTextDocument: disposable,
+      onDidChangeConfiguration(listener) { configurationListener = listener; return disposable(); },
+      getConfiguration() { return { inspect: key => settings.has(key) ? { workspaceValue: settings.get(key) } : { defaultValue: '' }, get: key => settings.get(key) ?? '', async update(key, value, target) { if (value === undefined) settings.delete(key); else settings.set(key, value); updates.push({ key, value, target }); configurationListener?.({ affectsConfiguration: candidate => candidate === `skillBuilder.${key}` }); await options.onUpdate?.(key, value); } }; } },
     window: {
       createOutputChannel() { return { appendLine: line => events.push({ type: 'log', line }), show() { events.push({ type: 'log-opened' }); }, dispose() {} }; },
       registerWebviewViewProvider: disposable,
       createWebviewPanel() {
         const panel = { htmlWrites: 0, messages: [], reveal() {}, onDidDispose(handler) { this.closed = handler; return disposable(); },
-          close() { this.closed(); },
+          close() { this.closed(); }, dispose() { this.closed(); },
           webview: { async postMessage(message) { panel.messages.push(message); events.push({ type: 'message', message, panel }); return true; },
             onDidReceiveMessage(handler) { panel.receive = handler; return disposable(); } } };
         Object.defineProperty(panel.webview, 'html', { set(value) { panel.htmlWrites++; panel.html = value; events.push({ type: 'render', panel }); } });
@@ -51,9 +56,10 @@ function fixture(options = {}) {
       return originalLoad.call(this, id, parent, main);
     };
     require(file).activateGuidedWorkbench({ subscriptions: [], extensionPath: path.resolve(__dirname, '..'),
-      extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: async () => path.resolve('fake-prerelease-data') });
+      extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: options.getRoot ?? (async () => path.resolve('fake-prerelease-data')) });
   } finally { Module._load = originalLoad; delete require.cache[file]; }
-  return { panels, controllers, commands, events, dispatchHooks, vscode,
+  return { panels, controllers, commands, events, dispatchHooks, vscode, settings, updates,
+    changeConfiguration(key, value) { settings.set(key, value); configurationListener({ affectsConfiguration: target => target === `skillBuilder.${key}` }); },
     async open() { await commands.get('skillBuilder.openWorkbench')(); return panels.at(-1); } };
 }
 
@@ -215,4 +221,136 @@ test('invalid optional repository metadata does not block local package opening'
   await panel.receive({ action: 'openPackage' });
   assert(f.events.some(event => event.type === 'dispatch' && event.action === 'openPackage'));
   assert.equal(f.controllers[0].state.error, undefined);
+});
+
+test('gear opens one fixed native settings destination while an action is pending', async () => {
+  const f = fixture(), panel = await f.open(), entered = deferred(), release = deferred();
+  f.dispatchHooks.set('check', async () => { entered.resolve(); await release.promise; });
+  const action = panel.receive({ action: 'check' }); await entered.promise;
+  const before = panel.htmlWrites;
+  await panel.receive({ action: 'openSettings', payload: { command: 'untrusted.command', url: 'https://example.invalid' } });
+  assert.deepEqual(f.events.filter(event => event.type === 'native-command').at(-1).args, ['workbench.action.openSettings', '@ext:DavidFarris.skill-builder']);
+  assert.equal(panel.htmlWrites, before);
+  assert(!f.events.some(event => event.type === 'dispatch' && event.action === 'openSettings'));
+  release.resolve(); await action;
+});
+
+test('settings invalidate the active operation synchronously without network work on save', async () => {
+  const f = fixture(), panel = await f.open(), entered = deferred(), release = deferred();
+  const hooks = f.controllers[0].hooks;
+  const captured = hooks.captureConfigurationGeneration();
+  f.dispatchHooks.set('check', async () => { entered.resolve(); await release.promise; });
+  const action = panel.receive({ action: 'check' }); await entered.promise;
+  const checks = f.events.filter(event => event.type === 'repository-check').length;
+  f.changeConfiguration('prerelease.repositoryUrl', 'https://github.com/new/skills');
+  assert.throws(() => hooks.assertConfigurationGeneration(captured), /Settings changed/);
+  assert.equal(f.events.filter(event => event.type === 'repository-check').length, checks);
+  release.resolve(); await action; await new Promise(resolve => setImmediate(resolve));
+  assert(f.events.some(event => event.type === 'settings-refresh'));
+  assert(panel.messages.some(message => message.type === 'configurationChanged'));
+  assert.equal(panel.htmlWrites, 2, 'one action-completion render; settings themselves must not replace the editor page');
+});
+
+test('a work-folder change during asynchronous opening never creates a stale controller', async () => {
+  const root = deferred(), f = fixture({ getRoot: () => root.promise });
+  const opening = f.open();
+  f.changeConfiguration('projectRoot', path.resolve('new-work-folder'));
+  root.resolve(path.resolve('previous-work-folder'));
+  await assert.rejects(opening, /work-folder setting changed while opening/);
+  assert.equal(f.controllers.length, 0); assert.equal(f.panels.length, 0); assert.equal(f.updates.length, 0);
+});
+
+test('startup seeds only unset preview Workspace keys and rolls them back if the work folder changes', async () => {
+  const entered = deferred(), release = deferred();
+  const f = fixture({ connection: { repository: 'https://github.com/example/skills', localPath: path.resolve('selected-repository') },
+    onUpdate: async (key, value) => { if (key === 'prerelease.repositoryUrl' && value !== undefined) { entered.resolve(); await release.promise; } } });
+  f.vscode.workspace.workspaceFolders.push({ uri: { fsPath: path.resolve('opened-work-folder') } });
+  const opening = f.open(); await entered.promise;
+  f.changeConfiguration('projectRoot', path.resolve('different-work-folder')); release.resolve();
+  await assert.rejects(opening, /work-folder setting changed while opening/);
+  assert.equal(f.settings.has('prerelease.repositoryUrl'), false);
+  assert.equal(f.settings.has('prerelease.localRepositoryPath'), false);
+  assert.equal(f.controllers.length, 0);
+  assert(f.updates.every(update => update.target === f.vscode.ConfigurationTarget.Workspace));
+});
+
+test('Palette repository actions capture the current in-panel edit before dispatch', async () => {
+  const f = fixture(), panel = await f.open(); f.events.length = 0;
+  const action = f.commands.get('skillBuilder.openRepositorySkill')();
+  await new Promise(resolve => setImmediate(resolve));
+  const request = panel.messages.find(message => message.type === 'captureEditorBuffer');
+  assert(request?.requestId);
+  assert(!f.events.some(event => event.type === 'dispatch'));
+  await panel.receive({ action: 'editorBufferCaptured', requestId: request.requestId, editorSkillId: 'meeting-notes', editorPath: 'SKILL.md', editorContent: 'Latest unsaved edit' });
+  await action;
+  const message = f.events.find(event => event.type === 'dispatch' && event.action === 'openRepositorySkill').message;
+  assert.equal(message.editorContent, 'Latest unsaved edit'); assert.equal(message.editorSkillId, 'meeting-notes');
+});
+
+test('Palette actions stop if settings change before the editor capture returns', async () => {
+  const f = fixture(), panel = await f.open(); f.events.length = 0;
+  const action = f.commands.get('skillBuilder.pullRepository')();
+  await new Promise(resolve => setImmediate(resolve));
+  const request = panel.messages.find(message => message.type === 'captureEditorBuffer');
+  f.changeConfiguration('prerelease.repositoryUrl', 'https://github.com/new/skills');
+  await panel.receive({ action: 'editorBufferCaptured', requestId: request.requestId });
+  await assert.rejects(action, /settings changed before the action began/);
+  assert(!f.events.some(event => event.type === 'dispatch' && event.action === 'pullRepository'));
+});
+
+test('obsolete webview setup messages cannot create repositories or overwrite native choices', async () => {
+  const f = fixture(), panel = await f.open(); f.events.length = 0;
+  for (const action of ['chooseWorkspace', 'connectRepository', 'setRepositoryFolder', 'discoverRepositories', 'createRepository', 'connectGitHub']) {
+    await panel.receive({ action, payload: { confirmed: true, repository: 'https://github.com/unreviewed/destination', nativeCommand: true } });
+  }
+  assert(!f.events.some(event => event.type === 'dispatch'));
+  assert.equal(f.updates.length, 0);
+  assert.match(f.controllers[0].state.error, /settings gear/);
+});
+
+test('Pull protects unsaved documents in newly configured B instead of cached repository A', async () => {
+  const oldPath = path.resolve('selected-repository-a'), newPath = path.resolve('selected-repository-b');
+  const f = fixture({ connection: { repository: 'https://github.com/example/a', localPath: oldPath } }), panel = await f.open();
+  f.settings.set('prerelease.repositoryUrl', 'https://github.com/example/b');
+  f.settings.set('prerelease.localRepositoryPath', newPath);
+  let savedOld = 0, savedNew = 0;
+  f.vscode.workspace.textDocuments.push(
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(oldPath, 'notes/SKILL.md') }, async save() { savedOld++; return true; } },
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(newPath, 'notes/SKILL.md') }, async save() { savedNew++; return false; } }
+  );
+  f.events.length = 0;
+  await panel.receive({ action: 'pullRepository' });
+  assert.equal(savedNew, 1); assert.equal(savedOld, 0);
+  assert(!f.events.some(event => event.type === 'dispatch' && event.action === 'pullRepository'));
+  assert.match(f.controllers[0].state.error, /could not be saved/);
+});
+
+test('settings changed during an external save cannot hand Pull a newer unchecked destination', async () => {
+  const localPath = path.resolve('selected-b'), entered = deferred(), release = deferred();
+  const f = fixture(), panel = await f.open();
+  f.settings.set('prerelease.repositoryUrl', 'https://github.com/example/b');
+  f.settings.set('prerelease.localRepositoryPath', localPath);
+  f.vscode.workspace.textDocuments.push({ isDirty: true, uri: { scheme: 'file', fsPath: path.join(localPath, 'SKILL.md') }, async save() { entered.resolve(); await release.promise; return true; } });
+  f.events.length = 0; const before = panel.htmlWrites;
+  const action = panel.receive({ action: 'pullRepository', editorSkillId: 'sample', editorPath: 'SKILL.md', editorContent: 'Newer in-panel edit' });
+  await entered.promise;
+  f.changeConfiguration('prerelease.repositoryUrl', 'https://github.com/example/c');
+  f.changeConfiguration('prerelease.localRepositoryPath', path.resolve('selected-c'));
+  release.resolve(); await action; await new Promise(resolve => setImmediate(resolve));
+  assert(!f.events.some(event => event.type === 'dispatch' && event.action === 'pullRepository'));
+  assert.match(f.controllers[0].state.error, /Settings changed while preparing/);
+  assert.equal(panel.htmlWrites, before, 'a pre-dispatch failure must not replace the unsaved editor document');
+  assert(panel.messages.some(message => message.type === 'operationComplete' && message.error));
+});
+
+test('reopening the command after a root change preserves the active editor document', async () => {
+  const f = fixture(), panel = await f.open();
+  f.controllers[0].state.active = { id: 'sample', name: 'sample' };
+  const before = panel.htmlWrites;
+  f.changeConfiguration('projectRoot', path.resolve('another-work-folder'));
+  await new Promise(resolve => setImmediate(resolve));
+  await f.commands.get('skillBuilder.openWorkbench')();
+  assert.equal(f.panels.length, 1); assert.equal(panel.htmlWrites, before);
+  assert(panel.messages.some(message => message.type === 'configurationChanged' && message.display.invalid));
+  assert.equal(f.controllers[0].state.active.id, 'sample');
 });

@@ -4,7 +4,7 @@
 
 Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-The **0.13.0 public preview** includes the reviewed file-move publication fix from stable **0.12.1**. Its higher version restores pre-release discovery and channel switching in VS Code. It identifies itself inside the workbench and stores its drafts, history, packages and repository connection in `.skilljetty-prerelease` beneath the selected work folder. It does not automatically import or migrate stable or local-beta data. Absolute or escaping inherited skills/export directory settings fall back to channel-local defaults. Import an existing skill explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
+The **0.13.1 public preview** puts setup in VS Code **Extension Settings**, opened by the workbench gear. The workbench shows a compact read-only configuration summary. It retains the reviewed publication fix from stable **0.12.1**, keeps preview work isolated in `.skilljetty-prerelease` beneath your work folder, and remains newer than stable for channel switching. No stable or local-beta data is automatically moved. Import a package explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -18,7 +18,17 @@ The preview acknowledges clicks with an activity indicator and explains what is 
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.13.0** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.13.1** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
+
+## Set up using the gear
+
+Open the workbench gear, or the extension's gear → **Extension Settings**, and choose **Workspace** for this project's paths. Set **Project Root** to your editing work folder, or leave it blank when that folder is already open. Set **Prerelease: Repository URL** to the sharing destination and **Prerelease: Local Repository Path** to its local Git root containing `.git`. That Git folder is separate from the work folder holding drafts. Do not put credentials in a repository address.
+
+Existing saved preview connections are preserved and prefilled into unset Workspace repository fields when possible; explicit User/Workspace choices are not replaced. An explicitly empty repository URL disconnects new sharing. An explicitly empty local path disables local reuse while still permitting upload through an isolated temporary download. Resetting an unconfigured field can retain the existing per-work-folder association.
+
+Saving settings does not pull, clone, create repositories, sign in or upload. Use **Ctrl+Shift+P** (macOS **Cmd+Shift+P**) for explicit **SkillJetty: Verify Skills Repository**, **Pull Skills Repository**, **Open Skill from Repository**, **Connect GitHub Account**, or **Create GitHub Repository** commands. Creation asks for name/visibility and confirmation; set the resulting address in Settings to use it. The gear remains available while work is running. Work-folder changes preserve the current draft until you save and reopen the workbench; repository changes require a fresh sharing summary before upload.
+
+The three older integration settings remain available but do not relocate guided drafts or releases. See the [settings and folder guide](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Settings-and-Repository-Setup) for the complete field reference, examples and diagrams.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
@@ -49,7 +59,7 @@ Skills/
       original.skill           # only for an originally imported package
 ```
 
-Only existing supporting folders are included. Complex nested files and binary assets are preserved. First versions need changelogs too. Past versions are immutable; publish a new version for changes.
+Only existing supporting folders are included. Complex nested files and binary assets are preserved. First versions need changelogs too. Prefer a new version for changes; explicitly choosing an existing number replaces that version while retaining recovery copies and Git history.
 
 For GitHub.com, submission uploads a **review branch** and creates a **pull request**, reusing an existing matching PR when retried. Review and merge follow your repository's rules. Approval alone does not put the skill on the default branch; the workbench never merges automatically. It does not upload the skill into an AI application or publish this extension to the Marketplace.
 
@@ -76,9 +86,9 @@ See [the short workflow and recovery guide](docs/workbench-guide.md).
 
 ## Requirements and development
 
-VS Code 1.90+. Publishing requires Git, a configured commit identity, and repository access. GitHub.com PR creation, reviewer selection and status checks use **VS Code's GitHub sign-in**. Git push access and API access are separate: SkillJetty checks API access before a fresh GitHub submission. Use **Connect GitHub account** or **Switch GitHub account** if the signed-in account cannot access the destination. Your repository or organization may require additional authorization.
+VS Code 1.90+. Publishing requires Git, a configured commit identity, and repository access. GitHub.com PR creation, reviewer selection and status checks use **VS Code's GitHub sign-in**. Git push access and API access are separate: SkillJetty checks API access before a fresh GitHub submission. Use **SkillJetty: Connect GitHub Account** if the signed-in account cannot access the destination. Your repository or organization may require additional authorization.
 
-Repository discovery and creation still use your signed-in **GitHub CLI** account; entering an existing repository URL does not require that discovery step. The new PR tools do not require the CLI. No model credentials, paid service, or global validator installation is required. SkillJetty does not store your GitHub token in project files.
+Creating a new repository still uses your signed-in **GitHub CLI** account. Entering an existing repository address does not require discovery. PR tools do not require the CLI. No model credentials, paid service, or global validator installation is required. SkillJetty does not store your GitHub token in project files.
 
 ```sh
 npm install

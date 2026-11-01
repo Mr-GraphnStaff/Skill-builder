@@ -9,16 +9,22 @@ function harness(overrides = {}) {
   const html = renderGuidedWorkbench(state, 'feedbackTestNonce');
   const source = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)[1];
   const elements = new Map();
+  const lifecycle = { focusCalls: 0, stateWrites: 0 };
   function element(id, extra = {}) {
     const value = { id, dataset: {}, hidden: false, textContent: '', disabled: false, value: '', attributes: {},
       setAttribute(name, text) { this.attributes[name] = text; }, removeAttribute(name) { delete this.attributes[name]; },
-      focus() {}, addEventListener() {}, ...extra };
+      focus() { lifecycle.focusCalls++; }, addEventListener() {}, ...extra };
     elements.set(id, value); return value;
   }
-  const main = element('main-content', { dataset: { step: 'edit', activeId: 'sample', busy: String(!!state.busy), waitingForInput: String(!!state.waitingForInput) } });
+  const main = element('main-content', { dataset: { step: state.step, activeId: 'sample', busy: String(!!state.busy), waitingForInput: String(!!state.waitingForInput) } });
   const editor = element('editorContent', { dataset: { editorPath: 'SKILL.md' }, readOnly: false });
   element('operation-status'); element('operation-indicator', { hidden: true }); element('progress-message'); element('activity-details');
   for (const id of ['client-error', 'save-status', 'retry-save', 'reload-file', 'stepHeading', 'feedback']) element(id);
+  element('workbench-configuration', { dataset: { configurationError: 'false' } });
+  for (const id of ['active-work-folder', 'local-repository-path', 'configured-repository', 'repository-settings-state', 'repository-verification']) {
+    const output = element(id);
+    Object.defineProperty(output, 'innerHTML', { set() { throw new Error('Untrusted HTML insertion'); } });
+  }
   const buttons = [element('check-button'), element('permanently-unavailable', { dataset: { unavailable: 'true' }, disabled: true })];
   const input = element('optional-note'), unavailable = element('unavailable-input', { disabled: true });
   const packagePath = element('packagePath', { value: 'C:\\Downloads\\example.skill' });
@@ -34,13 +40,13 @@ function harness(overrides = {}) {
   const context = { document, window: { addEventListener: (name, handler) => windowHandlers.set(name, handler) },
     Date: { now: () => now },
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
-    clearTimeout: id => timers.delete(id), acquireVsCodeApi: () => ({ getState: () => ({ step: 'edit', activeId: 'sample' }), setState() {},
+    clearTimeout: id => timers.delete(id), acquireVsCodeApi: () => ({ getState: () => ({ step: state.step, activeId: 'sample' }), setState() { lifecycle.stateWrites++; },
       postMessage(message) { posted.push({ message, label: elements.get('progress-message').textContent, spinning: !elements.get('operation-indicator').hidden }); } }) };
   new vm.Script(source).runInNewContext(context);
   const click = action => handlers.get('click')({ preventDefault() {}, target: { closest: () => ({ dataset: { action } }) } });
   const receive = message => windowHandlers.get('message')({ data: message });
   const fire = delay => { const entry = [...timers].find(([, timer]) => timer.delay === delay); assert(entry, `missing ${delay}ms timer`); timers.delete(entry[0]); entry[1].callback(); };
-  return { html, main, editor, elements, buttons, posted, timers, click, receive, fire, advance: ms => { now += ms; }, submitPath: () => formSubmit({ preventDefault() {} }) };
+  return { html, main, editor, elements, element, lifecycle, buttons, posted, timers, click, receive, fire, advance: ms => { now += ms; }, submitPath: () => formSubmit({ preventDefault() {} }) };
 }
 
 test('startup sends no automatic skill load and explicit load shows immediate activity', () => {
@@ -208,4 +214,100 @@ test('elapsed processing time excludes time spent choosing a package', () => {
   assert.match(h.elements.get('activity-details').textContent, /^0s elapsed/);
   h.advance(2000); h.fire(1000);
   assert.match(h.elements.get('activity-details').textContent, /^2s elapsed/);
+});
+
+test('native command capture acknowledges the current unsaved editor buffer without saving or starting work', () => {
+  const h = harness();
+  h.editor.value = 'Typed locally but not saved yet.';
+  const timers = h.timers.size;
+  h.receive({ type: 'captureEditorBuffer', requestId: 'bound-request-123', action: 'publish' });
+  assert.equal(h.posted.length, 1);
+  const captured = h.posted[0].message;
+  assert.equal(captured.action, 'editorBufferCaptured');
+  assert.equal(captured.requestId, 'bound-request-123');
+  assert.equal(captured.editorSkillId, 'sample');
+  assert.equal(captured.editorPath, 'SKILL.md');
+  assert.equal(captured.editorContent, 'Typed locally but not saved yet.');
+  assert.equal(h.posted[0].spinning, false);
+  assert.equal(h.editor.readOnly, false);
+  assert.equal(h.buttons[0].disabled, false);
+  assert.equal(h.timers.size, timers);
+  assert.equal(h.editor.value, 'Typed locally but not saved yet.');
+});
+
+test('buffer capture responds while busy without unlocking controls or dispatching a supplied action', () => {
+  const h = harness(); h.click('check');
+  h.receive({ type: 'captureEditorBuffer', requestId: 'busy-request', action: 'publish' });
+  assert.equal(h.posted.length, 2);
+  assert.equal(h.posted[1].message.action, 'editorBufferCaptured');
+  assert.equal(h.posted[1].message.requestId, 'busy-request');
+  assert.equal(h.buttons[0].disabled, true);
+  assert.equal(h.editor.readOnly, true);
+  assert.equal(h.elements.get('progress-message').textContent, 'Running a structural sanity check…');
+  h.receive({ type: 'captureEditorBuffer', requestId: 7 });
+  assert.equal(h.posted.length, 2, 'malformed request ids are ignored');
+});
+
+test('settings gear does not capture or flush a pending editor save', () => {
+  const h = harness(); h.click('save');
+  h.editor.value = 'Still typing during save.';
+  h.click('openSettings');
+  assert.equal(h.posted.length, 2);
+  assert.equal(h.posted[1].message.action, 'openSettings');
+  assert.deepEqual(Object.keys(h.posted[1].message), ['action']);
+  assert.equal(h.editor.value, 'Still typing during save.');
+  assert.equal(h.editor.readOnly, false);
+});
+
+test('targeted configuration updates preserve newer unsaved text after an earlier autosave advanced the server', () => {
+  const h = harness({ editor: { path: 'SKILL.md', content: 'Original page baseline.' } });
+  h.editor.value = 'First edit saved to the server.';
+  h.click('save');
+  h.receive({ type: 'saved' });
+  const latest = 'Second edit typed after autosave.\n</textarea><script>not executable</script>';
+  h.editor.value = latest;
+  const counts = { ...h.lifecycle }, timerCount = h.timers.size, posts = h.posted.length;
+  const hostile = '<img src=x onerror=hostile()>';
+  h.receive({ type: 'configurationChanged', display: { workFolder: 'P:/Active work', localRepository: hostile,
+    repository: 'https://github.com/changed/Skills', invalid: false, notice: hostile } });
+  assert.equal(h.editor.value, latest, 'targeted updates must not restore any earlier editor baseline');
+  assert.equal(h.editor.readOnly, false);
+  assert.deepEqual(h.lifecycle, counts, 'no focus move or persisted editor snapshot');
+  assert.equal(h.timers.size, timerCount, 'no autosave scheduled');
+  assert.equal(h.posted.length, posts, 'no operation or editor acknowledgement sent');
+  assert.equal(h.elements.get('active-work-folder').textContent, 'P:/Active work');
+  assert.equal(h.elements.get('local-repository-path').textContent, hostile);
+  assert.equal(h.elements.get('repository-verification').textContent, hostile);
+  assert.equal(h.elements.get('repository-settings-state').textContent, 'Not yet verified');
+});
+
+test('configuration changes disable only stale upload while preserving local save and the settings route', () => {
+  const h = harness({ step: 'publish' });
+  const upload = h.element('primary-action');
+  const localSave = h.element('local-package-button');
+  h.element('publish-form', { dataset: { formAction: 'publish' } });
+  h.receive({ type: 'configurationChanged', display: { workFolder: 'P:/Active work', localRepository: '',
+    repository: '', invalid: true, notice: 'Correct your repository in Settings.' } });
+  assert.equal(upload.disabled, true);
+  assert.equal(upload.dataset.unavailable, 'true');
+  assert.equal(localSave.disabled, false);
+  assert.equal(h.elements.get('workbench-configuration').dataset.configurationError, 'true');
+  assert.equal(h.elements.get('repository-settings-state').textContent, 'Needs attention');
+  assert.match(h.elements.get('repository-verification').textContent, /review a fresh submission summary/);
+  h.click('publish');
+  assert.equal(h.posted.length, 0, 'implicit or programmatic upload cannot use the stale review');
+  h.click('openSettings');
+  assert.equal(h.posted[0].message.action, 'openSettings');
+  h.click('savePackage');
+  assert.equal(h.posted[1].message.action, 'savePackage');
+});
+
+test('a local-only package primary remains available after settings change', () => {
+  const h = harness({ step: 'publish' });
+  const save = h.element('primary-action');
+  h.element('publish-form', { dataset: { formAction: 'savePackage' } });
+  h.receive({ type: 'configurationChanged', display: { workFolder: 'P:/Active work', localRepository: '', repository: '', invalid: false, notice: 'Settings updated.' } });
+  assert.equal(save.disabled, false);
+  h.click('savePackage');
+  assert.equal(h.posted[0].message.action, 'savePackage');
 });

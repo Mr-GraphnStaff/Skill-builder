@@ -133,11 +133,11 @@ export function activate(context: vscode.ExtensionContext) {
   });
   activateGuidedWorkbench(context, { getRoot: async () => {
     const root = getWorkspaceRoot();
-    if (!root) return undefined;
     const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
+    if (!root && (!configured || !path.isAbsolute(configured))) return undefined;
     // The public prerelease always receives an isolated child data tree. Opening the same
     // VS Code workspace as production does not share its drafts or repository.
-    const selected = prereleaseWorkspaceRoot(root, configured);
+    const selected = prereleaseWorkspaceRoot(root ?? configured, configured);
     return selected.split(/[\\/]/).some(segment => segment.toLowerCase() === '.codex') ? undefined : selected;
   } });
 

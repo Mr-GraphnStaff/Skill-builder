@@ -26,6 +26,10 @@ export function createGitHubSessionRunner(getToken: () => Promise<string>, reque
       let req: import('node:http').ClientRequest | undefined;
       const finish = (error?: Error, value?: unknown) => { if (settled) return; settled = true; clearTimeout(deadline); emitWorkbenchMetric(sink, { stage: 'githubRequest', operation, durationMs: performance.now() - started, statusCode, timedOut, outcome: error ? 'error' : 'ok' }); if (error) { responseStream?.destroy(); req?.destroy(); reject(error); } else resolve(value); };
       const deadline = setTimeout(() => { timedOut = true; finish(new Error('GitHub request timed out.')); }, Math.max(1, Math.min(timeoutMs, 30_000)));
+      if (request.method !== 'GET') {
+        try { request.beforeWrite?.(); }
+        catch (error) { finish(error instanceof Error ? error : new Error('Settings changed before the GitHub write.')); return; }
+      }
       try { req = requestFactory({ protocol: 'https:', hostname: 'api.github.com', port: 443, rejectUnauthorized: true, path: `/${request.endpoint}`, method: request.method,
         headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}`, 'User-Agent': 'SkillJetty', ...(body === undefined ? {} : { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }) } }, response => {
         responseStream = response;

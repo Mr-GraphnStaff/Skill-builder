@@ -29,6 +29,54 @@ test('performance log is in Activity from the first screen through busy later st
   }
 });
 
+test('read-only configuration and its labelled settings gear remain available on every screen', () => {
+  for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
+    for (const hasWorkspace of [false, true]) {
+      const html = renderGuidedWorkbench(state({ step, hasWorkspace, busy: true,
+        workFolder: 'P:/Actual <work>/folder', configuredRepository: 'https://github.com/desired/Skills',
+        configuredLocalRepository: 'P:/Desired <repo>',
+        check: { valid: true, errors: [], warnings: [], compatibility: '', behaviorNote: '' },
+        publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
+      assert.equal((html.match(/id="open-settings"/g) || []).length, 1);
+      assert.match(html, /id="open-settings"[^>]*data-action="openSettings"[^>]*aria-label="Open SkillJetty settings"/);
+      assert.doesNotMatch(html, /<button[^>]*id="open-settings"[^>]*\bdisabled/);
+      assert.match(html, /id="active-work-folder">P:\/Actual &lt;work&gt;\/folder<\/dd>/);
+      assert.match(html, /id="configured-repository">https:\/\/github.com\/desired\/Skills<\/dd>/);
+      assert.match(html, /id="local-repository-path">P:\/Desired &lt;repo&gt;<\/dd>/);
+      assert.doesNotMatch(html, /id="repository-form"|id="create-repository-form"|id="repository-settings"|data-action="connectGitHub"|data-action="pullRepository"|data-action="verifyRepository"|data-action="setRepositoryFolder"/);
+    }
+  }
+});
+
+test('empty settings do not resurrect saved repository values and unconfigured users have a settings route', () => {
+  const html = renderGuidedWorkbench(state({ configuredRepository: '', configuredLocalRepository: '', hasWorkspace: false }), nonce);
+  assert.match(html, /id="configured-repository">Not configured<\/dd>/);
+  assert.match(html, /id="local-repository-path">Not configured<\/dd>/);
+  assert.match(html, /id="active-work-folder">Not selected<\/dd>/);
+  assert.match(html, /set an absolute Project Root in SkillJetty settings, then reopen the workbench/);
+  assert.match(html, /id="open-settings"/);
+  assert.doesNotMatch(html, /data-action="chooseWorkspace"/);
+});
+
+test('invalid settings do not disclose rejected credentials or claim the new configuration is verified', () => {
+  const secret = 'never-display-this-password';
+  const html = renderGuidedWorkbench(state({ configuredRepository: `https://account:${secret}@github.com/new/Skills`,
+    configuredLocalRepository: 'P:/Rejected <folder>', configurationError: `Invalid URL ${secret}`,
+    repositoryVerification: { status: 'verified', message: 'Saved connection verified' } }), nonce);
+  assert.doesNotMatch(html, new RegExp(secret));
+  assert.doesNotMatch(html, /Rejected &lt;folder&gt;|Saved connection verified/);
+  assert.match(html, /id="repository-settings-state">Needs attention<\/dd>/);
+  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/Skills.git<\/dd>/);
+});
+
+test('invalid native settings keep local packaging available without enabling upload through a saved connection', () => {
+  const html = renderGuidedWorkbench(state({ step: 'publish', configurationError: 'Invalid native setting',
+    publish: { version: '1.0.0', changelog: '', fileCount: 1, reviewSupported: true } }), nonce);
+  assert.match(html, /id="publish-form"[^>]*data-form-action="savePackage"/);
+  assert.match(html, /id="primary-action"[^>]*>Save package on this computer/);
+  assert.doesNotMatch(html, /data-form-action="publish"|>Upload &amp; create PR|>Upload version|Submitting to/);
+});
+
 test('saved skills are opt-in and unloaded content is not rendered', () => {
   const saved = { drafts: [{ id: 'private-draft', name: 'private-draft' }], library: [{ skillName: 'private-release', version: '1.0.0', directory: 'local', status: 'archived' }] };
   const unloaded = renderGuidedWorkbench(state(saved), nonce);
@@ -72,16 +120,12 @@ test('each guided step marks progress; Start offers equal choices and later step
   }
 });
 
-test('start uses inline repository selection and preserves create inputs without a branch prompt', () => {
+test('start keeps local skill choices while repository setup lives in native settings', () => {
   const repository = renderGuidedWorkbench(state({ connection: undefined, repositories: [{ label: 'My Skills', repository: 'https://github.com/example/Skills.git' }] }), nonce);
-  assert.match(repository, /<select id="repository-choice"/);
-  assert.match(repository, /id="repository" name="repository"/);
-  assert.doesNotMatch(repository, /<(?:input|select)[^>]+(?:id|name)="[^"]*branch/i);
-  assert.match(repository, /data-form-action="connectRepository"/);
-  assert.match(repository, /<button type="submit" class="secondary">Connect repository/);
+  assert.match(repository, /id="open-settings"[^>]*data-action="openSettings"/);
+  assert.doesNotMatch(repository, /id="repository-choice"|id="repository-form"|id="repository" name="repository"|data-form-action="connectRepository"|id="create-repository-form"/);
   for (const action of ['showCreate', 'openPackage', 'openFolder']) assert.match(repository, new RegExp(`data-action="${action}"`));
   assert.match(repository, /No repository connection is needed to create, open, or edit a skill/);
-  assert(repository.indexOf('class="start-choices"') < repository.indexOf('id="repository-form"'));
   assert.doesNotMatch(repository, /id="primary-action"/);
   const creation = renderGuidedWorkbench(state({ form: { mode: 'create', name: 'weekly-status', description: 'Summarize project updates.', instructions: 'Keep unknowns explicit.' } }), nonce);
   assert.match(creation, /id="skillName"[^>]*value="weekly-status"/);
@@ -101,10 +145,11 @@ test('skill contents and paths remain inert text, including textarea and script 
   assert.match(html, /&lt;unsafe&gt;/);
 });
 
-test('repository discovery leaves Start connection controls expanded so the returned choices are visible', () => {
-  const html = renderGuidedWorkbench(state({ repositories: [{ label: 'My Skills', repository: 'https://github.com/example/Skills.git' }] }), nonce);
-  assert.match(html, /<details class="optional" open><summary>Change the connected repository<\/summary>/);
-  assert.match(html, /<select id="repository-choice"/);
+test('legacy repository form state returns to local Start choices and native settings', () => {
+  const html = renderGuidedWorkbench(state({ form: { mode: 'repository' }, repositories: [{ label: 'My Skills', repository: 'https://github.com/example/Skills.git' }] }), nonce);
+  assert.match(html, /data-action="showCreate"/);
+  assert.match(html, /data-action="openSettings"/);
+  assert.doesNotMatch(html, /id="repository-form"|id="repository-choice"|form="repository-form"/);
 });
 
 test('serialized file data restores both textarea values before the baseline without opening a script boundary', () => {
@@ -159,7 +204,8 @@ test('check and publish explain their limits and show actionable file findings',
   assert.match(publish, /Editable source/);
   assert.match(publish, /Installable .skill package/);
   assert.match(publish, /CHANGELOG.md/);
-  assert.match(publish, /Change or reconnect the repository/);
+  assert.match(publish, /id="open-settings"[^>]*aria-label="Open SkillJetty settings"/);
+  assert.doesNotMatch(publish, /Change or reconnect the repository|id="repository-form"/);
   assert.match(publish, /form="publish-form"[^>]*>Upload &amp; create PR/);
   assert.match(publish, /Step 4: <\/span>Submit/);
   assert.match(publish, /data-action="loadReviewers"/);
@@ -196,16 +242,14 @@ test('submission reviewer choice is optional, escaped and explicitly discloses n
   assert.match(html, /reviewer, confirmed: !!reviewer/);
 });
 
-test('GitHub account control delegates consent to VS Code and does not solicit a token', () => {
+test('GitHub account is read-only and reviewer state remains scoped to the host account', () => {
   const connect = renderGuidedWorkbench(state(), nonce);
-  assert.match(connect, /data-action="connectGitHub"[^>]*>Connect GitHub account/);
-  assert.match(connect, /VS Code manages sign-in and asks you to allow repository access/);
-  assert.match(connect, /Cancel keeps your draft unchanged/);
+  assert.match(connect, /GitHub sign-in are available in the Command Palette/);
+  assert.doesNotMatch(connect, /data-action="connectGitHub"/);
   assert.doesNotMatch(connect, /type="password"|name="token"|name="pat"/);
   const switched = renderGuidedWorkbench(state({ githubAccount: 'Account <unsafe>' }), nonce);
   assert.match(switched, /Account &lt;unsafe&gt;/);
-  assert.match(switched, /data-action="connectGitHub"[^>]*>Switch GitHub account/);
-  assert.match(switched, /key\.endsWith\(':reviewer'\)/);
+  assert.doesNotMatch(switched, /data-action="connectGitHub"/);
   assert.match(switched, /element\.name === 'reviewer' && reviewerContextChanged/);
 });
 

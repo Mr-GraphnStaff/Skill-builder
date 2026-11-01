@@ -13,6 +13,7 @@ import { githubRepository, GitHubReviewService, type GitHubRunner, type ReviewCo
 import type { PullRequestRecord } from './guided-contract.js';
 import { resolveRepositoryDefaultBranch, verifyRepositoryBranchCommit, prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview } from './repository-publisher.js';
 import { measureWorkbenchPhase, currentWorkbenchMetrics } from './workbench-metrics.js';
+import { validateLocalRepositorySelection } from './repository-settings.js';
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
 const MAX_TEXT = 16 * 1024 * 1024;
@@ -137,13 +138,15 @@ export function setWorkspaceRepositoryFolder(root: string, localPath: string): W
   const updated = { ...connection, localPath: path.resolve(localPath) };
   saveWorkspaceConnection(root, updated); return updated;
 }
-export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
+export async function connectWorkspaceRepository(root: string, repository: string, options?: { localPath?: string; beforeSave?: () => void }): Promise<WorkspaceConnection> {
   repository = validateRepository(repository);
+  if (options) await validateLocalRepositorySelection(repository, options.localPath);
   const baseBranch = await resolveRepositoryDefaultBranch(repository);
   let previous: WorkspaceConnection | undefined;
   try { previous = getWorkspaceConnection(root); } catch { /* Reconnection can repair damaged metadata. */ }
-  const connection: WorkspaceConnection = { repository, baseBranch,
-    ...(previous?.localPath && sameRepository(previous.repository, repository) ? { localPath: previous.localPath } : {}) };
+  const localPath = options ? options.localPath : previous?.localPath && sameRepository(previous.repository, repository) ? previous.localPath : undefined;
+  const connection: WorkspaceConnection = { repository, baseBranch, ...(localPath ? { localPath } : {}) };
+  options?.beforeSave?.();
   saveWorkspaceConnection(root, connection);
   // Repair matching old per-skill branch selections such as "makeitfire".
   // Other associated destinations are left alone until that draft is published
@@ -260,15 +263,16 @@ function sameFiles(left: { path: string; size: number; sha256: string }[], right
 }
 
 /** Called only from the guided screen's explicit Publish version action. */
-export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: import('./guided-contract.js').GuidedProgress, options: { deferCleanup?: boolean; expectedFiles?: FileDigest[] } = {}): Promise<GuidedPublication> {
-  const saved = getWorkspaceConnection(root);
+export async function publishGuidedSkill(root: string, id: string, version: string, changelog: string, onProgress?: import('./guided-contract.js').GuidedProgress, options: { deferCleanup?: boolean; expectedFiles?: FileDigest[]; connection?: WorkspaceConnection; beforeWrite?: () => void } = {}): Promise<GuidedPublication> {
+  const saved = options.connection ?? getWorkspaceConnection(root);
   if (!saved) throw new Error('Connect your skill repository first.');
   const skill = listWorkbenchSkills(root).find(item => item.id === id);
   if (!skill) throw new Error('Choose an active draft before publishing.');
   onProgress?.('Checking your connected repository.');
   // Resolve again immediately before publishing. A saved base branch is not
   // trusted after remote configuration changes, and never comes from a name box.
-  const connection = await connectWorkspaceRepository(root, saved.repository);
+  options.beforeWrite?.();
+  const connection = await connectWorkspaceRepository(root, saved.repository, options.connection ? { localPath: saved.localPath, beforeSave: options.beforeWrite } : undefined);
   onProgress?.('Connected repository verified.', 'succeeded');
   updateSkillRepository(root, skill.id, connection.repository, connection.baseBranch);
   onProgress?.('Checking the draft against the reviewed file summary…');
@@ -302,7 +306,7 @@ export async function publishGuidedSkill(root: string, id: string, version: stri
   if (options.expectedFiles && !sameFiles(release.manifest.files, options.expectedFiles)) throw new Error('The prepared release differs from the reviewed sharing summary. The local files are preserved and nothing was uploaded. Review a fresh summary.');
   const preview = await prepareRepositoryPublish(release.directory, connection.repository, connection.baseBranch, onProgress, true, { localPath: connection.localPath });
   try {
-    const publication = await pushPreparedRelease(preview, onProgress);
+    const publication = await pushPreparedRelease(preview, onProgress, options.beforeWrite);
     onProgress?.('Upload commit confirmed by the destination repository.', 'succeeded');
     let cleanup: GuidedPublication['cleanup']; let cleanupError: string | undefined;
     try {
@@ -322,22 +326,27 @@ function connectedRepository(root: string, repository: string): boolean {
 }
 
 export function connectedReviewReleases(root: string): LibraryRelease[] {
-  return listLibraryReleases(root, undefined, { verifyPayload: false }).filter(item => item.status === 'uploaded' && !!item.repository && connectedRepository(root, item.repository));
+  // Saved submissions retain their own destination even after native settings
+  // select a different repository. Actions below use that explicit receipt.
+  return listLibraryReleases(root, undefined, { verifyPayload: false }).filter(item => item.status === 'uploaded' && !!item.repository);
 }
 
 export function libraryReviewContext(root: string, directory: string): { item: LibraryRelease; context: ReviewContext } {
   if (typeof directory !== 'string') throw new Error('Choose a recorded uploaded version.');
   const item = connectedReviewReleases(root).find(release => path.resolve(release.directory) === path.resolve(directory));
-  const connection = getWorkspaceConnection(root);
-  if (!item?.repository || !item.branch || !item.commit || !connection) throw new Error('This version has no verified upload in the connected repository. Connect its recorded repository before checking or creating its PR.');
+  let connection: WorkspaceConnection | undefined;
+  try { connection = getWorkspaceConnection(root); } catch { /* A complete historical receipt supplies its own destination and base. */ }
+  if (!item?.repository || !item.branch || !item.commit) throw new Error('This version has no verified upload receipt.');
+  const baseBranch = item.baseBranch ?? (connection && sameRepository(connection.repository, item.repository) ? connection.baseBranch : undefined);
+  if (!baseBranch) throw new Error('This historical upload has no recorded target branch. Reconnect its recorded repository before checking or creating its PR.');
   verifySkillRelease(item.directory);
-  return { item, context: { repository: item.repository, baseBranch: item.baseBranch ?? connection.baseBranch, branch: item.branch, commit: item.commit, skillName: item.skillName, version: item.version } };
+  return { item, context: { repository: item.repository, baseBranch, branch: item.branch, commit: item.commit, skillName: item.skillName, version: item.version } };
 }
 
-export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer' | 'merge', reviewer?: string, runner?: GitHubRunner, onProgress?: import('./guided-contract.js').GuidedProgress): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
+export async function reviewLibraryRelease(root: string, directory: string, action: 'check' | 'create' | 'reviewer' | 'merge', reviewer?: string, runner?: GitHubRunner, onProgress?: import('./guided-contract.js').GuidedProgress, beforeWrite?: () => void): Promise<{ pr: PullRequestRecord; cleanupError?: string }> {
   onProgress?.('Checking the saved upload and pull request identity…');
   const { item, context } = measureWorkbenchPhase('reviewPreparation', currentWorkbenchMetrics(), () => libraryReviewContext(root, directory));
-  const service = new GitHubReviewService(root, runner, onProgress);
+  const service = new GitHubReviewService(root, runner, onProgress, beforeWrite);
   let pr = action === 'merge' ? item.pr ? await service.merge(context, item.pr) : { supported: true, status: 'uploaded' as const, mergeError: 'Create and verify this upload’s PR before merging.' } : action === 'create' ? await service.ensure(context, item.pr) : action === 'reviewer'
     ? item.pr ? await service.requestReviewer(context, item.pr, reviewer ?? '') : { supported: !!githubRepository(context.repository), status: 'uploaded' as const, reviewRequestError: 'Create the PR before requesting a reviewer.' }
     : await service.check(context, item.pr);

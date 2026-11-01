@@ -72,7 +72,8 @@ test('a checked skill can become a usable package without a repository or accoun
   const html = renderGuidedWorkbench(state({ connection: undefined }), nonce);
   assert.match(html, /data-form-action="savePackage"/);
   assert.match(html, /id="primary-action"[^>]*form="publish-form"[^>]*>Save package on this computer/);
-  assert.match(html, /<summary>Optional: share through a repository<\/summary>/);
+  assert.match(html, /configure a repository in SkillJetty settings using the gear above/);
+  assert.doesNotMatch(html, /id="repository-form"/);
   assert.match(html, /No repository or sign-in is needed/);
   assert.doesNotMatch(html, /id="primary-action"[^>]*form="repository-form"/);
 });

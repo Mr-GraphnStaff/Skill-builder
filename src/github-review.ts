@@ -2,8 +2,9 @@ import { deleteBranchWithLease } from './github-branch-delete.js';
 import { mergeVerifiedPullRequest } from './github-merge.js';
 import { runPublisherProcess } from './repository-publisher.js';
 import type { PullRequestRecord, ReviewerChoice } from './guided-contract.js';
+import { RepositoryConfigurationChangedError } from './repository-settings.js';
 
-export type GitHubRequest = { method: 'GET' | 'POST' | 'PUT'; endpoint: string; body?: unknown };
+export type GitHubRequest = { method: 'GET' | 'POST' | 'PUT'; endpoint: string; body?: unknown; beforeWrite?: () => void };
 export type GitHubRunner = (request: GitHubRequest) => Promise<unknown>;
 export type ReviewContext = { repository: string; baseBranch: string; branch: string; commit: string; skillName: string; version: string };
 type Repository = { owner: string; name: string; fullName: string };
@@ -78,15 +79,27 @@ function validateContext(context: ReviewContext): Repository | undefined {
 
 export class GitHubReviewService {
   private readonly run: GitHubRunner;
-  constructor(private readonly cwd: string, runner?: GitHubRunner, private readonly onProgress?: import('./guided-contract.js').GuidedProgress) {
-    this.run = runner ?? (async request => {
+  constructor(private readonly cwd: string, runner?: GitHubRunner, private readonly onProgress?: import('./guided-contract.js').GuidedProgress, private readonly beforeWrite?: () => void) {
+    const run: GitHubRunner = runner ?? (async request => {
       const args = ['api', '--hostname', 'github.com', '--method', request.method, request.endpoint, '--header', 'Accept: application/vnd.github+json'];
       if (request.body !== undefined) args.push('--input', '-');
+      if (request.method !== 'GET') request.beforeWrite?.();
       const result = await runPublisherProcess('gh', args, { cwd, timeoutMs: 30_000,
         env: { ...process.env, GH_HOST: 'github.com', GH_REPO: undefined, GH_DEBUG: undefined, DEBUG: undefined, GH_PAGER: 'cat', GH_PROMPT_DISABLED: '1' },
         ...(request.body === undefined ? {} : { input: JSON.stringify(request.body) }) });
       return JSON.parse(result.stdout);
     });
+    this.run = request => {
+      if (request.method === 'GET' || !this.beforeWrite) return run(request);
+      const guard = () => {
+        try { this.beforeWrite?.(); }
+        catch (error) { throw error instanceof RepositoryConfigurationChangedError ? error : new RepositoryConfigurationChangedError(error instanceof Error ? error.message : undefined); }
+      };
+      guard();
+      // Native authentication may await a token. Its runner invokes this again
+      // at the actual HTTP boundary, after that await.
+      return run({ ...request, beforeWrite: guard });
+    };
   }
   private async pages(endpoint: string): Promise<any[]> {
     const result: any[] = [];
@@ -223,6 +236,7 @@ export class GitHubReviewService {
         this.identity(context, created, previous);
       }
       catch (error) {
+        if (error instanceof RepositoryConfigurationChangedError) throw error;
         try { const reconciled = await this.findForCreation(context); if (reconciled) return await this.status(context, reconciled, previous); } catch { /* Keep the original write ambiguous, never retry POST here. */ }
         return { ...previous, supported: true, status: previous?.status ?? 'uploaded', creationUncertain: true, lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR creation was not confirmed. ${githubError(error)}` };
       }
@@ -231,10 +245,10 @@ export class GitHubReviewService {
       this.onProgress?.('Reading the pull request review status…');
       // Preserve a successfully created PR even if the following reviews read fails.
       return this.check(context, confirmed);
-    } catch (error) { return { ...previous, supported: true, status: previous?.status ?? 'uploaded', lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR not created or verified. ${githubError(error)}` }; }
+    } catch (error) { if (error instanceof RepositoryConfigurationChangedError) throw error; return { ...previous, supported: true, status: previous?.status ?? 'uploaded', lastAttemptAt: new Date().toISOString(), error: `Uploaded — PR not created or verified. ${githubError(error)}` }; }
   }
   async merge(context: ReviewContext, previous: PullRequestRecord): Promise<PullRequestRecord> {
-    return mergeVerifiedPullRequest(context, previous, this.run, current => deleteBranchWithLease(this.cwd, current));
+    return mergeVerifiedPullRequest(context, previous, this.run, current => deleteBranchWithLease(this.cwd, current, undefined, this.beforeWrite));
   }
   async requestReviewer(context: ReviewContext, previous: PullRequestRecord, reviewer: string): Promise<PullRequestRecord> {
     const repo = validateContext(context);

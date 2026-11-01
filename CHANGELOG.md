@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.1 — 2026-11-01 (public pre-release)
+
+- Move repository address and local repository folder configuration into native VS Code Extension Settings, reached by the workbench gear.
+- Replace repeated setup forms with a compact read-only configuration summary; keep repository operations and GitHub sign-in available as explicit SkillJetty commands.
+- Preserve existing preview connections and drafts. Changing settings does not clone, pull, authenticate or publish; changed/invalid destinations block stale writes.
+- Classify the extension as AI and clarify the work folder versus sharing repository settings.
+
 ## 0.13.0 — 2026-11-01 (public pre-release bug fix)
 
 - Restore VS Code pre-release discovery and channel switching by keeping the public preview newer than stable 0.12.1.
