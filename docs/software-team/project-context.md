@@ -1,5 +1,21 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Channel availability and public wiki — November 1, 2026
+
+Preview 0.13.0 was published separately from `codex/public-prerelease` via
+pipeline 12/build 976, source `c750ff6e`, to restore channel switching after stable
+0.12.1 overtook preview 0.11.13. Public exact-package/catalog verification passed
+19:48 UTC; independent actual VS Code action-method checks enabled both switch
+directions at 19:49 UTC. Production runtime and published 0.12.1 are unchanged.
+No home/work PC GUI observation is claimed.
+
+The public wiki is now enabled with user guides, channel status, troubleshooting,
+release notes and a maintenance procedure. Keep it current under
+`docs/wiki-maintenance.md`; source README updates alone do not update the wiki.
+Following David's category complaint, both source manifests specify AI for future
+packages. This post-build metadata preparation does not change either published
+VSIX or establish live category correction. No extra package was published for it.
+
 ## Production hotfix 0.12.1 — November 1, 2026
 
 David authorized immediate correction and production publication after a false
