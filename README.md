@@ -2,9 +2,9 @@
 
 [User guides, channel status and release notes](https://github.com/Mr-GraphnStaff/Skill-builder/wiki)
 
-Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
+Install the stable release of **SkillJetty by DAF-TECH** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace listing and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-The **0.13.1 public preview** puts setup in VS Code **Extension Settings**, opened by the workbench gear. The workbench shows a compact read-only configuration summary. It retains the reviewed publication fix from stable **0.12.1**, keeps preview work isolated in `.skilljetty-prerelease` beneath your work folder, and remains newer than stable for channel switching. No stable or local-beta data is automatically moved. Import a package explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
+The **0.13.2 public preview** puts setup in VS Code **Extension Settings**, opened by the workbench gear. The workbench shows a compact read-only configuration summary. It retains the reviewed publication fix from stable **0.12.1**, keeps preview work isolated in `.skilljetty-prerelease` beneath your work folder, and remains newer than stable for channel switching. No stable or local-beta data is automatically moved. Import a package explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 

@@ -1,8 +1,16 @@
 # SkillJetty contributor instructions
 
+## Public branding
+
+Use **SeñorFarris** (ñ, no space) for the personal brand and **DAF-TECH** for the
+business brand. Product copy says **SkillJetty by DAF-TECH**. Do not use
+DavidFarris or David Farris as public promotional prose. Preserve technical
+publisher IDs, URLs, command/settings names, receipts and compatibility paths;
+a branding correction does not authorize renaming them or publishing a package.
+
 ## Release freeze — October 31, 2026
 
-David Farris has declared a release freeze: bug fixes only, no new features.
+The project owner has declared a release freeze: bug fixes only, no new features.
 The feature set is frozen after 0.11.12; only bug-fix releases may follow. Preserve this scope in team handoffs;
 the lead decides when the freeze ends and when production promotion proceeds.
 On November 1 the owner explicitly authorized one scoped exception: consolidate

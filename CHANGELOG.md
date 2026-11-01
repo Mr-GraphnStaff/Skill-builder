@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.13.2 — 2026-11-01 (public pre-release documentation correction)
+
+- Correct installation copy to SkillJetty by DAF-TECH. The publisher display name is SeñorFarris.
+- Preserve the existing extension identity, preview features and work data; no runtime change.
+
 ## 0.13.1 — 2026-11-01 (public pre-release)
 
 - Move repository address and local repository folder configuration into native VS Code Extension Settings, reached by the workbench gear.
@@ -77,7 +82,7 @@
 
 ## 0.11.4 (public pre-release preparation)
 
-- Prepare the existing `DavidFarris.skill-builder` Marketplace identity with production command, setting and view names, preserving the established listing and icon.
+- Prepare the existing SkillJetty Marketplace listing with production command, setting and view names, preserving the established listing and icon.
 - Identify the public preview and version inside the workbench. Keep its work data under `.skilljetty-prerelease` with a channel-specific repository preference; do not automatically migrate stable or local-beta state.
 - Confine inherited skills and export directory settings to the preview data tree, using safe defaults for absolute or escaping values.
 - Preserve the original local UAT and production checkouts. Packaging, publication, native smoke checks and human UAT are distinct evidence; this preparation does not claim they passed.
@@ -124,7 +129,7 @@
 
 ## 0.7.0
 
-- Introduced SkillJetty by DAF-TECH: Agent Skills Studio — Build it. Version it. Ship it. The permanent Marketplace identity remains DavidFarris.skill-builder.
+- Introduced SkillJetty by DAF-TECH: Agent Skills Studio — Build it. Version it. Ship it. The existing Marketplace listing is preserved.
 - Replaced the normal nested command/tree workflow with a clickable Start → Edit → Check → Publish → Done workbench and a prominent next action on every screen.
 - Kept Open Workbench as the single visible Command Palette entry; clicking the activity icon opens the complete guided editor.
 - Connected one repository per workspace, detecting and verifying its real default branch automatically and repairing old invalid branch associations.
