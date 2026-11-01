@@ -3,13 +3,17 @@
 ## Authorized production promotion — November 1, 2026
 
 David authorized promoting tested pre-release 0.11.13 to production including
-Marketplace publication. Candidate 0.12.0 keeps local diagnostic recording and
+Marketplace publication. Stable 0.12.0 is published and publicly verified. It keeps local diagnostic recording and
 Command Palette access, with no workbench log button or new opt-in setting. This
 explicit November 1 decision supersedes earlier no-command instructions. The
 bug-fix-only freeze remains; no new feature work is authorized. Original 17 release
 changes have recovery copies/patches and retained stash; per-file reconciliation
-and stable isolation are being reviewed. See `2026-11-01-production-0.12.0.md` for
-source, evidence and delivery state. Historical pre-release records below remain.
+and stable isolation passed review. Build 974 passed 332/332 tests and exact-artifact
+native smoke. Upload succeeded once; its catalog wait timed out, then independent
+read-only verification confirmed stable visibility and exact public package bytes.
+Artifact source is main `9b1bc38`; pre-release remains unchanged at `f293bf7`.
+See `2026-11-01-production-0.12.0.md` for evidence and limitations. Historical
+pre-release records below remain.
 
 ## Freeze bug fix: per-skill Activity reset 0.11.13
 
