@@ -18,6 +18,11 @@ and hide channel switching; coordinate the preview release first within the
 owner's publication authority. Merely finding an old preview in history is not
 channel-switch acceptance.
 
+Keep the public GitHub wiki current for every release and user-visible incident.
+The coordinator owns updating Home, Release Channels, Release Notes and affected
+troubleshooting pages before delivery is declared complete. Follow
+`docs/wiki-maintenance.md`; do not label pending publication as validated.
+
 SkillJetty by DAF-TECH is an Agent Skills Studio. This checkout prepares the authorized public pre-release under the existing DavidFarris.skill-builder identity, with production skillBuilder command/view/settings names and the established Marketplace listing and icon. Public prerelease work data belongs under .skilljetty-prerelease and uses a channel-specific repository preference. Do not automatically migrate stable or local-UAT state, and confine inherited skills/export directory overrides to the preview root. The original local beta and production checkouts remain preserved.
 
 The team lead explicitly authorized public pre-release publication on October 28, 2026. Authorization does not establish completed publication, native smoke or human UAT. Verify the exact reviewed public-identity VSIX, pre-release flag, source/build binding and digest before publishing. Never publish the separate local-UAT identity as a second listing. Do not install over a protected production setup as a testing shortcut; native smoke uses a disposable profile and extension directory.

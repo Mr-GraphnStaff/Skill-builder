@@ -1,5 +1,7 @@
 # SkillJetty — Agent Skills Studio
 
+[User guides, channel status and release notes](https://github.com/Mr-GraphnStaff/Skill-builder/wiki)
+
 Install the stable release of **DavidFarris.skill-builder** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace identity and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
 The **0.13.0 public preview** includes the reviewed file-move publication fix from stable **0.12.1**. Its higher version restores pre-release discovery and channel switching in VS Code. It identifies itself inside the workbench and stores its drafts, history, packages and repository connection in `.skilljetty-prerelease` beneath the selected work folder. It does not automatically import or migrate stable or local-beta data. Absolute or escaping inherited skills/export directory settings fall back to channel-local defaults. Import an existing skill explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.

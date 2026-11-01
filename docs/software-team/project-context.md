@@ -1,5 +1,23 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Channel-switch repair and public wiki — November 1, 2026
+
+David explicitly authorized pre-release publication to restore missing switches.
+Preview 0.13.0 is published and independently verified alongside stable 0.12.1.
+Pipeline 12/build 976 source `c750ff6e` passed 328/328 tests and exact-installed
+native smoke; independent security and QA passed. Publish uploaded once, then its
+catalog wait expired. Final exact public payload/catalog verification passed
+19:48 UTC and actual VS Code action-method eligibility passed in both directions
+19:49 UTC. Home/work installed UI remains unobserved. Keep preview numerically
+newer than stable, and verify both channel choices after publication.
+
+The requested public wiki is enabled and populated with user guides, channels,
+troubleshooting and release notes. Both source channels and workspace instructions
+require it kept current before release completion; see `docs/wiki-maintenance.md`.
+AI category is prepared in both source manifests after this build; live category
+metadata editing is a separate follow-up, not a new uploaded package. Detailed
+evidence/limitations: `2026-11-01-prerelease-0.13.0.md`. Bug-fix freeze continues.
+
 ## Freeze bug fix: per-skill Activity reset 0.11.13
 
 David reported history accumulating across skills and explicitly chose a fresh
