@@ -9,7 +9,7 @@ const core = require('../out/skill-workbench.js');
 
 function fixture(t) {
   const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-entrypoint-'));
-  const root = path.join(sandbox, '.skilljetty-prerelease'); fs.mkdirSync(root);
+  const root = path.join(sandbox, 'stable-workspace'); fs.mkdirSync(root);
   t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }));
   const source = path.join(root, 'skills', 'sample');
   fs.mkdirSync(source, { recursive: true });
