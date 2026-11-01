@@ -290,4 +290,3 @@
 - Follow the selected VS Code theme for native control color scheme and high-contrast primary actions.
 - Preserve selected-file metadata and error-message text contrast; keep warning/error meaning in words alongside color.
 - Review the rendered workflow across light, dark, high-contrast dark/light and forced-colors variants, including narrow layouts.
-
