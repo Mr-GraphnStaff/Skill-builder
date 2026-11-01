@@ -203,25 +203,26 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       // or seed another channel, and never overwrite an explicit native choice.
       if (root && vscode.workspace.workspaceFolders?.length) {
         const seeded: Array<{ key: string; value: string }> = [];
-        const configuration = vscode.workspace.getConfiguration('skillBuilder');
         try {
           const saved = getWorkspaceConnection(root);
           if (saved) {
             const seed = async (key: string, value: string) => {
               assertOpeningRoot();
+              const configuration = vscode.workspace.getConfiguration('skillBuilder');
               if (isExplicitSetting(configuration, key)) return;
               seeded.push({ key, value });
               await configuration.update(key, value, vscode.ConfigurationTarget.Workspace);
               assertOpeningRoot();
             };
             await seed(PREVIEW_REPOSITORY_KEY, saved.repository);
-            if (saved.localPath && configuration.get<string>(PREVIEW_REPOSITORY_KEY) === saved.repository) await seed(PREVIEW_LOCAL_REPOSITORY_KEY, saved.localPath);
+            if (saved.localPath && vscode.workspace.getConfiguration('skillBuilder').get<string>(PREVIEW_REPOSITORY_KEY) === saved.repository) await seed(PREVIEW_LOCAL_REPOSITORY_KEY, saved.localPath);
           }
         } catch {
           if (rootGeneration !== workFolderGeneration) {
             // Undo only our still-matching provisional values. Never overwrite
             // an explicit value the user changed while opening the workbench.
             for (const item of seeded.reverse()) {
+              const configuration = vscode.workspace.getConfiguration('skillBuilder');
               if (configuration.inspect<string>(item.key)?.workspaceValue === item.value) await configuration.update(item.key, undefined, vscode.ConfigurationTarget.Workspace);
             }
             assertOpeningRoot();

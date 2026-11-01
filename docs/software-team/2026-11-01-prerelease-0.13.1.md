@@ -38,3 +38,19 @@ The prior AI category source preparation is included in this candidate. Source
 version is 0.13.1, greater than stable 0.12.1 and preview 0.13.0. Build, independent
 final reviews, native installed-artifact checks, public readback and final wiki
 updates are still in progress; no completed new publication is claimed here.
+
+## Native snapshot issue caught before publication
+
+Initial source `4c9b80a80a5f53463191dc1dce1451c3e8dbf9fd` built in pipeline 12/run
+977, passing 358/358 CI tests and exact-artifact review. The actual installed
+native check then failed: the repository address prefilled but the local path did
+not. VS Code configuration objects are snapshots; a pre-update object returned the
+old URL after `update()` completed. No gate approval or upload occurred for 977;
+the run was canceled and its artifact/native failure retained.
+
+The host now reacquires settings for each prefill step, after an awaited update,
+and before conditional rollback. Tests model actual snapshots rather than a live
+mutable map; the two-field prefill and root-change rollback regressions pass.
+Fresh compilation and independent host tests passed 22/22, with independent
+security approval of the narrow correction. A replacement same-version build and
+fresh isolated native fixture are required; earlier artifact review is superseded.

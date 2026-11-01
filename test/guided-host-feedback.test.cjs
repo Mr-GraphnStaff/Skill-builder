@@ -32,7 +32,7 @@ function fixture(options = {}) {
     commands: { registerCommand(id, handler) { commands.set(id, handler); return disposable(); }, async executeCommand(...args) { events.push({ type: 'native-command', args }); } },
     workspace: { textDocuments: [], workspaceFolders: [], onDidSaveTextDocument: disposable,
       onDidChangeConfiguration(listener) { configurationListener = listener; return disposable(); },
-      getConfiguration() { return { inspect: key => settings.has(key) ? { workspaceValue: settings.get(key) } : { defaultValue: '' }, get: key => settings.get(key) ?? '', async update(key, value, target) { if (value === undefined) settings.delete(key); else settings.set(key, value); updates.push({ key, value, target }); configurationListener?.({ affectsConfiguration: candidate => candidate === `skillBuilder.${key}` }); await options.onUpdate?.(key, value); } }; } },
+      getConfiguration() { const snapshot = options.configurationSnapshots ? new Map(settings) : settings; return { inspect: key => snapshot.has(key) ? { workspaceValue: snapshot.get(key) } : { defaultValue: '' }, get: key => snapshot.get(key) ?? '', async update(key, value, target) { if (value === undefined) settings.delete(key); else settings.set(key, value); updates.push({ key, value, target }); configurationListener?.({ affectsConfiguration: candidate => candidate === `skillBuilder.${key}` }); await options.onUpdate?.(key, value); } }; } },
     window: {
       createOutputChannel() { return { appendLine: line => events.push({ type: 'log', line }), show() { events.push({ type: 'log-opened' }); }, dispose() {} }; },
       registerWebviewViewProvider: disposable,
@@ -262,7 +262,7 @@ test('a work-folder change during asynchronous opening never creates a stale con
 
 test('startup seeds only unset preview Workspace keys and rolls them back if the work folder changes', async () => {
   const entered = deferred(), release = deferred();
-  const f = fixture({ connection: { repository: 'https://github.com/example/skills', localPath: path.resolve('selected-repository') },
+  const f = fixture({ configurationSnapshots: true, connection: { repository: 'https://github.com/example/skills', localPath: path.resolve('selected-repository') },
     onUpdate: async (key, value) => { if (key === 'prerelease.repositoryUrl' && value !== undefined) { entered.resolve(); await release.promise; } } });
   f.vscode.workspace.workspaceFolders.push({ uri: { fsPath: path.resolve('opened-work-folder') } });
   const opening = f.open(); await entered.promise;
@@ -272,6 +272,16 @@ test('startup seeds only unset preview Workspace keys and rolls them back if the
   assert.equal(f.settings.has('prerelease.localRepositoryPath'), false);
   assert.equal(f.controllers.length, 0);
   assert(f.updates.every(update => update.target === f.vscode.ConfigurationTarget.Workspace));
+});
+
+test('startup reacquires native settings snapshots after prefilling each saved connection field', async () => {
+  const saved = { repository: 'https://github.com/example/skills', localPath: path.resolve('selected-repository') };
+  const f = fixture({ connection: saved, configurationSnapshots: true });
+  f.vscode.workspace.workspaceFolders.push({ uri: { fsPath: path.resolve('opened-work-folder') } });
+  await f.open();
+  assert.equal(f.settings.get('prerelease.repositoryUrl'), saved.repository);
+  assert.equal(f.settings.get('prerelease.localRepositoryPath'), saved.localPath);
+  assert.equal(f.updates.length, 2); assert(f.updates.every(update => update.target === f.vscode.ConfigurationTarget.Workspace));
 });
 
 test('Palette repository actions capture the current in-panel edit before dispatch', async () => {
