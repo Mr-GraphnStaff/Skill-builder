@@ -307,7 +307,7 @@ export async function prepareRepositoryPublish(
           // The user selected this whole version for replacement. Only its
           // conflicts are resolved by the incoming copy; other conflicts stop.
         }
-        pulledPaths = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(file => file && !file.startsWith(`${relativePath}/`)).sort();
+        pulledPaths = (await git(checkoutPath, ['diff', '--cached', '--no-renames', '--name-only', '-z'])).split('\0').filter(file => file && !file.startsWith(`${relativePath}/`)).sort();
       } else await git(checkoutPath, ['switch', '-C', branch]);
     } else await git(checkoutPath, ['switch', '-C', branch]);
     const destination = path.join(checkoutPath, relativePath);
@@ -330,7 +330,10 @@ export async function prepareRepositoryPublish(
     const copied = await inventory(destination);
     if (!equalInventory(sourceInventory, copied)) throw new Error('Release changed while preparing publication; prepare it again.');
     await git(checkoutPath, ['add', '-f', '--', relativePath]);
-    const files = (await git(checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
+    // Compare literal changed paths throughout review/commit verification. Git's
+    // rename heuristics differ between diff and diff-tree and can hide a deleted
+    // path on one side of an otherwise identical change.
+    const files = (await git(checkoutPath, ['diff', '--cached', '--no-renames', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
     const expected = [...copied.keys()].map(file => `${relativePath}/${file}`).sort();
     const outside = files.filter(file => !file.startsWith(`${relativePath}/`));
     if (replaceExisting ? JSON.stringify(outside) !== JSON.stringify(pulledPaths) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
@@ -360,7 +363,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   const current = await inventory(path.join(preview.checkoutPath, preview.relativePath));
   if (!equalInventory(expected.inventory, current)) throw new Error('Prepared files changed; review a new publication preview.');
   if ((await git(preview.checkoutPath, ['write-tree'])).trim() !== expected.indexTree) throw new Error('Unexpected staged files or changed Git index; publication stopped.');
-  const staged = (await git(preview.checkoutPath, ['diff', '--cached', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
+  const staged = (await git(preview.checkoutPath, ['diff', '--cached', '--no-renames', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
   // Retrying an unsuccessful push reuses the existing commit instead of duplicating it.
   if (staged.length > 0) {
     if (JSON.stringify(staged) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Unexpected staged files; publication stopped.');
@@ -373,7 +376,7 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
     await git(preview.checkoutPath, ['-c', `core.hooksPath=${emptyHooks}`, 'commit', '-m', `Release ${preview.skillName} ${preview.version}`]);
   }
   const commit = (await git(preview.checkoutPath, ['rev-parse', 'HEAD'])).trim();
-  const actual = preview.changedFiles?.length === 0 ? [] : (await git(preview.checkoutPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '-z', `${commit}^`, commit])).split('\0').filter(Boolean).sort();
+  const actual = preview.changedFiles?.length === 0 ? [] : (await git(preview.checkoutPath, ['diff-tree', '--no-renames', '--no-commit-id', '--name-only', '-r', '-z', `${commit}^`, commit])).split('\0').filter(Boolean).sort();
   if (preview.changedFiles?.length !== 0 && JSON.stringify(actual) !== JSON.stringify(preview.changedFiles ?? preview.files)) throw new Error('Commit contents differ from the reviewed release.');
   if ((await git(preview.checkoutPath, ['rev-parse', 'HEAD^{tree}'])).trim() !== expected.indexTree) throw new Error('Committed tree differs from the reviewed release.');
   report(onProgress, 'Pushing the release branch to the selected repository.');

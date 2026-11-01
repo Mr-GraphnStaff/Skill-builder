@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.0 — 2026-11-01 (public pre-release bug fix)
+
+- Restore VS Code pre-release discovery and channel switching by keeping the public preview newer than stable 0.12.1.
+- Include the reviewed fix for false commit-content mismatches when an unchanged file moves within a replaced version; retain all integrity checks.
+- Preserve preview work-data isolation and existing preview diagnostics controls. No automatic migration or new feature is introduced.
+
 ## 0.11.13 — 2026-10-31 (public pre-release bug fix)
 
 - Start a fresh Activity list for each new skill workflow instead of carrying history across skills.

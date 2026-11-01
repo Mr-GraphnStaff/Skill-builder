@@ -5,9 +5,18 @@
 David Farris has declared a release freeze: bug fixes only, no new features.
 The feature set is frozen after 0.11.12; only bug-fix releases may follow. Preserve this scope in team handoffs;
 the lead decides when the freeze ends and when production promotion proceeds.
-Production must expose no performance-log option: remove its Activity button and
-Command Palette command during stable promotion, and add no diagnostics opt-in
-setting. Keep the Activity workflow itself in the production candidate.
+The owner's November 1 decision supersedes the earlier diagnostics restriction:
+production retains local recording and its Command Palette command, hides the
+Activity log button, and adds no diagnostics opt-in setting. Keep Activity itself.
+
+The owner explicitly authorized publishing pre-release 0.13.0 on November 1 to
+restore channel switching after stable 0.12.1 overtook preview 0.11.13. Before
+declaring channel delivery complete, verify a validated latest pre-release newer
+than stable, both versions' channel flags, and VS Code switch eligibility. Before
+future stable publication, ensure its version will not overtake the public preview
+and hide channel switching; coordinate the preview release first within the
+owner's publication authority. Merely finding an old preview in history is not
+channel-switch acceptance.
 
 SkillJetty by DAF-TECH is an Agent Skills Studio. This checkout prepares the authorized public pre-release under the existing DavidFarris.skill-builder identity, with production skillBuilder command/view/settings names and the established Marketplace listing and icon. Public prerelease work data belongs under .skilljetty-prerelease and uses a channel-specific repository preference. Do not automatically migrate stable or local-UAT state, and confine inherited skills/export directory overrides to the preview root. The original local beta and production checkouts remain preserved.
 
