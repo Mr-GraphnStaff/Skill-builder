@@ -44,6 +44,14 @@ and Windows retry invalidation
 (`working/runs/73bf520920fd4272ad5a182388191830/reports/security-persistent-clone-retry.json`).
 Fresh full CI and exact native/browser/package reviews still govern final delivery.
 
+The final visible Sync action uses the same clone-only guard for an absent
+implicit repository as first upload; the focused dispatch regression passed
+(`working/runs/8ec90351f9104af7b54464334b2b2141/reports/full-tests.log`).
+CI1006 at `bcdd2546bd11d5ef98a73977918dd0ec41f9a8de` was superseded before any
+approval/upload to include that call-site guard. Its pending publication gate
+was canceled, retaining the receipt
+`working/runs/5b185343d8f849a696f0817d037fe2d9/reports/superseded-build.json`.
+
 The owner explicitly rejected incremental menu/copy changes and authorized a
 whole-experience revamp: "revamp", "make this stupid simple". Replace the numbered
 wizard and internal-folder lessons with Home → Editor → Build / Share. Existing

@@ -99,6 +99,22 @@ test('publication keeps explicit missing paths, existing defaults and Pull selec
   assert.deepEqual(expected, [implicit, custom, implicit, implicit]);
 });
 
+test('visible Sync uses clone-only preparation for an absent implicit local repository', async t => {
+  const root = fixture(t), guided = require('../out/guided-workspace.js'), managed = require('../out/managed-repository.js');
+  const originalConnect = guided.connectWorkspaceRepository, originalPull = managed.pullProjectRepository;
+  t.after(() => { guided.connectWorkspaceRepository = originalConnect; managed.pullProjectRepository = originalPull; });
+  const repository = 'https://github.com/example/skills.git', localPath = path.join(root, 'repositories', 'skills');
+  guided.connectWorkspaceRepository = async (_root, remote, selection) => ({ repository: remote, baseBranch: 'main', localPath: selection.localPath });
+  let captured;
+  managed.pullProjectRepository = async (...args) => { captured = args; throw new Error('FIXTURE_STOP_BEFORE_TRANSPORT'); };
+  const controller = new GuidedWorkbenchController(root, { enforceWorkbench: true, getRepositorySettings: () => ({ repositoryUrl: repository }) });
+  await controller.dispatch({ action: 'pullRepository' });
+  assert.match(controller.state.error, /FIXTURE_STOP_BEFORE_TRANSPORT/);
+  assert.equal(captured[2], localPath);
+  assert.equal(captured[5], true, 'first Sync must not merge into a raced target');
+  assert.equal(fs.existsSync(localPath), false);
+});
+
 function savedPlugin(t) {
   const root = fixture(t), releases = [], drafts = [];
   for (const name of ['alpha-notes', 'beta-notes']) {
