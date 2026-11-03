@@ -2,6 +2,56 @@
 
 ## Current assignment — November 3: project experience redesign, preview 0.15.4
 
+### Verified delivery — completed within pre-release scope
+
+Public preview **0.15.4** is validated/latest and installed from the official
+gallery in the actual **Default** profile. The open user window was not reloaded;
+its loaded version and owner usability acceptance remain unconfirmed. The Beta
+profile, stable 0.12.2 and pending publisher transfer are unchanged. No user work
+was moved, reset, pulled or uploaded during verification.
+
+The delivered model is **Build space → Local repository ↔ Remote repository**,
+with visible Sync and Build & upload. Home lists work automatically; the editor
+leads directly to checked Build / Share; saved plugins reopen as editable objects.
+Required choices and next actions remain visible. Missing implicit local Git
+setup is automatic, guarded against raced files/settings, and never replaces
+existing explicit/custom/legacy work.
+
+- Artifact/runtime source: `26f058d71f250a9808a08a9fb8f12e996199e69b`, CI1008,
+  SHA-256 `3cb005e6b52edf12f29a48020ea022fe2fd91ecf6af3948da924ed285260529b`.
+  CI: 491 tests, 490 passed, zero failed, one Windows-only skip on Linux.
+  Production audit zero findings; tooling six moderate, configured gate passed.
+  Raw logs: `working/runs/f262edd154db4834a3b73587d42b0951/reports/ci1008-evidence.json`.
+- Independent exact-package security PASS (32 JS + 32 maps, manifest/assets,
+  trust/containment/export guards, 196 payload files):
+  `working/runs/8936c3640eca4bfcae1f05427126a4c8/reports/security-artifact-review.json`.
+  Combined native/browser/backend PASS:
+  `working/runs/6e61a9351f4e45e3b13586a7bb76069f/native/native-final-receipt.json`.
+  Actual native exit 0, 38 transitions, three binary-preserving plugin exports
+  and reopen/next-version checks; ten browser cases and four installed-module
+  backend cases. Git uses controlled local transport; no live GitHub/user upload.
+  Human GUI, screen-reader and Claude/Gemini app acceptance were not performed.
+- CI1008 uploaded once at 22:13:22 UTC. Its publish job remains failed because
+  catalog visibility exceeded its deadline. Preserve original log:
+  `working/runs/d3491c92fad5402d85f9a023d65430fd/reports/build-1008-22.log`.
+  Independent anonymous verification at 22:19:43 UTC confirmed validated latest
+  preview, stable 0.12.2 and identical public bytes/payload:
+  `working/runs/9fed52cd48b54cd798a3ed27cd65455b/reports/public-verification.json`.
+  Read-only reconciliation1009 succeeded without rebuilding/uploading:
+  `working/runs/6b257d40f98746de9b91cf9a1a9cdd29/reports/reconcile-result.json`.
+  Both bounded actual-runtime channel-switch cases passed:
+  `working/runs/7507c02d0e9f4967b3c733d3486f04e9/reports/channel-switch.json`.
+- Actual Default gallery installation matches all 196 reviewed public files:
+  `working/runs/b7fea4e089eb4b60850df79911112c98/reports/default-gallery-install.json`.
+  Version 0.15.4, gallery source, both pre-release fields true, pin retained.
+  The explicit-version CLI reset the preference; only the recorded channel/pin
+  fields were restored after guarded before/after readback. No reload occurred.
+- Wiki commit `0cc16a3` updates nine pages and removes the folder/setup tours from
+  the main guides. Fresh anonymous readback verified Home, Getting Started,
+  Release Channels, Release Notes, Settings and Concepts. Original dated release
+  evidence remains in Release Notes/history. This documentation-only follow-up
+  does not change the runtime source/artifact binding above.
+
 ### Final owner model: build space, local repository, remote repository
 
 The owner's latest clarification is authoritative: "local build space, local repo
