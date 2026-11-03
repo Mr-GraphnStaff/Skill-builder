@@ -696,7 +696,7 @@ export class GuidedWorkbenchController {
           const receipt = this.state.receipt;
           const requested = string('path');
           const artifact = receipt?.artifacts?.find(item => item.path === requested);
-          if (requested) {
+          if (requested && receipt?.artifacts) {
             if (!artifact?.path) throw new Error('Choose a package in this export receipt.');
             const selected = assertWorkbenchPath(this.workspace(), artifact.path);
             if (!fs.lstatSync(selected).isFile()) throw new Error('This saved package is unavailable.');

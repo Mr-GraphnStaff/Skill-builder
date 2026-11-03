@@ -147,3 +147,59 @@ Static findings:
 
 The earlier focused execution predates this expansion. New integrated tests and
 the rebuilt exact VSIX must be checked before using it as final release evidence.
+
+## Expanded scope: stable plugin folder and local release archives
+
+The lead additionally directed a stable active plugin folder and explicit local
+older-release archiving. Morgan independently inspected the new publisher and
+`release-archive.ts`, worker/controller actions and regression-test sources.
+
+- Stable plugin publication targets `Plugins/<name>`. Before replacement the
+  existing folder must be a complete verified active plugin release with matching
+  identity, payload, ZIP, receipt and handoff hashes. Legacy version folders and
+  unknown/modified files are not adopted or removed. Checks remain in an isolated
+  publication checkout; source working trees and Git history remain preserved.
+- Morgan identified that a generic replacement flag could permit remote
+  same-version byte drift or downgrades from a fresh workbench. Ishan changed
+  the plugin path to require strictly newer SemVer precedence, independently of
+  that flag. Identical no-ops and differing-content same-version updates stop
+  before removal. Portable replacement behavior remains separate.
+- Archive execution requires the host-held reviewed plan and explicit confirmation.
+  It recomputes eligibility and inventories, protects newest saved versions and
+  uploaded releases without verified merged/cleaned PR state, rejects tracked
+  paths and nested repositories, and checks path ancestors and file types.
+  Content moves use same-volume rename with before/after inventories and a
+  recovery journal; there is no remote cleanup or deletion of release contents.
+- Morgan identified that interrupted archives/restores could leave a preparing
+  journal hidden from the recovery UI. Avery changed listing to expose incomplete
+  journals and restore to reconcile matching original/archive copies before any
+  write, skip already-restored matching entries and refuse divergent collisions.
+  Unique temporary journal names prevent a stale temporary record from blocking
+  recovery and retain orphan evidence. Static closure confirmed.
+
+No outstanding material static finding remains in these additions. Current
+compiled execution and final package inspection are still required; earlier
+focused test results do not establish acceptance of this expanded implementation.
+
+## Current integrated independent execution
+
+Against compiled source `332d394ffe6ba4b2dd5909fb333af9521878c0f0`:
+
+```text
+node --test --test-concurrency=1 test/release-archive.test.cjs test/plugin-release.test.cjs test/prerelease-release-pipeline.test.cjs
+21 passed, 0 failed, 1 skipped; command and owner launcher exit 0
+Run: working/runs/3411b2dfb89040079da23365e89fcf06
+Duration: 132.98 seconds
+```
+
+This supersedes earlier focused runs for the expanded plugin/readiness/archive
+implementation. The 5 MiB database preservation and exact-path size report,
+metadata containment/HTTPS validation, README code-fence exclusion, ZIP symlink
+attribute tamper, Gemini preservation/refusal and four archive scenarios executed.
+Archive scenarios include protected latest/drafts/active uploads, stale preview,
+collision refusal and interrupted archive/partial-restore reconciliation.
+
+The one skip and hard-link diagnostic remain physical-host fixture limitations
+(`EISDIR`), not claimed as executed enforcement evidence. Stable active-plugin
+real-Git regression and the full suite are separate coordinator/CI evidence.
+Final exact CI artifact inspection remains pending.

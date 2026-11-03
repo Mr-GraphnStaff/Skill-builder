@@ -4,6 +4,10 @@ const vm = require('node:vm');
 const { renderGuidedWorkbench } = require('../out/guided-workbench-html.js');
 
 const nonce = 'humanWorkbenchNonce123';
+function submissionSource(source, start, end) {
+  const helpers = source.slice(source.indexOf('function exportPayload()'), source.indexOf('function updateExportVisibility()'));
+  return helpers + '\n' + source.slice(start, end);
+}
 function state(overrides = {}) {
   return {
     step: 'publish', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable',
@@ -56,9 +60,9 @@ test('publish sends an override only when the person actually supplies one', () 
     let submit;
     let posted;
     const form = { dataset: { formAction: 'publish' }, reportValidity: () => true, addEventListener: (_name, handler) => { submit = handler; } };
-    const context = { document: { querySelectorAll: () => [form] }, actionPending: false,
+    const context = { document: { querySelectorAll: selector => selector === 'form[data-form-action]' ? [form] : [], getElementById: () => undefined }, actionPending: false,
       clientError: () => {}, fieldValue: id => id === 'releaseVersion' ? override : '', post: (action, payload) => { posted = { action, payload }; } };
-    new vm.Script(source.slice(start, end)).runInNewContext(context);
+    new vm.Script(submissionSource(source, start, end)).runInNewContext(context);
     submit({ preventDefault() {}, isComposing: false });
     assert.equal(posted.action, 'publish');
     assert.equal(posted.payload.version, expected);
@@ -87,7 +91,7 @@ test('saving locally from a connected workbench sends no review request', () => 
   let submit;
   let posted;
   const form = { dataset: { formAction: 'publish' }, reportValidity: () => true, addEventListener: (_name, handler) => { submit = handler; } };
-  new vm.Script(source.slice(start, end)).runInNewContext({ document: { querySelectorAll: () => [form] }, actionPending: false,
+  new vm.Script(submissionSource(source, start, end)).runInNewContext({ document: { querySelectorAll: selector => selector === 'form[data-form-action]' ? [form] : [], getElementById: () => undefined }, actionPending: false,
     clientError: () => {}, fieldValue: id => id === 'reviewer' ? 'someone' : id === 'releaseChangelog' ? 'Useful context.' : '',
     post: (action, payload) => { posted = { action, payload }; } });
   submit({ preventDefault() {}, isComposing: false, submitter: { dataset: { submitAction: 'savePackage' } } });
