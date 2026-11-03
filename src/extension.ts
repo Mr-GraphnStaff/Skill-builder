@@ -130,7 +130,15 @@ export function activate(context: vscode.ExtensionContext) {
   const provider = new SkillTreeProvider();
   const resolveWorkspace = async (): Promise<WorkspaceSelection | undefined> => {
     const root = getWorkspaceRoot();
-    const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
+    const settings = vscode.workspace.getConfiguration('skillBuilder');
+    const configured = settings.get<string>('projectRoot', '').trim();
+    const rootSetting = settings.inspect?.<string>('projectRoot');
+    // Opening the exact initialized folder is an explicit choice. A global
+    // fallback for another project must not silently replace that workbench.
+    // Scoped settings still win; ordinary projects are never adopted here.
+    if (root && rootSetting?.workspaceValue === undefined && rootSetting?.workspaceFolderValue === undefined && isManagedWorkbench(root)) {
+      return { kind: 'managed', dataRoot: root };
+    }
     if (!root && (!configured || !path.isAbsolute(configured))) return undefined;
     // The public prerelease always receives an isolated child data tree. Opening the same
     // VS Code workspace as production does not share its drafts or repository.

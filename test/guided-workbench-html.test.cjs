@@ -37,17 +37,17 @@ test('older release archives require a reviewed local plan and show recoverable 
 test('Submit keeps portable default and exposes explicit plugin and Gemini export choices', () => {
   const html = renderGuidedWorkbench(state({ step: 'publish', active: { id: 'a', name: 'skill-a' },
     publish: { version: '1.0.0', changelog: '', fileCount: 2 } }), nonce);
-  assert.match(html, /<legend>Choose your export<\/legend>/);
-  assert.match(html, /<label for="exportMode">Package format<\/label>/);
-  assert.match(html, /value="portable" selected>Portable skill only/);
-  assert.match(html, /value="plugin" >Claude plugin only/);
-  assert.match(html, /value="both" >Both portable skill and Claude plugin/);
+  assert.match(html, /<legend>What to save<\/legend>/);
+  assert.match(html, /<label for="exportMode">Save as<\/label>/);
+  assert.match(html, /value="portable" selected>Skill package \(\.skill\)/);
+  assert.match(html, /value="plugin" >Claude plugin ZIP/);
+  assert.match(html, /value="both" >Both skill package and plugin ZIP/);
   assert.match(html, /id="plugin-options" hidden/);
   assert.match(html, /id="pluginName"[^>]*data-plugin-required[^>]*disabled/);
   assert.doesNotMatch(html, /id="pluginName"[^>]*\srequired(?:\s|>)/);
   assert.match(html, /id="geminiZip"[^>]*aria-describedby="gemini-export-help"/);
-  assert.match(html, /Import and runtime behavior must be tested in your account/);
-  assert.match(html, /Claude organization installation, marketplace sync and group assignment are separate manual steps/);
+  assert.match(html, /Import and runtime behavior still need testing in your account/);
+  assert.match(html, /Saving a ZIP does not install it in Claude or prove application compatibility/);
 });
 
 test('plugin metadata and multiple members are labelled, selected explicitly and escaped', () => {
@@ -66,9 +66,70 @@ test('plugin metadata and multiple members are labelled, selected explicitly and
   assert.match(html, /name="pluginMembers" value="b&quot;"[^>]*checked/);
   assert.match(html, /id="geminiZip"[^>]*checked/);
   assert.match(html, /Installable .skill package and Claude plugin ZIP/);
-  assert.match(html, /The bundle has its own version/);
+  assert.match(html, /id="pluginVersion"[^>]*value="1\.2\.0"[^>]*data-export-option/);
+  assert.match(html, /A version is filled in for you/);
+  assert.match(html, /id="pluginName"[^>]*data-export-option/);
+  assert.doesNotMatch(html, /id="pluginAuthor"[^>]*data-export-option/);
   assert.doesNotMatch(html, /<img src=x|<script>bad/);
   assert.match(html, /&lt;\/script&gt;&lt;img/);
+});
+
+test('plugin-first review follows the actual output format while keeping saving local-first', () => {
+  for (const [mode, title, nav, button] of [
+    ['portable', 'Review and save your skill', 'Save skill', 'Save skill package'],
+    ['plugin', 'Review and save your plugin', 'Save plugin', 'Save plugin ZIP'],
+    ['both', 'Review and save both packages', 'Save packages', 'Save both packages']
+  ]) {
+    const html = renderGuidedWorkbench(state({ workflowIntent: 'plugin', step: 'publish',
+      active: { id: 'a', name: 'skill-a' }, publish: { version: '1.0.0', changelog: '', fileCount: 2 },
+      exportOptions: { mode, pluginName: 'team-tools', pluginDescription: 'Team tools', pluginVersion: '1.0.0', members: [] }
+    }), nonce);
+    assert(html.includes(`<h1 id="stepHeading" tabindex="-1">${title}</h1>`));
+    assert(html.includes(`Step 4: </span>${nav}`));
+    assert(html.includes(`>${button} <span aria-hidden="true">`));
+    assert.match(html, /id="publish-form"[^>]*data-form-action="savePackage"/);
+    assert.match(html, /id="plugin-github-upload" class="optional"><summary>Upload to GitHub \(optional\)/);
+    assert.match(html, /<h2>What will be saved<\/h2>/);
+    assert.doesNotMatch(html, /Submitting to|<h2>What will be submitted<\/h2>/);
+    const help = /<details id="step-help"[^>]*>([\s\S]*?)<\/details>/.exec(html)[1];
+    if (mode === 'portable') {
+      assert.match(html, /id="plugin-options" hidden/);
+      assert.match(html, /This format does not create a plugin ZIP/);
+      assert.match(help, /<dt>Save skill package<\/dt>/);
+      assert.doesNotMatch(help, /<dt>Name and description<\/dt>|<dt>Skills to include<\/dt>/);
+    } else {
+      assert.doesNotMatch(html, /id="plugin-options" hidden/);
+      assert.match(help, /<dt>Name and description<\/dt>/);
+      if (mode === 'both') assert.match(help, /both the \.skill package and the Claude plugin ZIP/);
+    }
+  }
+});
+
+test('plugin source choices reuse the accepted local repository without exposing a rejected destination', () => {
+  const connected = { workflowIntent: 'plugin', connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' } };
+  const html = renderGuidedWorkbench(state(connected), nonce);
+  assert.match(html, /data-action="openRepositorySkill" id="open-repository-skill">Choose a skill from your repository/);
+  assert.match(html, /data-action="openPackage"[^>]*>Open a \.skill file/);
+  assert.match(html, /does not create the plugin ZIP yet/);
+  const rejected = renderGuidedWorkbench(state({ ...connected, configurationError: 'The inherited destination is outside this work location.' }), nonce);
+  assert.doesNotMatch(rejected, /data-action="openRepositorySkill"/);
+  assert.match(rejected, /data-action="openPackage"[^>]*>Open a \.skill file/);
+});
+
+test('plugin destination reports are optional and distinguish directory rules from selected app requirements', () => {
+  const html = renderGuidedWorkbench(state({ workflowIntent: 'plugin', step: 'publish',
+    error: 'Package generation failed. Your draft is preserved.',
+    publish: { version: '1.0.0', changelog: '', fileCount: 2, compatibility: [
+      { target: 'Claude public directory', issues: ['Missing directory icon.'], tested: false },
+      { target: 'Gemini App', issues: ['Unsupported file type.'], tested: false }
+    ] }, exportOptions: { mode: 'plugin', pluginName: 'team-tools', pluginDescription: 'Tools', pluginVersion: '1.0.0', members: [] }
+  }), nonce);
+  assert.match(html, /<details id="export-compatibility-details" class="optional"><summary>Public directory and app checks \(optional\)<\/summary>/);
+  assert.match(html, /A private plugin ZIP does not need a public directory listing/);
+  assert.match(html, /<h3>Claude public directory<\/h3>/);
+  assert.match(html, /<h3>Gemini App<\/h3>/);
+  assert.match(html, /Application import and runtime behavior have not been tested/);
+  assert(html.indexOf('Package generation failed.') < html.indexOf('id="export-compatibility-details"'), 'actual save errors remain in the visible feedback region');
 });
 
 test('client serializes selected members and active format and disables hidden plugin requirements', () => {
@@ -201,7 +262,8 @@ test('an existing repository keeps normal Start and makes managed workbench setu
     drafts: [{ id: 'saved-draft', name: 'saved-draft' }],
     connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' }
   }), nonce);
-  assert.match(html, /data-action="showCreate"[^>]*>Create a new skill/);
+  assert.match(html, /data-action="showCreate"[^>]*>Create a skill/);
+  assert.match(html, /data-action="showPlugin"[^>]*>Build a plugin/);
   assert.match(html, /data-action="openPackage"[^>]*>Open a \.skill file/);
   assert.match(html, /Resume saved-draft/);
   assert.match(html, /id="local-repository-path">P:\/Projects\/Skills<\/dd>/);
@@ -210,7 +272,8 @@ test('an existing repository keeps normal Start and makes managed workbench setu
   assert.doesNotMatch(html, /<details[^>]*id="optional-workbench-setup"[^>]*\sopen(?:\s|>)/);
   assert.match(html, /Using your existing workspace\. Managed workbench setup is optional/);
   assert.doesNotMatch(html, /Give SkillJetty a workbench|Local repository — inside repositories\/|What goes in each workbench folder/);
-  assert(html.indexOf('Choose how to start') < html.indexOf('Manage work location (optional)'));
+  assert(html.indexOf('data-action="showCreate"') < html.indexOf('Manage work location (optional)'));
+  assert(html.indexOf('id="repository-details"') > html.indexOf('</main>'), 'repository settings must follow the primary task');
 });
 
 test('invalid settings do not disclose rejected credentials or claim the new configuration is verified', () => {
@@ -280,7 +343,8 @@ test('start keeps local skill choices while repository setup lives in native set
   assert.match(repository, /id="open-settings"[^>]*data-action="openSettings"/);
   assert.doesNotMatch(repository, /id="repository-choice"|id="repository-form"|id="repository" name="repository"|data-form-action="connectRepository"|id="create-repository-form"/);
   for (const action of ['showCreate', 'openPackage', 'openFolder']) assert.match(repository, new RegExp(`data-action="${action}"`));
-  assert.match(repository, /No repository connection is needed to create, open, or edit a skill/);
+  assert.match(repository, /Both can be saved on this computer without GitHub setup/);
+  assert.match(repository, /data-action="showPlugin"[^>]*>Build a plugin/);
   assert.doesNotMatch(repository, /id="primary-action"/);
   const creation = renderGuidedWorkbench(state({ form: { mode: 'create', name: 'weekly-status', description: 'Summarize project updates.', instructions: 'Keep unknowns explicit.' } }), nonce);
   assert.match(creation, /id="skillName"[^>]*value="weekly-status"/);
@@ -399,7 +463,7 @@ test('submission reviewer choice is optional, escaped and explicitly discloses n
 
 test('GitHub account is read-only and reviewer state remains scoped to the host account', () => {
   const connect = renderGuidedWorkbench(state(), nonce);
-  assert.match(connect, /GitHub sign-in is also available in the Command Palette/);
+  assert.match(connect, /id="open-settings"[^>]*aria-label="Open SkillJetty settings"/);
   assert.doesNotMatch(connect, /data-action="connectGitHub"/);
   assert.doesNotMatch(connect, /type="password"|name="token"|name="pat"/);
   const switched = renderGuidedWorkbench(state({ githubAccount: 'Account <unsafe>' }), nonce);
@@ -413,7 +477,7 @@ test('non-GitHub uploads do not advertise automatic PRs or reviewer requests', (
     publish: { version: '1.0.0', changelog: 'Initial version.', fileCount: 4, reviewSupported: false }, reviewersLoaded: true, reviewers: [{ login: 'casey' }]
   }), nonce);
   assert.match(html, /form="publish-form"[^>]*>Upload version/);
-  assert.match(html, /This upload does not create a PR or notify a reviewer/);
+  assert.match(html, /GitHub PRs and reviewer requests are unavailable/);
   assert.doesNotMatch(html, /id="reviewer"|data-action="loadReviewers"|>Upload &amp; create PR/);
 });
 

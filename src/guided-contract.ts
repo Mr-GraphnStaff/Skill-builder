@@ -9,6 +9,7 @@ export type ExportCompatibility = { target: string; issues: string[]; tested?: b
 export type ExportOptions = {
   mode: ExportMode; pluginName: string; pluginVersion: string; pluginDescription: string;
   pluginAuthor?: string; pluginLicense?: string; geminiZip: boolean;
+  pluginVersionSource?: 'suggested' | 'explicit';
   pluginIcon?: string; pluginPrivacyPolicyUrl?: string; pluginDocumentationUrl?: string; pluginSupportUrl?: string;
   members: { id: string; name: string; version?: string; selected: boolean }[];
 };
@@ -27,6 +28,7 @@ export type GuidedReviewItem = { directory: string; skillName: string; version: 
 export type RepositoryCheckState = { status: 'checking' | 'verified' | 'outOfSync' | 'setupRequired' | 'error'; message: string; localPath?: string; repository?: string; branch?: string; localCommit?: string; remoteCommit?: string; dirty?: boolean; trustRequired?: boolean };
 export type GuidedState = {
   step: GuidedStep;
+  workflowIntent?: 'skill' | 'plugin';
   busy?: boolean;
   progress?: string;
   activity?: GuidedActivityEntry[];
@@ -73,7 +75,7 @@ export type GuidedState = {
   form?: Record<string, string>;
 };
 
-export type GuidedAction = 'ready' | 'openSettings' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
+export type GuidedAction = 'ready' | 'openSettings' | 'showPlugin' | 'showSkillStart' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
   | 'verifyRepository' | 'setRepositoryFolder' | 'pullRepository' | 'openRepositorySkill' | 'showCreate' | 'createSkill' | 'openPackage' | 'openPackagePath' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
   | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage' | 'updateExportOptions'

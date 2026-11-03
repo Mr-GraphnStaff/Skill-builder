@@ -25,6 +25,12 @@ function brandHeader(brand?: GuidedBrand, heading = false): string {
 function secondary(action: string, label: string, attributes = ''): string {
   return `<button type="button" class="secondary" data-action="${escape(action)}" ${attributes}>${escape(label)}</button>`;
 }
+function settingsButton(): string {
+  return '<button type="button" id="open-settings" class="secondary settings-gear" data-action="openSettings" data-settings="true" aria-label="Open SkillJetty settings" title="Open SkillJetty settings" aria-describedby="settings-help"><span aria-hidden="true">⚙</span></button><span id="settings-help" class="visually-hidden">Settings for file locations and optional GitHub publishing.</span>';
+}
+function selectedExportMode(state: GuidedState) {
+  return state.exportOptions?.mode ?? (state.workflowIntent === 'plugin' ? 'plugin' : 'portable');
+}
 function scriptString(value: string): string {
   // This is data inside a nonced script, not HTML text. Prevent closing the
   // script element and keep JavaScript line separators escaped as data.
@@ -47,6 +53,16 @@ function stepHelp(state: GuidedState): string {
   if (state.publish?.reviewSupported === false) help.publish = help.publish.filter(([label]) => label !== 'Upload & create PR' && label !== 'Merge').concat([['Upload version', 'Upload this version to your connected repository. Complete review in that repository service; this destination has no automatic PR or reviewer action.']]);
   if (!state.connection || state.configurationError) help.publish = help.publish.filter(([label]) => label !== 'Upload & create PR' && label !== 'Merge');
   if (state.receipt?.local) help.done = help.done.filter(([label]) => label !== 'Check status');
+  if (state.workflowIntent === 'plugin') {
+    const mode = selectedExportMode(state);
+    help.start = [['Choose the first skill', 'Open a .skill file or skill folder, or choose a saved draft. The original files stay unchanged.'], ['Build locally', 'Review the skill, check it, then name the plugin and choose its included skills. GitHub is optional.']];
+    help.edit = [['Review the skill', 'These instructions and supporting files will be included in your plugin. Edit anything you need.'], ['Check this skill', 'Check the skill metadata and package structure before reviewing the plugin. No model or imported script is run.']];
+    help.check = [['Errors', 'Correct any listed skill errors before continuing.'], ['Review plugin', 'Choose the plugin name, description, and included skills before saving its ZIP.']];
+    help.publish = mode === 'portable'
+      ? [['Save skill package', 'Save this skill as a .skill file on this computer. No plugin ZIP is created in this format.'], ['Save as', 'Choose Claude plugin ZIP or Both if you want to bundle skills as a plugin instead.'], ['Upload to GitHub (optional)', 'Use the separate upload option only when you want to submit to the connected repository.']]
+      : [['Name and description', 'Give the plugin a name and a short description of what it does.'], ['Skills to include', 'Your current skill is included. Tick any other saved drafts to bundle with it.'], [mode === 'both' ? 'Save both packages' : 'Save plugin ZIP', mode === 'both' ? 'Create both the .skill package and the Claude plugin ZIP on this computer. Saving does not upload or install them.' : 'Create the plugin ZIP on this computer. Saving does not upload or install it.'], ['Upload to GitHub (optional)', 'Use the separate upload option only when you want to submit to the connected repository. A reviewer selection sends a review request.']];
+    help.done = [['Saved result', 'Use the verified receipt to open the actual package files.'], ['Claude installation', 'Saving the ZIP does not install it in Claude. Import or organization deployment is a separate step.']];
+  }
   if (state.form?.mode === 'create') help.start = [['Skill name', 'Use a short lowercase name with hyphens. This identifies your skill folder.'], ['Purpose & instructions', 'Describe when the skill should be used, then give repeatable steps and an expected result. Create draft opens the complete files for editing.']];
   if (state.form?.mode === 'reviews') help.start = [['Refresh PR statuses', 'Read the connected repository’s recorded submissions. Refreshing does not create PRs or merge anything.'], ['Create PR / Check status', 'Create a missing PR for an existing upload, or read its current state. An approved PR still needs a merge.'], ['Merge PR and delete branch', 'Merge the exact uploaded commit after identity checks. The submission branch is removed only after GitHub confirms the merge.']];
   return `<details id="step-help" class="optional step-help" data-persist-open><summary>Help with this step</summary><dl class="action-help">${help[state.step].map(([label, description]) => `<dt>${escape(label)}</dt><dd>${escape(description)}</dd>`).join('')}</dl><p class="hint">While an action runs, its status stays at the top of this workbench. If it asks for a selection, use the VS Code dialog; cancelling returns you to your work.</p></details>`;
@@ -86,12 +102,12 @@ function configurationSummary(state: GuidedState): string {
   const repository = invalid ? state.connection?.repository : state.configuredRepository ?? state.connection?.repository;
   const local = invalid ? state.connection?.localPath : state.configuredLocalRepository ?? state.connection?.localPath;
   const verification = state.repositoryVerification;
-  return `<section id="workbench-configuration" class="configuration-summary" aria-labelledby="configuration-heading" data-configuration-error="${invalid}">
-    <div class="configuration-heading"><h2 id="configuration-heading">Configuration</h2><button type="button" id="open-settings" class="secondary settings-gear" data-action="openSettings" data-settings="true" aria-label="Open SkillJetty settings" title="Open SkillJetty settings" aria-describedby="settings-help"><span aria-hidden="true">⚙</span></button></div>
+  return `<details id="repository-details" class="optional configuration-summary" data-persist-open><summary>Repository and file locations (optional)</summary><section id="workbench-configuration" aria-labelledby="configuration-heading" data-configuration-error="${invalid}">
+    <h2 id="configuration-heading">Where your work is saved</h2>
     <dl class="configuration-values"><div><dt>Working files</dt><dd id="active-work-folder">${escape(state.workFolder ?? 'Not selected')}</dd></div><div><dt>Local Git repository</dt><dd id="local-repository-path">${escape(local || 'Not configured')}</dd></div><div><dt>GitHub repository</dt><dd id="configured-repository">${escape(repository || 'Not configured')}</dd></div><div><dt>Branch</dt><dd id="configured-target-branch">${escape(state.connection?.baseBranch || 'Detected when you verify the connection')}</dd></div>${state.githubAccount ? `<div><dt>GitHub account</dt><dd>${escape(state.githubAccount)}</dd></div>` : ''}<div><dt>Connection</dt><dd id="repository-settings-state">${invalid ? 'Needs attention' : repositoryStatusLabel(verification?.status)}</dd></div></dl>
-    <p id="repository-verification" class="hint" role="status" aria-live="polite" data-status="${invalid ? 'error' : escape(verification?.status ?? 'setupRequired')}">${invalid ? 'Settings need attention. Open SkillJetty settings to correct your folders or repository. Any saved connection shown above is not a verification of the new settings.' : escape(verification?.message ?? 'Repository verification has not completed. Local skill work is available without a repository.')}</p>
-    <p id="settings-help" class="hint">Use the gear to review repository settings. Verify and Pull are separate Command Palette actions; changing settings does not clone, pull or upload. GitHub sign-in is also available in the Command Palette.</p>
-    ${state.hasWorkspace ? state.workspaceMode === 'managed' ? workbenchFolderGuide() : state.workspaceMode === 'existing-repository' ? '<p class="hint">Using your existing workspace. Managed workbench setup is optional.</p>' : '' : '<p class="hint">Choose a work location below before creating or editing skills. Existing folders are not adopted automatically.</p>'}</section>`;
+    <p id="repository-verification" class="hint" role="status" aria-live="polite" data-status="${invalid ? 'error' : escape(verification?.status ?? 'setupRequired')}">${invalid ? 'GitHub upload settings need attention. You can still create skills and save skill or plugin packages on this computer. Open settings only when you want to repair GitHub upload.' : escape(verification?.message ?? 'A repository is only needed for GitHub upload. Local skill and plugin packages do not need one.')}</p>
+    <p class="hint">The gear opens settings. Verify and Pull are separate Command Palette actions; changing settings does not clone, pull or upload.</p>
+    ${state.hasWorkspace ? state.workspaceMode === 'managed' ? workbenchFolderGuide() : state.workspaceMode === 'existing-repository' ? '<p class="hint">Using your existing workspace. Managed workbench setup is optional.</p>' : '' : '<p class="hint">Choose a work location before saving. Existing folders are not adopted automatically.</p>'}</section></details>`;
 }
 function reviewLabel(pr?: PullRequestRecord): string {
   if (!pr) return 'Uploaded — PR not checked';
@@ -108,7 +124,7 @@ function reviewerChoices(state: GuidedState, id: string, selected = ''): string 
   return `<div class="field"><label for="${id}">Reviewer (optional)</label><select id="${id}" name="reviewer" data-persist aria-describedby="${id}-hint"><option value="">Skip — do not request a reviewer</option>${(state.reviewers ?? []).map(reviewer => `<option value="${escape(reviewer.login)}" ${reviewer.login === selected ? 'selected' : ''}>${escape(reviewer.name ? `${reviewer.name} (@${reviewer.login})` : `@${reviewer.login}`)}</option>`).join('')}</select><p class="hint" id="${id}-hint">Choose an eligible repository collaborator. Submitting a review request will notify that person. Leaving this blank sends no review request.</p></div>`;
 }
 function reviewerPicker(state: GuidedState): string {
-  return `<section class="reviewer-picker"><h2>Ask someone to review (optional)</h2>${state.reviewersLoaded ? reviewerChoices(state, 'reviewer', state.form?.reviewer ?? '') : '<p class="hint">You can submit without choosing a reviewer. Load eligible collaborators if you want to request a review.</p>'}
+  return `<section class="reviewer-picker"><h2>Ask someone to review (optional)</h2><p class="hint">Selecting a reviewer sends that person a review request when you submit. Saving locally does not notify them.</p>${state.reviewersLoaded ? reviewerChoices(state, 'reviewer', state.form?.reviewer ?? '') : '<p class="hint">You can submit without choosing a reviewer. Load eligible collaborators if you want to request a review.</p>'}
     ${secondary('loadReviewers', state.reviewersLoaded ? 'Refresh eligible reviewers' : 'Load eligible reviewers')}
     ${state.reviewersLoaded && !state.reviewers?.length ? '<p class="hint">No eligible collaborators were returned. You can continue without a review request.</p>' : ''}
     ${state.reviewersError ? `<p class="warning"><span aria-hidden="true">!</span> Reviewers could not be loaded: ${escape(state.reviewersError)}. You can retry or submit without a reviewer.</p>` : ''}</section>`;
@@ -155,7 +171,7 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
   };
   if (state.form?.mode === 'reviews') return reviews(state);
   if (state.form?.mode === 'create') return {
-    title: 'Create your draft', hint: 'Give the skill a name, describe when it should be used, and write its instructions.',
+    title: state.workflowIntent === 'plugin' ? 'Create a skill for your plugin' : 'Create your skill', hint: 'Give it a name, explain what it does, and write its instructions. You can change these later.',
     html: `<section class="card"><form id="create-form" action="#" method="post" data-form-action="createSkill"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">New skill</legend>
       ${field('skillName', 'Skill name (required)', state.form?.name ?? '', 'required maxlength="64" pattern="[a-z0-9]+(-[a-z0-9]+)*" autocomplete="off" autocapitalize="off" spellcheck="false"', 'Use a short lowercase name with hyphens, for example weekly-status.')}
       ${textField('skillDescription', 'What it does and when to use it (required)', state.form?.description ?? '', 'required maxlength="1024" rows="3"', 'For example: Summarize project updates. Use when the user asks for a weekly status report.')}
@@ -163,15 +179,22 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
       </fieldset></form></section>`,
     primary: { label: 'Create draft', form: 'create-form' }
   };
+  if (state.workflowIntent === 'plugin') return {
+    title: 'Build a Claude plugin', hint: 'Start with a skill. Review its contents, then save a plugin ZIP. No GitHub connection is needed.',
+    html: `<section class="card"><h2>Choose the first skill</h2><p>A plugin can contain one or more skills. Start with one now; you can include other saved drafts before saving the ZIP.</p><div class="button-row">${secondary('openPackage', 'Open a .skill file')}${secondary('openFolder', 'Open a skill folder')}${!state.configurationError && state.connection?.localPath ? secondary('openRepositorySkill', 'Choose a skill from your repository', 'id="open-repository-skill"') : ''}${secondary('showCreate', 'Create a skill for this plugin', 'data-intent="plugin"')}</div><p class="hint">The original files stay unchanged. This step opens an editable copy; it does not create the plugin ZIP yet.</p></section>${savedWork(state)}<div class="button-row">${secondary('showSkillStart', '← Back to skill or plugin')}</div>`,
+    primary: undefined
+  };
   return {
-    title: 'What would you like to improve?', hint: 'Bring an existing skill or start with an idea. Work locally; SkillJetty handles the release numbering when you are ready to share.',
-    html: `${savedWork(state)}${archiveManagement(state)}<section class="card start-card"><h2>Choose how to start</h2><p>No repository connection is needed to create, open, or edit a skill.</p><div class="start-choices">
-      <div class="start-option">${secondary('showCreate', 'Create a new skill', 'aria-describedby="create-choice-help"')}<p class="hint" id="create-choice-help">Start from an idea. Write the name, purpose, and instructions.</p></div>
-      <div class="start-option">${secondary('openPackage', 'Open a .skill file', 'aria-describedby="package-choice-help"')}<p class="hint" id="package-choice-help">Its instructions and supporting files become an editable draft. The original package stays preserved.</p></div>
+    title: 'What do you want to make?', hint: 'Choose a skill or a plugin. Both can be saved on this computer without GitHub setup.',
+    html: `<section class="card start-card"><div class="start-choices">
+      <div class="start-option">${secondary('showCreate', 'Create a skill', 'aria-describedby="create-choice-help"')}<p class="hint" id="create-choice-help">Write reusable instructions for an AI assistant.</p></div>
+      <div class="start-option">${secondary('showPlugin', 'Build a plugin', 'aria-describedby="plugin-choice-help"')}<p class="hint" id="plugin-choice-help">Package one or more skills as a Claude plugin ZIP.</p></div>
+      </div></section><section class="card"><h2>Open existing work</h2><div class="button-row">
+      <div class="start-option">${secondary('openPackage', 'Open a .skill file', 'aria-describedby="package-choice-help"')}<p class="hint" id="package-choice-help">Edit a copy of a skill you already have.</p></div>
       <div class="start-option">${secondary('openFolder', 'Open a skill folder', 'aria-describedby="folder-choice-help"')}<p class="hint" id="folder-choice-help">Choose a folder containing SKILL.md and any supporting files.</p></div>
       ${state.connection?.localPath ? `<div class="start-option">${secondary('openRepositorySkill', 'Open skill from project…', 'id="open-repository-skill" aria-describedby="repository-open-help"')}<p class="hint" id="repository-open-help">Copy a skill from your configured local repository into an editable draft.</p></div>` : ''}
       </div><details class="optional"><summary>Open by file path</summary><p class="hint">If the file chooser is unavailable, paste the full path to a .skill package.</p><form id="package-path-form" action="#" method="post" data-form-action="openPackagePath"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Open a package by file path</legend>${field('packagePath', 'Full package path (required)', state.form?.path ?? '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'Use the complete path, including the .skill filename.')}<button type="submit" class="secondary">Open this package</button></fieldset></form></details></section>
-      ${state.connection ? `<section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">To upload later, set your repository in SkillJetty settings using the gear above.</p>'}
+      ${savedWork(state)}${state.connection ? `<details class="optional"><summary>GitHub submissions</summary><p>Check versions you already uploaded. This does not upload or merge anything.</p>${secondary('checkPullRequests', 'Check PRs')}</details>` : ''}${archiveManagement(state)}
       ${state.workspaceMode === 'existing-repository' ? optionalWorkbenchSetup() : ''}`,
     primary: undefined
   };
@@ -211,13 +234,13 @@ function edit(state: GuidedState): { title: string; hint: string; html: string; 
   const editor = state.editor;
   const targets = [['portable', 'Portable'], ['claude', 'Claude'], ['codex', 'Codex'], ['gemini', 'Gemini'], ['copilot', 'GitHub Copilot']];
   return {
-    title: state.active?.name ?? 'Edit your skill', hint: 'Focus on what the skill should do. Changes save locally; Sanity check reviews its metadata and package structure.',
+    title: state.workflowIntent === 'plugin' ? `Review skill: ${state.active?.name ?? 'your skill'}` : state.active?.name ?? 'Edit your skill', hint: state.workflowIntent === 'plugin' ? 'This skill will go into your plugin. Edit anything you need, then check it. You choose the plugin name and included skills next.' : 'Write or edit the skill instructions, then check the skill before saving a package. Changes save locally.',
     html: `${skillIdentity(state)}<div class="edit-toolbar"><div class="field target-field"><label for="target">Where will you use this skill?</label><select id="target" name="target" aria-describedby="target-help" ${state.busy ? 'disabled' : ''}>${targets.map(([value, label]) => `<option value="${value}" ${value === state.target ? 'selected' : ''}>${label}</option>`).join('')}</select><p class="hint" id="target-help">Records where you plan to use the skill. Sanity check reviews package structure; it does not test application compatibility. Choose Portable for general Agent Skills.</p></div><div class="save-controls"><span id="save-status" aria-live="off">Saved locally</span>${secondary('save', 'Save now', `id="save-button" ${!editor || editor.readOnly ? 'disabled data-unavailable="true"' : ''}`)}<button type="button" class="secondary" data-action="save" id="retry-save" ${state.error ? '' : 'hidden'}>Retry save</button><button type="button" class="secondary" data-action="reloadFile" id="reload-file" ${state.error ? '' : 'hidden'}>Reload saved file</button></div></div>
       <div class="editor-layout"><aside class="file-panel" aria-labelledby="files-heading"><h2 id="files-heading">Skill files</h2><p class="hint">Choose a file to edit or inspect. Your current text is saved before you switch files.</p>${editor ? `<a href="#editorContent" class="editor-skip">Skip file list and ${editor.readOnly ? 'inspect' : 'edit'} selected file</a>` : ''}<ul class="file-list">${state.files.map(file => `<li><button type="button" class="file-button ${file.path === editor?.path ? 'selected' : ''}" data-action="openFile" data-path="${escape(file.path)}" ${file.path === editor?.path ? 'aria-current="true"' : ''}><span>${escape(file.path)}</span><small>${file.text ? 'Text' : 'Binary — preserved'} · ${file.size} bytes</small></button></li>`).join('')}</ul>
       <details class="optional"><summary>Add a supporting file</summary><form id="add-file-form" action="#" method="post" data-form-action="addFile">${field('addFilePath', 'Destination inside this skill (optional)', '', 'autocomplete="off" autocapitalize="off" spellcheck="false"', 'For example references/rules.md. Leave blank to keep the selected filename under references/.')}<button type="submit" class="secondary">Choose file to add</button></form></details>
       <details class="optional"><summary>Create a text file</summary><form id="new-file-form" action="#" method="post" data-form-action="createFile">${field('newFilePath', 'File path inside this skill (required)', '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'For example references/report-format.md. Existing files are not overwritten.')}<button type="submit" class="secondary">Create file</button></form></details></aside>
       <section class="editor-panel" aria-labelledby="editor-heading"><h2 id="editor-heading">${escape(editor?.path ?? 'Select a file to edit')}</h2>${editor ? `<label for="editorContent" class="visually-hidden">Content of ${escape(editor.path)}</label><textarea id="editorContent" name="editorContent" class="code-editor" data-editor-path="${escape(editor.path)}" ${editor.readOnly ? 'readonly data-read-only="true"' : ''} spellcheck="false" autocomplete="off" aria-describedby="editor-help">${escape(editor.content)}</textarea><p class="hint" id="editor-help">${editor.readOnly ? 'This file is binary or read-only. Its original bytes are preserved; it will not be saved as text.' : 'You are editing the complete file. Tab moves to the next control. No scripts or AI models are run by this editor.'}</p>` : '<p>Choose a text file from Skill files. Binary supporting files remain included without being edited.</p>'}${earlierEdits(state)}</section></div>`,
-    primary: { label: 'Sanity check', action: 'check', disabled: !state.active }
+    primary: { label: state.workflowIntent === 'plugin' ? 'Check this skill for the plugin' : 'Sanity check', action: 'check', disabled: !state.active }
   };
 }
 function findings(title: string, values: { message: string; file?: string }[], className: string, actionable = true): string {
@@ -228,11 +251,11 @@ function check(state: GuidedState): { title: string; hint: string; html: string;
   const passed = !!result?.valid;
   return {
     title: passed ? 'Sanity check passed' : 'Sanity check needs attention',
-    hint: passed ? 'Review any structural notes, then continue to the submission summary.' : 'Open an affected file or return to editing, correct the structural errors, and run Sanity check again.',
+    hint: passed ? state.workflowIntent === 'plugin' ? 'The skill passed its structural check. Next, name your plugin and choose the skills to include.' : 'Review any structural notes, then continue to the submission summary.' : 'Open an affected file or return to editing, correct the structural errors, and run Sanity check again.',
     html: `<p class="result-badge ${passed ? 'pass' : 'warning'}"><span aria-hidden="true">${passed ? '✓' : '!'}</span> ${passed ? 'Structural checks passed.' : 'Structural checks need attention.'}</p><p>Security scanning was not performed by SkillJetty.</p>
       ${findings('Errors', result?.errors ?? [], 'error-card')}${findings('Structural notes', result?.warnings ?? [], '', false)}
       <section class="card"><h2>Intended application</h2><p>${escape(result?.compatibility ?? 'Application compatibility was not tested.')}</p><p class="hint">${escape(result?.behaviorNote ?? 'No AI model was run. Test the skill in your intended application before relying on its behavior.')}</p></section>`,
-    primary: passed ? { label: 'Continue to submission', action: 'preparePublish' } : { label: 'Fix and return to editing', action: 'edit' }
+    primary: passed ? { label: state.workflowIntent === 'plugin' ? 'Review plugin' : 'Continue to submission', action: 'preparePublish' } : { label: 'Fix and return to editing', action: 'edit' }
   };
 }
 function publish(state: GuidedState): { title: string; hint: string; html: string; primary: Primary } {
@@ -242,53 +265,57 @@ function publish(state: GuidedState): { title: string; hint: string; html: strin
   const version = details?.version ?? '1.0.0';
   const override = state.form?.version ?? '';
   const changelog = state.form?.changelog ?? details?.changelog ?? '';
+  const pluginWorkflow = state.workflowIntent === 'plugin';
+  const mode = selectedExportMode(state);
+  const localSaveLabel = mode === 'plugin' ? 'Save plugin ZIP' : mode === 'both' ? 'Save both packages' : 'Save skill package';
   return {
-    title: !connection ? 'Your skill is ready to take with you' : reviewSupported ? 'Ready to share your improvements?' : 'Ready to upload your skill?', hint: !connection ? 'Save an installable package on this computer. SkillJetty handles the release number and notes. No repository or sign-in is needed.' : reviewSupported ? 'Review what changed and where it will go. SkillJetty manages release numbering and prepares the package and notes. Upload & create PR opens a pull request; nothing is merged automatically.' : 'Review what changed and where it will go. SkillJetty manages release numbering, packaging and notes. This destination supports a Git upload; GitHub PRs and reviewer requests are unavailable.',
-    html: `${connection ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submitting to <strong>${escape(connection.repository)}</strong></span></section>` : '<p class="hint">Keep the package locally, install it in your chosen tool, or share it yourself.</p>'}
-      ${skillIdentity(state)}<section class="card managed-release"><h2>Release details, handled</h2><p>Release number <strong id="managed-version">${escape(version)}</strong></p><p class="hint">${escape(details?.versionSource ?? 'Chosen automatically to preserve earlier releases. You do not need to choose a number.')}</p>${details?.versionWarning ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(details.versionWarning)}</p>` : ''}<p class="hint">This number identifies the package being prepared. A declared version in the draft is shown separately above.</p></section>
-      ${changeSummary(state)}<section class="card"><form id="publish-form" action="#" method="post" data-form-action="${connection ? 'publish' : 'savePackage'}"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Share this skill</legend>
+    title: pluginWorkflow ? mode === 'portable' ? 'Review and save your skill' : mode === 'both' ? 'Review and save both packages' : 'Review and save your plugin' : !connection ? 'Your skill is ready to take with you' : reviewSupported ? 'Ready to share your improvements?' : 'Ready to upload your skill?', hint: pluginWorkflow ? mode === 'portable' ? 'Save a .skill package on this computer. This format does not create a plugin ZIP. GitHub upload is optional.' : mode === 'both' ? 'Name the plugin and choose its skills, then save both the .skill package and plugin ZIP on this computer. GitHub upload is optional.' : 'Name the plugin, choose its skills, then save the ZIP on this computer. GitHub upload is optional.' : !connection ? 'Save an installable package on this computer. SkillJetty handles the release number and notes. No repository or sign-in is needed.' : reviewSupported ? 'Review what changed and where it will go. SkillJetty manages release numbering and prepares the package and notes. Upload & create PR opens a pull request; nothing is merged automatically.' : 'Review what changed and where it will go. SkillJetty manages release numbering, packaging and notes. This destination supports a Git upload; GitHub PRs and reviewer requests are unavailable.',
+    html: `${connection && !pluginWorkflow ? `<section class="connected-strip"><span aria-hidden="true">✓</span><span>Submitting to <strong>${escape(connection.repository)}</strong></span></section>` : '<p class="hint">Saving on this computer needs no GitHub account and uploads nothing.</p>'}
+      ${!pluginWorkflow ? `${skillIdentity(state)}<section class="card managed-release"><h2>Release details, handled</h2><p>Release number <strong id="managed-version">${escape(version)}</strong></p><p class="hint">${escape(details?.versionSource ?? 'Chosen automatically to preserve earlier releases. You do not need to choose a number.')}</p>${details?.versionWarning ? `<p class="warning"><span aria-hidden="true">!</span> ${escape(details.versionWarning)}</p>` : ''}<p class="hint">This number identifies the package being prepared. A declared version in the draft is shown separately above.</p></section>${changeSummary(state)}` : details?.versionWarning ? `<p class="warning">${escape(details.versionWarning)}</p>` : ''}
+      <section class="card"><form id="publish-form" action="#" method="post" novalidate data-form-action="${pluginWorkflow ? 'savePackage' : connection ? 'publish' : 'savePackage'}"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">${pluginWorkflow ? mode === 'portable' ? 'Save your skill' : mode === 'both' ? 'Save your packages' : 'Save your plugin' : 'Share this skill'}</legend>
       ${exportChoices(state)}
-      ${textField('releaseChangelog', 'Anything else people should know? (optional)', changelog, 'rows="4"', 'Add the purpose of your changes, a testing note, or guidance for the next person. Leave blank to use the automatic release notes.')}
-      <details class="optional" ${override ? 'open' : ''}><summary>Advanced: choose a release number</summary>${field('releaseVersion', 'Release number override (optional)', override, 'autocomplete="off" autocapitalize="off" spellcheck="false"', `Leave blank to let SkillJetty use ${version}. Only override this when you need a particular release number; Using an existing number replaces that version’s folder in Git. Earlier contents remain in Git history and local recovery copies.`)}</details>
-      ${connection && reviewSupported ? reviewerPicker(state) : ''}
-      ${connection ? '<div class="button-row"><button type="submit" class="secondary" data-submit-action="savePackage">Save package on this computer</button></div><p class="hint">Saving locally does not upload anything or notify a reviewer. Your draft stays available for editing.</p>' : ''}
+      ${pluginWorkflow ? '<details class="optional"><summary>Optional release notes</summary>' : ''}${textField('releaseChangelog', 'Anything else people should know? (optional)', changelog, 'rows="4"', 'Leave blank to use automatic release notes.')}${pluginWorkflow ? '</details>' : ''}
+      ${!pluginWorkflow ? `<details class="optional" ${override ? 'open' : ''}><summary>Advanced: choose a release number</summary>${field('releaseVersion', 'Release number override (optional)', override, 'autocomplete="off" autocapitalize="off" spellcheck="false"', `Leave blank to let SkillJetty use ${version}. Only override this when you need a particular release number; Using an existing number replaces that version’s folder in Git. Earlier contents remain in Git history and local recovery copies.`)}</details>` : ''}
+      ${connection && pluginWorkflow ? `<details id="plugin-github-upload" class="optional"><summary>Upload to GitHub (optional)</summary><p>Destination: <strong>${escape(connection.repository)}</strong></p>${reviewSupported ? reviewerPicker(state) : ''}<button type="submit" class="secondary" data-submit-action="publish">${reviewSupported ? 'Upload &amp; create PR' : 'Upload version'}</button><p class="hint">This uploads to GitHub. Selecting a reviewer sends a review request. It does not install the plugin in Claude.</p></details>` : connection && reviewSupported ? reviewerPicker(state) : ''}
+      ${connection && !pluginWorkflow ? '<div class="button-row"><button type="submit" class="secondary" data-submit-action="savePackage">Save package on this computer</button></div><p class="hint">Saving locally does not upload anything or notify a reviewer. Your draft stays available for editing.</p>' : ''}
       </fieldset></form></section>
-      <section class="card"><h2>${connection ? 'What will be submitted' : 'What you will get'}</h2><ul class="package-summary"><li><span aria-hidden="true">✓</span><span><strong>Editable source</strong> — ${details?.fileCount ?? state.files.length} files with their existing folder structure</span></li><li><span aria-hidden="true">✓</span><span><strong id="export-package-summary">${state.exportOptions?.mode === 'plugin' ? 'Claude plugin ZIP' : state.exportOptions?.mode === 'both' ? 'Installable .skill package and Claude plugin ZIP' : 'Installable .skill package'}</strong> — rebuilt and checked against this source</span></li><li><span aria-hidden="true">✓</span><span><strong>CHANGELOG.md</strong> — automatic release notes and any context you add</span></li></ul><p class="hint">Original packages and replaced local versions remain available in recovery copies. Git keeps earlier contents in commit history. ${!connection ? 'Your package and notes stay on this computer. You can optionally configure a repository in SkillJetty settings using the gear above.' : reviewSupported ? 'A successful GitHub submission creates a pull request; merging is a separate repository decision. Selecting a reviewer sends that person a review request when you submit.' : 'This upload does not create a PR or notify a reviewer.'}</p><p class="hint">Claude organization installation, marketplace sync and group assignment are separate manual steps. Exporting does not deploy a plugin or prove application compatibility.</p></section>${compatibilityReport(details?.compatibility)}`,
-    primary: { label: connection ? reviewSupported ? 'Upload & create PR' : 'Upload version' : 'Save package on this computer', form: 'publish-form', disabled: !details }
+      ${pluginWorkflow ? '<details class="optional"><summary>Package contents and limits</summary>' : ''}<section class="card"><h2>${pluginWorkflow ? 'What will be saved' : connection ? 'What will be submitted' : 'What you will get'}</h2><ul class="package-summary"><li><span aria-hidden="true">✓</span><span><strong>Editable source</strong> — ${details?.fileCount ?? state.files.length} files with their existing folder structure</span></li><li><span aria-hidden="true">✓</span><span><strong id="export-package-summary">${mode === 'plugin' ? 'Claude plugin ZIP' : mode === 'both' ? 'Installable .skill package and Claude plugin ZIP' : 'Installable .skill package'}</strong> — generated when you save or upload</span></li><li><span aria-hidden="true">✓</span><span><strong>CHANGELOG.md</strong> — automatic release notes and any context you add</span></li></ul><p class="hint">Original packages and replaced local versions remain available in recovery copies. Saving a ZIP does not install it in Claude or prove application compatibility.</p></section>${pluginWorkflow ? '</details>' : ''}${compatibilityReport(details?.compatibility, pluginWorkflow)}`,
+    primary: { label: pluginWorkflow ? localSaveLabel : connection ? reviewSupported ? 'Upload & create PR' : 'Upload version' : 'Save package on this computer', form: 'publish-form', disabled: !details }
   };
 }
 function exportChoices(state: GuidedState): string {
   const options = state.exportOptions;
-  const mode = options?.mode ?? 'portable';
+  const mode = selectedExportMode(state);
   const plugin = mode !== 'portable';
+  const pluginVersion = options?.pluginVersion ?? '1.0.0';
   const candidates = options?.members ?? [
     ...(state.active ? [{ id: state.active.id, name: state.active.name, version: state.active.version, selected: true }] : []),
     ...state.drafts.filter(draft => draft.id !== state.active?.id).map(draft => ({ ...draft, selected: false, version: undefined }))
   ];
   const pluginField = (id: string, label: string, value: string, required = false, hint = '') => field(id, label, value,
-    `${required ? 'data-plugin-required' : ''} ${plugin && required ? 'required' : ''} ${!plugin ? 'disabled' : ''} autocomplete="off"`, hint);
-  return `<fieldset class="export-options"><legend>Choose your export</legend>
-    <div class="field"><label for="exportMode">Package format</label><select id="exportMode" name="exportMode" data-persist data-export-option aria-describedby="export-mode-help">${[['portable', 'Portable skill only'], ['plugin', 'Claude plugin only'], ['both', 'Both portable skill and Claude plugin']].map(([value, label]) => `<option value="${value}" ${mode === value ? 'selected' : ''}>${label}</option>`).join('')}</select><p id="export-mode-help" class="hint">Portable remains the default. Both prepares the outputs from the same skill content; separate upload receipts show each result.</p></div>
-    <fieldset id="plugin-options" ${!plugin ? 'hidden' : ''}><legend>Claude plugin bundle</legend>
-      ${pluginField('pluginName', 'Plugin name (required)', options?.pluginName ?? state.active?.name ?? '', true, 'Use lowercase words joined by hyphens. This is the bundle identity, separate from each skill name.')}
-      ${pluginField('pluginDescription', 'Plugin description (required)', options?.pluginDescription ?? '', true)}
-      ${pluginField('pluginVersion', 'Plugin release number (required)', options?.pluginVersion ?? '1.0.0', true, 'The bundle has its own version, independent of the skill release number.')}
-      ${pluginField('pluginAuthor', 'Plugin author (optional)', options?.pluginAuthor ?? '')}
-      ${pluginField('pluginLicense', 'Plugin license (optional)', options?.pluginLicense ?? '', false, 'Specify only licensing terms you are authorized to grant.')}
-      ${pluginField('pluginIcon', 'Directory icon path (optional)', options?.pluginIcon ?? '', false, 'A plugin-relative image path, for example ./skills/name/assets/logo.png. The file must already be included in the bundle.')}
-      ${pluginField('pluginPrivacyPolicyUrl', 'Privacy policy URL (optional)', options?.pluginPrivacyPolicyUrl ?? '', false, 'An HTTPS policy URL is needed for a public listing when the plugin talks to a remote server. Review bundled scripts before making data-handling claims.')}
-      ${pluginField('pluginDocumentationUrl', 'Documentation URL (optional)', options?.pluginDocumentationUrl ?? '')}
-      ${pluginField('pluginSupportUrl', 'Support URL (optional)', options?.pluginSupportUrl ?? '')}
-      <fieldset aria-describedby="plugin-members-help"><legend>Skills in this plugin</legend><p id="plugin-members-help" class="hint">Your current skill is included. Select other authored drafts to bundle with it. Open/import repository skills or restore saved skill versions as drafts first. SkillJetty preserves their complete content.</p>
+    `${required ? 'data-plugin-required' : ''} ${plugin && required ? 'required' : ''} ${!plugin ? 'disabled' : ''} ${id === 'pluginName' || id === 'pluginVersion' ? 'data-export-option' : ''} autocomplete="off"`, hint);
+  return `<fieldset class="export-options"><legend>What to save</legend>
+    <div class="field"><label for="exportMode">Save as</label><select id="exportMode" name="exportMode" data-persist data-export-option aria-describedby="export-mode-help">${[['portable', 'Skill package (.skill)'], ['plugin', 'Claude plugin ZIP'], ['both', 'Both skill package and plugin ZIP']].map(([value, label]) => `<option value="${value}" ${mode === value ? 'selected' : ''}>${label}</option>`).join('')}</select><p id="export-mode-help" class="hint">A skill is reusable instructions. A plugin packages one or more skills together for Claude.</p></div>
+    <fieldset id="plugin-options" ${!plugin ? 'hidden' : ''}><legend>Your plugin</legend>
+      ${pluginField('pluginName', 'Plugin name (required)', options?.pluginName ?? state.active?.name ?? '', true, 'Use lowercase words joined by hyphens, for example team-tools.')}
+      ${pluginField('pluginDescription', 'What does the plugin do? (required)', options?.pluginDescription ?? '', true)}
+      <fieldset aria-describedby="plugin-members-help"><legend>Skills to include</legend><p id="plugin-members-help" class="hint">Your current skill is included. Tick any other saved drafts you want in this plugin. Their supporting files are included too.</p>
       ${candidates.map((member, index) => `<label class="export-choice" for="plugin-member-${index}"><input id="plugin-member-${index}" type="checkbox" name="pluginMembers" value="${escape(member.id)}" data-persist data-export-option ${member.selected || member.id === state.active?.id ? 'checked' : ''} ${member.id === state.active?.id ? 'data-current-member disabled' : !plugin ? 'disabled' : ''}> <span>${escape(member.name)}${member.version ? ` — ${escape(member.version)}` : ' — version prepared at submission'}${member.id === state.active?.id ? ' (current skill)' : ''}</span></label>`).join('')}
-      </fieldset><p class="hint">The plugin export includes its manifest and a marketplace handoff. GitHub submission creates review work; Claude organization deployment remains manual.</p>
+      </fieldset><details id="plugin-version-details" class="optional" ${!pluginVersion.trim() || state.error ? 'open' : ''}><summary>Version ${escape(pluginVersion || 'required')} — change if needed</summary>${pluginField('pluginVersion', 'Plugin version (required)', pluginVersion, true, 'A version is filled in for you. Keep it unless you need a specific version.')}</details>
+      <details id="plugin-publisher-details" class="optional" ${state.error ? 'open' : ''}><summary>Optional publisher details</summary>
+      ${pluginField('pluginAuthor', 'Author (optional)', options?.pluginAuthor ?? '')}
+      ${pluginField('pluginLicense', 'License (optional)', options?.pluginLicense ?? '', false, 'Only grant licensing terms you are authorized to use.')}
+      ${pluginField('pluginIcon', 'Icon path inside the plugin (optional)', options?.pluginIcon ?? '', false, 'For example ./skills/name/assets/logo.png. The image must already be included.')}
+      ${pluginField('pluginPrivacyPolicyUrl', 'Privacy policy URL (optional)', options?.pluginPrivacyPolicyUrl ?? '', false, 'Needed for a public directory listing if the plugin sends data to a remote server.')}
+      ${pluginField('pluginDocumentationUrl', 'Documentation URL (optional)', options?.pluginDocumentationUrl ?? '')}
+      ${pluginField('pluginSupportUrl', 'Support URL (optional)', options?.pluginSupportUrl ?? '')}</details>
     </fieldset>
-    <label class="export-choice" for="geminiZip"><input id="geminiZip" type="checkbox" name="geminiZip" aria-describedby="gemini-export-help" data-persist data-export-option ${options?.geminiZip ? 'checked' : ''}> <span>Also prepare a Gemini App import ZIP</span></label><p class="hint" id="gemini-export-help">Checks documented Gemini App file and size limits. Google Workspace Studio, Cloud Gemini Enterprise and Gemini CLI have separate requirements. Import and runtime behavior must be tested in your account.</p>
+    <details class="optional" ${options?.geminiZip ? 'open' : ''}><summary>Other export options</summary><label class="export-choice" for="geminiZip"><input id="geminiZip" type="checkbox" name="geminiZip" aria-describedby="gemini-export-help" data-persist data-export-option ${options?.geminiZip ? 'checked' : ''}> <span>Also save a Gemini App import ZIP</span></label><p class="hint" id="gemini-export-help">Checks Gemini App file and size limits. Import and runtime behavior still need testing in your account.</p></details>
   </fieldset>`;
 }
-function compatibilityReport(reports: ExportCompatibility[] | undefined): string {
+function compatibilityReport(reports: ExportCompatibility[] | undefined, optional = false): string {
   if (!reports?.length) return '';
-  return `<section class="card" aria-labelledby="compatibility-heading"><h2 id="compatibility-heading">Export compatibility</h2>${reports.map(report => `<h3>${escape(report.target)}</h3>${report.issues.length ? `<ul>${report.issues.map(issue => `<li>${escape(issue)}</li>`).join('')}</ul>` : '<p>No documented structural conflicts found.</p>'}<p class="hint">${report.tested ? 'Application test results are recorded for this export.' : 'Application import and runtime behavior have not been tested by SkillJetty.'}</p>`).join('')}</section>`;
+  return `${optional ? '<details id="export-compatibility-details" class="optional"><summary>Public directory and app checks (optional)</summary><p>A private plugin ZIP does not need a public directory listing. Directory requirements apply only if you submit there. Other selected formats, such as Gemini App, have separate file requirements.</p>' : ''}<section class="card" aria-labelledby="compatibility-heading"><h2 id="compatibility-heading">Export compatibility</h2>${reports.map(report => `<h3>${escape(report.target)}</h3>${report.issues.length ? `<ul>${report.issues.map(issue => `<li>${escape(issue)}</li>`).join('')}</ul>` : '<p>No documented structural conflicts found.</p>'}<p class="hint">${report.tested ? 'Application test results are recorded for this export.' : 'Application import and runtime behavior have not been tested by SkillJetty.'}</p>`).join('')}</section>${optional ? '</details>' : ''}`;
 }
 function artifactReceipts(state: GuidedState): string {
   const artifacts = state.receipt?.artifacts;
@@ -340,7 +367,8 @@ const styles = `
   :root { --workbench-accent: #0b635d; } .brand-lockup { display: flex; align-items: center; gap: 1rem; margin-block: .3rem 1.4rem; min-inline-size: 0; } .brand-logo { inline-size: 64px; block-size: 64px; object-fit: contain; flex: none; } .brand-wordmark { min-inline-size: 0; } .brand-company { display: block; color: var(--workbench-accent); font-size: .78rem; line-height: 1.5; font-weight: 750; letter-spacing: .16em; } .brand-product { display: block; color: var(--vscode-editor-foreground, CanvasText); font-size: clamp(1.3rem, 2.3vw, 1.8rem); font-weight: 700; line-height: 1.2; letter-spacing: -.025em; margin: .08rem 0 .2rem; overflow-wrap: anywhere; } .brand-tagline { display: block; color: var(--vscode-descriptionForeground, GrayText); font-size: .85rem; line-height: 1.4; }
   @media (prefers-color-scheme: dark) { :root { --workbench-accent: #67c3b8; } } body.vscode-light, body.vscode-high-contrast-light { color-scheme: light; --workbench-accent: #0b635d; } body.vscode-dark, body.vscode-high-contrast { color-scheme: dark; --workbench-accent: #67c3b8; }
   .editor-skip { position: absolute; inline-size: 1px; block-size: 1px; clip-path: inset(50%); overflow: hidden; white-space: nowrap; } .editor-skip:focus { position: static; display: block; inline-size: auto; block-size: auto; clip-path: none; overflow: visible; white-space: normal; padding: .5rem; margin-block-end: .5rem; }
-  .start-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .8rem; } .start-option { min-inline-size: 0; } .start-choices button { inline-size: 100%; min-block-size: 3.5rem; font-weight: 650; } .start-option .hint { margin: .6rem .15rem 0; }
+  .header-heading { display: flex; align-items: start; justify-content: space-between; gap: 1rem; } .header-tools { flex: none; } #activity-timing { margin-block: .2rem 0; } #activity-timing > summary { font-size: .8rem; padding-block: .3rem; }
+  .start-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: .8rem; } .start-option { min-inline-size: 0; } .start-choices button { inline-size: 100%; min-block-size: 3.5rem; font-weight: 650; } .start-option .hint { margin: .6rem .15rem 0; } .start-card .start-choices button { background: #0b635d; color: #fff; border-color: #0b635d; } .start-card .start-choices button:hover:not(:disabled) { background: #084f4b; }
   .account-strip { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; padding-block-end: .9rem; border-block-end: 1px solid var(--vscode-panel-border, GrayText); } .account-strip p { margin: .1rem 0 0; overflow-wrap: anywhere; } .account-strip .hint { flex-basis: 100%; }
   @media (max-width: 760px) { .editor-layout { grid-template-columns: 1fr; } .file-list { max-block-size: 12rem; } .code-editor { min-block-size: 24rem; } .step { flex-direction: column; align-items: start; gap: .35rem; } .step-name { font-size: .9rem; } .step-state { font-size: .7rem; } .work-list li { align-items: start; flex-direction: column; gap: .5rem; } .action-bar { align-items: stretch; } .action-bar .primary { min-inline-size: 0; flex: 1; } }
   @media (pointer: coarse) { button, input, select, summary { min-block-size: 3rem; } }
@@ -368,6 +396,10 @@ const script = `
   let saveTimer;
   let savePending = false;
   let queuedAction;
+  let pluginMetadataSequence = 0;
+  let pluginVersionEditSequence = 0;
+  let pluginMetadataRequest;
+  let queuedMetadataAction;
   let lastSavedContent = '';
   let actionPending = main.dataset.busy === 'true';
   let activityTimer;
@@ -516,7 +548,7 @@ const script = `
       checkPullRequests: 'Checking recorded pull requests…', checkPullRequest: 'Checking this pull request…',
       createPullRequest: 'Finding or creating the pull request…', requestReviewer: 'Requesting the selected reviewer…',
       openPullRequest: 'Opening the recorded pull request…', openLink: 'Opening the selected link…', setTarget: 'Updating the intended application…',
-      showCreate: 'Opening a new skill draft…', edit: 'Returning to your draft…', back: 'Returning to the previous step…',
+      showCreate: 'Opening a new skill draft…', showPlugin: 'Opening the plugin builder…', showSkillStart: 'Returning to skill or plugin choices…', edit: 'Returning to your draft…', back: 'Returning to the previous step…',
       startAnother: 'Opening the start screen…' })[action] || 'Working on your request…';
   }
   function beginActivity(message, waitingForInput = false) {
@@ -563,6 +595,12 @@ const script = `
     if (action === 'openPerformanceLog') { vscode.postMessage({ action }); return; }
     if (actionPending) return;
     if (action === 'publish' && configurationChanged) { clientError('Settings changed. Return to the previous step and review a fresh submission summary before uploading.'); return; }
+    if (pluginMetadataRequest) {
+      queuedMetadataAction = { action, payload, focusStatus };
+      lockActions(true);
+      beginActivity('Updating plugin details before continuing…');
+      return;
+    }
     persist();
     const messageBuffer = action === 'reloadFile' ? {} : buffer();
     clearTimeout(saveTimer);
@@ -598,6 +636,23 @@ const script = `
       geminiZip: document.getElementById('geminiZip')?.checked === true
     };
   }
+  function submissionPayload(action) {
+    const reviewer = action === 'publish' ? fieldValue('reviewer') : '';
+    const version = fieldValue('releaseVersion').trim();
+    return { ...(version ? { version } : {}), changelog: fieldValue('releaseChangelog'), reviewer, confirmed: !!reviewer, ...exportPayload() };
+  }
+  function requestPluginMetadata(acceptedVersion) {
+    // Keep one request in flight. Later edits remain in the live form and are
+    // coalesced after the host acknowledges the previous suggested version.
+    if (pluginMetadataRequest) return;
+    const displayedVersion = fieldValue('pluginVersion');
+    pluginMetadataRequest = { requestId: pluginMetadataClientId + ':' + (++pluginMetadataSequence),
+      pluginName: fieldValue('pluginName'), pluginVersion: acceptedVersion === undefined ? displayedVersion : acceptedVersion,
+      displayedVersion, versionEditSequence: pluginVersionEditSequence };
+    persist();
+    vscode.postMessage({ action: 'updatePluginMetadata', requestId: pluginMetadataRequest.requestId,
+      payload: { pluginName: pluginMetadataRequest.pluginName, pluginVersion: pluginMetadataRequest.pluginVersion } });
+  }
   function updateExportVisibility() {
     const pluginOptions = document.getElementById('plugin-options');
     if (!pluginOptions) return;
@@ -615,7 +670,13 @@ const script = `
   document.querySelectorAll('form[data-form-action]').forEach(form => form.addEventListener('submit', event => {
     event.preventDefault();
     if (event.isComposing || actionPending) return;
-    if (!form.reportValidity()) { clientError('Complete the required fields highlighted below.'); const first = form.querySelector(':invalid'); if (first) first.focus(); return; }
+    // A required field may be inside an advanced disclosure. Reveal it before
+    // native validation tries to focus it, so the error is never hidden.
+    if (form.querySelectorAll) form.querySelectorAll(':invalid').forEach(control => {
+      let details = control.closest?.('details');
+      while (details) { details.open = true; details = details.parentElement?.closest('details'); }
+    });
+    if (!form.reportValidity()) { clientError('Complete the required fields highlighted below.'); const first = form.querySelector('input:invalid,select:invalid,textarea:invalid'); if (first) first.focus(); return; }
     clientError('');
     const action = event.submitter?.dataset.submitAction || form.dataset.formAction;
     let payload = {};
@@ -624,9 +685,7 @@ const script = `
     if (action === 'addFile') payload = { path: fieldValue('addFilePath') };
     if (action === 'createFile') payload = { path: fieldValue('newFilePath') };
     if (action === 'publish' || action === 'savePackage') {
-      const reviewer = action === 'publish' ? fieldValue('reviewer') : '';
-      const version = fieldValue('releaseVersion').trim();
-      payload = { ...(version ? { version } : {}), changelog: fieldValue('releaseChangelog'), reviewer, confirmed: !!reviewer, ...exportPayload() };
+      payload = submissionPayload(action);
     }
     post(action, payload, event.submitter?.id === 'primary-action');
   }));
@@ -635,17 +694,22 @@ const script = `
     if (!element) return;
     event.preventDefault();
     const payload = {};
-    for (const key of ['id', 'directory', 'path', 'url', 'reviewer']) if (element.dataset[key] !== undefined) payload[key] = element.dataset[key];
+    for (const key of ['id', 'directory', 'path', 'url', 'reviewer', 'intent']) if (element.dataset[key] !== undefined) payload[key] = element.dataset[key];
     if (element.dataset.confirmed === 'true') payload.confirmed = true;
     post(element.dataset.action, payload, element.id === 'primary-action');
   });
   document.addEventListener('input', event => {
+    if (event.target.id === 'pluginVersion') ++pluginVersionEditSequence;
     clientError(''); persist();
     if (event.target.validity && event.target.validity.valid) event.target.removeAttribute('aria-invalid');
     if (event.target === editor && !editor.readOnly) { document.getElementById('save-status').textContent = 'Unsaved changes'; scheduleSave(); }
   });
   document.addEventListener('change', event => {
     persist();
+    if (event.target.id === 'pluginName' || event.target.id === 'pluginVersion') {
+      if (!actionPending) requestPluginMetadata();
+      return;
+    }
     if (event.target.hasAttribute && event.target.hasAttribute('data-export-option')) {
       updateExportVisibility();
       if (step === 'publish') post('updateExportOptions', { ...exportPayload(), version: fieldValue('releaseVersion'), changelog: fieldValue('releaseChangelog') });
@@ -656,6 +720,44 @@ const script = `
   if (target) target.addEventListener('change', () => post('setTarget', { target: target.value }));
   window.addEventListener('message', event => {
     const message = event.data || {};
+    if (message.type === 'pluginMetadataUpdated') {
+      const request = pluginMetadataRequest;
+      if (!request || request.requestId !== message.requestId) return;
+      const currentName = fieldValue('pluginName'), currentVersion = fieldValue('pluginVersion');
+      const versionEdited = currentVersion !== request.displayedVersion || pluginVersionEditSequence !== request.versionEditSequence;
+      const unchanged = currentName === request.pluginName && !versionEdited;
+      const next = queuedMetadataAction;
+      queuedMetadataAction = undefined;
+      pluginMetadataRequest = undefined;
+      const error = typeof message.error === 'string' ? message.error
+        : typeof message.pluginVersion !== 'string' || typeof message.pluginName !== 'string' ? 'Plugin details could not be checked. Your inputs are preserved.' : undefined;
+      if (!unchanged) {
+        // Do not show an obsolete name's suggestion. For the next name, echo
+        // the host-accepted baseline instead of mistaking the old display for
+        // an explicit version override. Genuine version edits stay explicit.
+        queuedMetadataAction = next;
+        requestPluginMetadata(versionEdited ? currentVersion : error ? request.pluginVersion : message.pluginVersion);
+        return;
+      }
+      if (unchanged && !error) {
+        const version = document.getElementById('pluginVersion');
+        if (version) version.value = message.pluginVersion;
+        initialFields[scope + ':pluginVersion'] = message.pluginVersion;
+        const summary = document.getElementById('plugin-version-details')?.querySelector('summary');
+        if (summary) summary.textContent = 'Version ' + (message.pluginVersion || 'required') + ' — change if needed';
+        persist();
+      }
+      if (unchanged && error) clientError(error);
+      if (next) {
+        lockActions(false);
+        finishActivity();
+        if (unchanged && error) { finishActivity('Plugin details need attention. Your inputs are preserved.'); return; }
+        const payload = next.action === 'savePackage' || next.action === 'publish' ? submissionPayload(next.action)
+          : next.action === 'updateExportOptions' ? { ...exportPayload(), version: fieldValue('releaseVersion'), changelog: fieldValue('releaseChangelog') } : next.payload;
+        post(next.action, payload, next.focusStatus);
+      }
+      return;
+    }
     if (message.type === 'configurationChanged' && message.display && typeof message.display === 'object') {
       const display = message.display;
       configurationChanged = true;
@@ -749,16 +851,17 @@ const script = `
 export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?: GuidedBrand): string {
   nonce = nonceValue(nonce);
   const current = Math.max(0, steps.findIndex(step => step.key === state.step));
+  const workflowSteps = state.workflowIntent === 'plugin' ? steps.map(step => ({ ...step,
+    name: step.key === 'edit' ? 'Review skill' : step.key === 'check' ? 'Check skill' : step.key === 'publish' ? selectedExportMode(state) === 'portable' ? 'Save skill' : selectedExportMode(state) === 'both' ? 'Save packages' : 'Save plugin' : step.name
+  })) : steps;
   const screen = state.step === 'edit' ? edit(state) : state.step === 'check' ? check(state) : state.step === 'publish' ? publish(state) : state.step === 'done' ? done(state) : start(state);
-  const formScope = state.step === 'publish' ? `${state.active?.id ?? ''}:publish:${state.publish?.version ?? ''}` : state.step === 'start' ? `start:${state.form?.mode ?? 'home'}` : `${state.active?.id ?? ''}:${state.step}`;
+  const formScope = state.step === 'publish' ? `${state.active?.id ?? ''}:publish:${state.publish?.version ?? ''}:${state.workflowIntent ?? 'skill'}` : state.step === 'start' ? `start:${state.form?.mode ?? 'home'}:${state.workflowIntent ?? 'skill'}` : `${state.active?.id ?? ''}:${state.step}`;
   const backDisabled = state.step === 'start' && !state.form?.mode;
   const primary = screen.primary;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>${escape(screen.title)} | ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}</style></head><body>
     <a href="#main-content" class="skip-link">Skip to current step</a><div class="shell">
-    <div id="operation-status" class="activity-status" role="region" aria-labelledby="activity-heading" tabindex="-1" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><h2 id="activity-heading" class="activity-heading">Activity</h2><div class="activity-current"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message" role="status" aria-live="polite" aria-atomic="true">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div><ol id="activity-history" class="activity-history" aria-label="Activity history" aria-live="off" tabindex="0" ${state.activity?.length ? '' : 'hidden'}>${(state.activity ?? []).slice(-100).map(entry => `<li data-status="${escape(entry.status)}"><strong>${escape(({ running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' })[entry.status])}: </strong><span>${escape(entry.message)}</span></li>`).join('')}</ol><div class="button-row">${secondary('openPerformanceLog', 'Open performance log', 'id="open-performance-log" data-diagnostics="true" aria-describedby="performance-log-help"')}</div><p class="hint" id="performance-log-help">Open local timing details, including startup and earlier steps. Available while work is running.</p></div>
-    <header>${brandHeader(brand)}<nav aria-label="Skill workflow progress"><ol class="progress">${steps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
-
-    ${configurationSummary(state)}
+    <div id="operation-status" class="activity-status" role="region" aria-labelledby="activity-heading" tabindex="-1" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><h2 id="activity-heading" class="activity-heading">Activity</h2><div class="activity-current"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message" role="status" aria-live="polite" aria-atomic="true">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div><ol id="activity-history" class="activity-history" aria-label="Activity history" aria-live="off" tabindex="0" ${state.activity?.length ? '' : 'hidden'}>${(state.activity ?? []).slice(-100).map(entry => `<li data-status="${escape(entry.status)}"><strong>${escape(({ running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' })[entry.status])}: </strong><span>${escape(entry.message)}</span></li>`).join('')}</ol><details id="activity-timing" class="optional"><summary>Timing details</summary><div class="button-row">${secondary('openPerformanceLog', 'Open performance log', 'id="open-performance-log" data-diagnostics="true" aria-describedby="performance-log-help"')}</div><p class="hint" id="performance-log-help">Open local timing details, including startup and earlier steps. Available while work is running.</p></details></div>
+    <header><div class="header-heading">${brandHeader(brand)}<div class="header-tools">${settingsButton()}</div></div><nav aria-label="${state.workflowIntent === 'plugin' ? 'Plugin' : 'Skill'} workflow progress"><ol class="progress">${workflowSteps.map((step, index) => `<li class="step ${index === current ? 'current' : index < current ? 'completed' : ''}" ${index === current ? 'aria-current="step"' : ''}><span class="step-marker" aria-hidden="true">${index < current ? '✓' : index + 1}</span><span><span class="step-name"><span class="visually-hidden">Step ${index + 1}: </span>${step.name}</span><span class="step-state">${index === current ? 'Current step' : index < current ? 'Complete' : 'Next'}</span></span></li>`).join('')}</ol></nav></header>
     <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-waiting-for-input="${!!state.waitingForInput}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><div class="next-step"><strong>Next step</strong>${escape(screen.hint)}</div>
       <div id="feedback" class="feedback" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${state.error ? `<p class="error-message"><strong>Needs attention.</strong> ${escape(state.error)}</p>` : state.notice ? `<p class="notice-message">${escape(state.notice)}</p>` : ''}<p id="client-error" class="error-message" hidden></p></div>
@@ -766,7 +869,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
       ${screen.html}
       ${state.step !== 'edit' && state.editor ? `<textarea id="bufferContent" hidden data-editor-path="${escape(state.editor.path)}" ${state.editor.readOnly ? 'readonly data-read-only="true"' : ''}>${escape(state.editor.content)}</textarea>` : ''}
       ${primary ? `<footer class="action-bar"><button type="button" class="secondary" data-action="back" ${backDisabled ? 'disabled data-unavailable="true"' : ''}>← Back</button><button id="primary-action" class="primary" type="${primary.form ? 'submit' : 'button'}" ${primary.form ? `form="${primary.form}"` : `data-action="${primary.action}"`} ${primary.id ? `data-id="${escape(primary.id)}"` : ''} ${state.busy || primary.disabled ? 'disabled' : ''} ${primary.disabled ? 'data-unavailable="true"' : ''}>${state.busy ? 'Working…' : escape(primary.label)} <span aria-hidden="true">→</span></button></footer>` : ''}
-    </main></div><script nonce="${nonce}">const initialFileContent = ${scriptString(state.editor?.content ?? '')};const initialActivity = JSON.parse(${scriptString(JSON.stringify(state.activity ?? []))});const initialActivityGeneration = ${Number.isSafeInteger(state.activityGeneration) ? state.activityGeneration : 0};${script}</script></body></html>`;
+    </main>${configurationSummary(state)}</div><script nonce="${nonce}">const pluginMetadataClientId = ${scriptString(nonce.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, ''))};const initialFileContent = ${scriptString(state.editor?.content ?? '')};const initialActivity = JSON.parse(${scriptString(JSON.stringify(state.activity ?? []))});const initialActivityGeneration = ${Number.isSafeInteger(state.activityGeneration) ? state.activityGeneration : 0};${script}</script></body></html>`;
 }
 
 export function renderGuidedLauncher(nonce: string, brand?: GuidedBrand): string {

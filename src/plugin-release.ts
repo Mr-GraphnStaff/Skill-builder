@@ -180,10 +180,30 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
   } finally { if (fs.existsSync(staging)) { assertWorkbenchPath(workspaceRoot, staging); fs.rmSync(staging, { recursive: true }); } }
   return verifyPluginRelease(directory);
 }
-export function readPluginReleaseMetadata(directory: string, activeDirectory = false): PluginRelease {
+export function readPluginReleaseMetadata(directory: string, activeDirectory = false, maxMetadataBytes?: number): PluginRelease {
   directory = path.resolve(directory); assertWorkbenchPath(directory, directory);
   const file = assertWorkbenchPath(directory, path.join(directory, 'release.json'));
-  const manifest = JSON.parse(fs.readFileSync(file, 'utf8')) as PluginManifest;
+  let metadata: string;
+  if (maxMetadataBytes === undefined) metadata = fs.readFileSync(file, 'utf8');
+  else {
+    if (!Number.isSafeInteger(maxMetadataBytes) || maxMetadataBytes < 1 || maxMetadataBytes > MAX_ARCHIVE) throw new Error('Invalid plugin metadata read limit.');
+    const fd = fs.openSync(file, 'r');
+    try {
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.nlink > 1 || stat.size > maxMetadataBytes) throw new Error('Saved plugin version metadata exceeds the safe suggestion limit or is not a regular file.');
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (total <= maxMetadataBytes) {
+        const chunk = Buffer.alloc(Math.min(64 * 1024, maxMetadataBytes + 1 - total));
+        const read = fs.readSync(fd, chunk, 0, chunk.length, null);
+        if (!read) break;
+        chunks.push(chunk.subarray(0, read)); total += read;
+      }
+      if (total > maxMetadataBytes) throw new Error('Saved plugin version metadata exceeds the safe suggestion limit.');
+      metadata = Buffer.concat(chunks, total).toString('utf8');
+    } finally { fs.closeSync(fd); }
+  }
+  const manifest = JSON.parse(metadata) as PluginManifest;
   if (manifest.kind !== 'plugin' || manifest.format !== 1 || !manifest.plugin || !Array.isArray(manifest.members) || !manifest.members.length || !Array.isArray(manifest.files)) throw new Error('Invalid plugin release receipt.');
   identifier(manifest.skillName); version(manifest.version);
   const matchesDirectory = activeDirectory

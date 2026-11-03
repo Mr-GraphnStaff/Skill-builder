@@ -23,7 +23,7 @@ export function activityForAction(action: GuidedAction): string {
     requestReviewer: 'Sending the review request you confirmed…', connectGitHub: 'Waiting for GitHub sign-in in VS Code…',
     openPullRequest: 'Opening the recorded pull request…', openLink: 'Opening the selected link…',
     edit: 'Returning to your draft…', back: 'Opening the previous step…', startAnother: 'Opening your skills…',
-    showCreate: 'Opening a new draft form…', setTarget: 'Updating the intended application…'
+    showCreate: 'Opening a new draft form…', showPlugin: 'Choose the skills for your plugin…', showSkillStart: 'Choose a skill or plugin task…', setTarget: 'Updating the intended application…'
   };
   return labels[action] ?? 'Working on your request…';
 }

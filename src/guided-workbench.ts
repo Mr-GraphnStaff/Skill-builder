@@ -38,8 +38,29 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
   let operationTiming: { waitMs: number; waitingSince?: number } | undefined;
   let selectedWorkbench: string | undefined;
   let currentWorkspace: WorkspaceSelection | undefined;
+  const selectionKey = 'skillBuilder.selectedWorkbench.v1';
+  const rootSettingsFingerprint = () => {
+    const settings = vscode.workspace.getConfiguration('skillBuilder');
+    const inspected = settings.inspect?.<unknown>('projectRoot');
+    return JSON.stringify([settings.get<unknown>('projectRoot'), inspected?.globalValue, inspected?.workspaceValue, inspected?.workspaceFolderValue]);
+  };
+  const rememberWorkbench = async (dataRoot?: string) => {
+    await context.workspaceState?.update(selectionKey, dataRoot ? { format: 1, dataRoot, rootSettingsFingerprint: rootSettingsFingerprint() } : undefined);
+  };
   const activeWorkspace = async (): Promise<WorkspaceSelection | undefined> => {
-    if (selectedWorkbench) return { kind: 'managed', dataRoot: selectedWorkbench };
+    if (selectedWorkbench) { requireWorkbench(selectedWorkbench); return { kind: 'managed', dataRoot: selectedWorkbench }; }
+    const remembered = context.workspaceState?.get<unknown>(selectionKey);
+    if (remembered !== undefined && remembered !== null) {
+      if (typeof remembered !== 'object') throw new Error('The saved work location is invalid. Open your workbench explicitly; existing files were preserved.');
+      const saved = remembered as { format?: unknown; dataRoot?: unknown; rootSettingsFingerprint?: unknown };
+      if (saved.format !== 1 || typeof saved.dataRoot !== 'string' || !path.isAbsolute(saved.dataRoot) || typeof saved.rootSettingsFingerprint !== 'string') throw new Error('The saved work location is invalid. Open your workbench explicitly; existing files were preserved.');
+      if (saved.rootSettingsFingerprint === rootSettingsFingerprint()) {
+        try { requireWorkbench(saved.dataRoot); }
+        catch { throw new Error('Your saved workbench is unavailable or its boundary changed. Open an existing workbench explicitly. No other work folder was selected.'); }
+        selectedWorkbench = saved.dataRoot;
+        return { kind: 'managed', dataRoot: saved.dataRoot };
+      }
+    }
     if (hooks.getWorkspace) return hooks.getWorkspace();
     const root = await hooks.getRoot();
     return root ? { kind: 'managed', dataRoot: root } : undefined;
@@ -258,13 +279,22 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         assertSetupCurrent();
         createWorkbench(destination);
       } else requireWorkbench(destination);
+      let remembered = true;
+      try { await rememberWorkbench(destination); }
+      catch { remembered = false; }
+      assertSetupCurrent();
       selectedWorkbench = destination;
       ++configurationGeneration; ++workFolderGeneration;
       const previous = panel; panel = undefined; controller = undefined; previous?.dispose();
       rootNeedsReopen = false;
       await open();
-      // Opening this folder is explicit and persists the selection through the
-      // editor's own session; never write settings into an unrelated repository.
+      const openedController = controller as GuidedWorkbenchController | undefined;
+      if (!remembered && openedController) {
+        openedController.state.notice = 'Your workbench is ready in this window, but its location could not be remembered. Your files are preserved; open this workbench explicitly next time.';
+        render();
+      }
+      // The explicit selection is remembered for this VS Code workspace.
+      // Opening its folder is optional; never write ambient project settings.
       // This optional notification may remain unanswered indefinitely. Do not
       // hold the action queue after the new workbench is already usable.
       const noticePanel = panel, noticeController = controller;
@@ -272,7 +302,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       const noticeCurrent = () => !!noticePanel && panel === noticePanel && controller === noticeController
         && selectedWorkbench === destination && configurationGeneration === noticeGeneration
         && workFolderGeneration === noticeRootGeneration && !rootNeedsReopen;
-      void Promise.resolve().then(() => vscode.window.showInformationMessage('Workbench ready. Open its folder in a new VS Code window to keep this workbench available next time.', 'Open workbench folder'))
+      void Promise.resolve().then(() => vscode.window.showInformationMessage(remembered ? 'Workbench ready. Its location is remembered in this VS Code workspace.' : 'Workbench ready for this window. Open this workbench explicitly next time.', 'Open workbench folder'))
         .then(async choice => {
           if (choice && noticeCurrent()) await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(destination), true);
         }).catch(() => {
@@ -288,6 +318,31 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     }
   };
   const handle = (input: unknown) => {
+    if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'updatePluginMetadata') {
+      const message = input as { requestId?: unknown; payload?: unknown };
+      const requestId = message.requestId;
+      if (typeof requestId !== 'string' || !/^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) return Promise.resolve();
+      const ownerPanel = panel, ownerController = controller;
+      if (!ownerPanel || !ownerController) return Promise.resolve();
+      const operation = handling.then(async () => {
+        if (panel !== ownerPanel || controller !== ownerController) return;
+        try {
+          const payload = message.payload as Record<string, unknown> | undefined;
+          if (!payload || typeof payload !== 'object' || ['pluginName', 'pluginVersion'].some(key => typeof payload[key] !== 'string' || (payload[key] as string).length > 256)) {
+            throw new Error('Plugin name and version updates must be short text values.');
+          }
+          if (rootNeedsReopen || !ownerController.state.workFolder) throw new Error('The work location changed. Save your work and reopen SkillJetty before continuing.');
+          assertCurrentWorkspace(ownerController.state.workFolder);
+          const updated = ownerController.updatePluginMetadata({ pluginName: payload.pluginName, pluginVersion: payload.pluginVersion });
+          if (panel === ownerPanel && controller === ownerController) await ownerPanel.webview.postMessage({ type: 'pluginMetadataUpdated', requestId, ...updated });
+        } catch (error) {
+          if (panel === ownerPanel && controller === ownerController) await ownerPanel.webview.postMessage({ type: 'pluginMetadataUpdated', requestId,
+            error: error instanceof Error ? error.message : 'Plugin details could not be updated.' });
+        }
+      });
+      handling = operation.then(() => undefined, () => undefined);
+      return operation;
+    }
     if (input && typeof input === 'object' && ['createWorkbench', 'openWorkbenchFolder'].includes(String((input as { action?: unknown }).action))) {
       return queueSetup((input as { action: string }).action === 'createWorkbench');
     }
@@ -394,7 +449,10 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       });
       metricContexts.set(createdController, createdMetrics);
       controller = createdController;
-      context.subscriptions.push(panel.webview.onDidReceiveMessage(handle), panel.onDidDispose(() => { if (panel === createdPanel) { panel = undefined; controller = undefined; } }));
+      context.subscriptions.push(createdPanel.webview.onDidReceiveMessage(message => {
+        if (panel !== createdPanel || controller !== createdController) return Promise.resolve();
+        return handle(message);
+      }), createdPanel.onDidDispose(() => { if (panel === createdPanel) { panel = undefined; controller = undefined; } }));
       // Initialize connection metadata before the first document. Startup has
       // no scan and must not send progress that can arrive in a later document.
       await createdController.dispatch({ action: 'ready' });
@@ -466,7 +524,12 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     // Invalidate synchronously, including an operation currently awaiting Git or
     // GitHub. Refresh the display later through the same ordered host queue.
     ++configurationGeneration;
-    if (rootChanged) { selectedWorkbench = undefined; ++workFolderGeneration; if (controller || opening) rootNeedsReopen = true; }
+    if (rootChanged) {
+      selectedWorkbench = undefined;
+      void rememberWorkbench().catch(() => undefined);
+      ++workFolderGeneration;
+      if (controller || opening) rootNeedsReopen = true;
+    }
     if (!controller) return;
     const operation = handling.then(() => {
       if (!controller || !panel) return;

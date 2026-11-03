@@ -1,22 +1,44 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { listWorkbenchSkills, type FileDigest, type WorkbenchRelease } from './skill-workbench.js';
-import { readSkillIdentity, semanticVersion } from './skill-identity.js';
+import { readSkillIdentity, semanticVersion, compareReleaseVersions, nextReleaseVersion } from './skill-identity.js';
 import { suggestReleaseVersion } from './workbench-library.js';
 import { readGuidedFile } from './guided-workspace.js';
 import { runWorkbenchJob } from './workbench-jobs.js';
 import type { GuidedState } from './guided-contract.js';
+import { assertWorkbenchPath } from './workbench-boundary.js';
+import { existingWorkspaceForPath } from './workspace-selection.js';
+import { readPluginReleaseMetadata } from './plugin-release.js';
 
 export type ExportOptions = NonNullable<GuidedState['exportOptions']>;
 export type ExportMember = { id: string; name: string; version: string; files: FileDigest[] };
 export type ExportPreview = { options: ExportOptions; members: ExportMember[] };
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
-export function initialExportOptions(root: string, activeId: string, version: string): ExportOptions {
+function exportJobBoundary(root: string): { boundaryRoot: string; requireManaged: boolean } {
+  const existing = existingWorkspaceForPath(root);
+  return { boundaryRoot: root, requireManaged: !existing || path.relative(existing.dataRoot, path.resolve(root)) !== '' };
+}
+
+/** Suggest from this plugin's receipts only; do not audit every package to show a default. */
+export function suggestPluginVersion(root: string, name: string): string {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) || name.length > 64 || /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/.test(name)) return '1.0.0';
+  const folder = assertWorkbenchPath(root, path.join(root, 'plugin-releases', name));
+  if (!fs.existsSync(folder)) return '1.0.0';
+  const versions = fs.readdirSync(folder).filter(number => semanticVersion.test(number)).sort(compareReleaseVersions);
+  const latest = versions.at(-1);
+  if (!latest) return '1.0.0';
+  const previous = readPluginReleaseMetadata(assertWorkbenchPath(root, path.join(folder, latest)), false, 8 * 1024 * 1024).version;
+  let next = nextReleaseVersion(previous);
+  while (versions.includes(next)) next = nextReleaseVersion(next);
+  return next;
+}
+
+export function initialExportOptions(root: string, activeId: string, version: string, mode: ExportOptions['mode'] = 'portable'): ExportOptions {
   const skills = listWorkbenchSkills(root), active = skills.find(item => item.id === activeId);
   if (!active) throw new Error('Choose an active skill.');
   const identity = readSkillIdentity(readGuidedFile(active, 'SKILL.md'));
-  return { mode: 'portable', pluginName: active.name, pluginDescription: identity.description ?? '', pluginVersion: '1.0.0',
+  return { mode, pluginName: active.name, pluginDescription: identity.description ?? '', pluginVersion: mode === 'portable' ? '1.0.0' : suggestPluginVersion(root, active.name), pluginVersionSource: 'suggested',
     pluginAuthor: '', pluginLicense: '', pluginIcon: '', pluginPrivacyPolicyUrl: '', pluginDocumentationUrl: '', pluginSupportUrl: '', geminiZip: false,
     members: skills.map(skill => ({ id: skill.id, name: skill.name, ...(skill.id === activeId ? { version } : {}), selected: skill.id === activeId })) };
 }
@@ -36,8 +58,11 @@ export function readExportOptions(root: string, activeId: string, previous: Expo
   if (!ids.includes(activeId) || ids.some(id => !skills.some(skill => skill.id === id))) throw new Error('Keep the current skill selected and choose other existing drafts in this workbench.');
   const geminiZip = input.geminiZip ?? previous.geminiZip;
   if (typeof geminiZip !== 'boolean') throw new Error('Choose whether to export a Gemini ZIP.');
-  const options: ExportOptions = { mode: mode as ExportOptions['mode'], pluginName: text('pluginName', previous.pluginName),
-    pluginDescription: text('pluginDescription', previous.pluginDescription), pluginVersion: text('pluginVersion', previous.pluginVersion),
+  const pluginName = text('pluginName', previous.pluginName), requestedVersion = text('pluginVersion', previous.pluginVersion);
+  const suggested = previous.pluginVersionSource === 'suggested' && requestedVersion === previous.pluginVersion;
+  const pluginVersion = suggested && (pluginName !== previous.pluginName || (previous.mode === 'portable' && mode !== 'portable')) ? suggestPluginVersion(root, pluginName) : requestedVersion;
+  const options: ExportOptions = { mode: mode as ExportOptions['mode'], pluginName,
+    pluginDescription: text('pluginDescription', previous.pluginDescription), pluginVersion, pluginVersionSource: suggested ? 'suggested' : 'explicit',
     pluginAuthor: text('pluginAuthor', previous.pluginAuthor), pluginLicense: text('pluginLicense', previous.pluginLicense), geminiZip,
     pluginIcon: text('pluginIcon', previous.pluginIcon), pluginPrivacyPolicyUrl: text('pluginPrivacyPolicyUrl', previous.pluginPrivacyPolicyUrl),
     pluginDocumentationUrl: text('pluginDocumentationUrl', previous.pluginDocumentationUrl), pluginSupportUrl: text('pluginSupportUrl', previous.pluginSupportUrl),
@@ -55,7 +80,7 @@ export async function captureExportPreview(root: string, activeId: string, optio
   for (const choice of options.members.filter(item => item.selected && (options.mode !== 'portable' || item.id === activeId))) {
     const skill = skills.find(item => item.id === choice.id);
     if (!skill) throw new Error('A selected skill is no longer an active draft. Review the bundle again.');
-    const snapshot = await runWorkbenchJob({ kind: 'snapshot', root, skill }, { boundaryRoot: root });
+    const snapshot = await runWorkbenchJob({ kind: 'snapshot', root, skill }, exportJobBoundary(root));
     const matching = snapshot.releases.find(item => {
       const manifest = JSON.parse(fs.readFileSync(path.join(item.directory, 'release.json'), 'utf8'));
       return same(manifest.files, snapshot.validation.files);
@@ -94,12 +119,12 @@ export async function prepareExportPlan(root: string, activeId: string, reviewed
   const artifacts: NonNullable<NonNullable<GuidedState['receipt']>['artifacts']> = [];
   let compatibility = exportCompatibility(fresh);
   for (const member of reviewed.members) {
-    const releases = await runWorkbenchJob({ kind: 'library', root, skillName: member.name }, { boundaryRoot: root });
+    const releases = await runWorkbenchJob({ kind: 'library', root, skillName: member.name }, exportJobBoundary(root));
     const existing = releases.find(item => item.version === member.version);
-    let release = existing ? await runWorkbenchJob({ kind: 'verifyRelease', directory: existing.directory }, { boundaryRoot: root }) : undefined;
+    let release = existing ? await runWorkbenchJob({ kind: 'verifyRelease', directory: existing.directory }, exportJobBoundary(root)) : undefined;
     const notes = member.id === activeId ? changelog : `Member snapshot ${member.name} ${member.version} for plugin ${reviewed.options.pluginName}.`;
     if (release && !same(release.manifest.files, member.files)) throw new Error(`Saved ${member.name} ${member.version} has different bytes. Choose a new version or explicitly prepare that skill first.`);
-    if (!release) release = await runWorkbenchJob({ kind: 'prepareRelease', root, id: member.id, version: member.version, changelog: notes }, { boundaryRoot: root });
+    if (!release) release = await runWorkbenchJob({ kind: 'prepareRelease', root, id: member.id, version: member.version, changelog: notes }, exportJobBoundary(root));
     if (!same(release.manifest.files, member.files)) throw new Error('The draft changed during packaging. Prepared files are retained; nothing was uploaded.');
     portable.push(release);
     if (reviewed.options.mode !== 'plugin') artifacts.push({ label: `Portable skill: ${member.name} ${member.version}`, kind: 'portable', version: member.version, path: release.packagePath, directory: release.directory, status: 'prepared' });
@@ -111,19 +136,19 @@ export async function prepareExportPlan(root: string, activeId: string, reviewed
       version: options.pluginVersion, author: options.pluginAuthor || undefined, license: options.pluginLicense || undefined, repository,
       icon: options.pluginIcon || undefined, privacyPolicyUrl: options.pluginPrivacyPolicyUrl || undefined,
       documentationUrl: options.pluginDocumentationUrl || undefined, supportUrl: options.pluginSupportUrl || undefined,
-      members: portable.map(release => ({ directory: release.directory })), changelog } }, { boundaryRoot: root });
+      members: portable.map(release => ({ directory: release.directory })), changelog } }, exportJobBoundary(root));
     submissions.push(plugin);
     artifacts.push({ label: `Claude plugin: ${plugin.skillName} ${plugin.version}`, kind: 'plugin', version: plugin.version, path: plugin.packagePath, directory: plugin.directory, status: 'prepared' });
-    const readiness = await runWorkbenchJob({ kind: 'pluginReadiness', directory: plugin.directory }, { boundaryRoot: root });
+    const readiness = await runWorkbenchJob({ kind: 'pluginReadiness', directory: plugin.directory }, exportJobBoundary(root));
     compatibility = compatibility.filter(report => !report.target.startsWith('Claude public directory'));
     compatibility.push({ target: 'Claude public directory (local preflight)', tested: false,
       issues: readiness.checks.map(check => `${check.result.toUpperCase()}: ${check.message}${check.paths?.length ? ` (${check.paths.join(', ')})` : ''}`) });
   }
   if (reviewed.options.geminiZip) for (const release of portable) {
-    const gemini = await runWorkbenchJob({ kind: 'prepareGemini', root, directory: release.directory }, { boundaryRoot: root });
+    const gemini = await runWorkbenchJob({ kind: 'prepareGemini', root, directory: release.directory }, exportJobBoundary(root));
     artifacts.push({ label: `Gemini App ZIP: ${release.skillName} ${release.version}`, kind: 'gemini', version: release.version, path: gemini.packagePath, directory: gemini.directory, status: 'prepared' });
   }
   // Reverify every submission after all other local packaging has completed.
-  for (const release of submissions) await runWorkbenchJob({ kind: 'verifyExport', directory: release.directory }, { boundaryRoot: root });
+  for (const release of submissions) await runWorkbenchJob({ kind: 'verifyExport', directory: release.directory }, exportJobBoundary(root));
   return { submissions, artifacts, compatibility };
 }

@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
 import { assertWorkbenchPath } from './workbench-boundary.js';
-import { initialExportOptions, readExportOptions, captureExportPreview, exportCompatibility, prepareExportPlan, type ExportPreview } from './guided-exports.js';
+import { initialExportOptions, suggestPluginVersion, readExportOptions, captureExportPreview, exportCompatibility, prepareExportPlan, type ExportPreview } from './guided-exports.js';
 import { exportRelativePath } from './plugin-release.js';
 import type { ReleaseArchivePlan } from './release-archive.js';
 import { suggestReleaseVersion } from './workbench-library.js';
@@ -52,7 +52,7 @@ export class GuidedWorkbenchController {
   private archivePlan?: ReleaseArchivePlan;
   private activitySequence = 0;
   private operationActivity?: number;
-  state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
+  state: GuidedState = { step: 'start', workflowIntent: 'skill', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
   constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; this.refreshRepositorySettings(); }
   private savedConnection(settings: RepositorySettings) {
     try { return this.root ? getWorkspaceConnection(this.root) : undefined; }
@@ -73,7 +73,13 @@ export class GuidedWorkbenchController {
         // preference uses the documented workbench-local clone destination.
         if (!selected.localPath && settings.localRepositoryPath === undefined) selected.localPath = path.join(this.root, 'repositories', 'skills');
       }
-      if (selected.localPath) assertWorkbenchRepository(this.root, selected.localPath);
+      if (selected.localPath) {
+        const relative = path.relative(path.join(this.root, 'repositories'), path.resolve(selected.localPath));
+        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+          throw new Error('For GitHub sharing, choose a repository folder inside your SkillJetty workbench\'s repositories folder. The saved Git folder belongs to another work location. Local skills and plugin packages can still be saved.');
+        }
+        assertWorkbenchRepository(this.root, selected.localPath);
+      }
     }
     return selected;
   }
@@ -129,6 +135,21 @@ export class GuidedWorkbenchController {
     this.refreshRepositorySettings();
     return connection;
   }
+  /** Passive form metadata: no activity, worker, file write, or page replacement.
+   * The host serializes this with normal actions; Save still validates the full
+   * current input and captures member bytes again before generating anything. */
+  updatePluginMetadata(input: Record<string, unknown>): { pluginName: string; pluginVersion: string } {
+    const previous = this.state.exportOptions;
+    if (this.state.step !== 'publish' || !previous) throw new Error('Review the plugin before changing its package details.');
+    const metadata = readExportOptions(this.workspace(), this.active().id, previous, {
+      ...(input.pluginName === undefined ? {} : { pluginName: input.pluginName }),
+      ...(input.pluginVersion === undefined ? {} : { pluginVersion: input.pluginVersion })
+    }, false);
+    const options = { ...previous, pluginName: metadata.pluginName, pluginVersion: metadata.pluginVersion, pluginVersionSource: metadata.pluginVersionSource };
+    this.state.exportOptions = options;
+    if (this.exportPreview) this.exportPreview = { ...this.exportPreview, options };
+    return { pluginName: options.pluginName, pluginVersion: options.pluginVersion };
+  }
   private async runJob<J extends WorkbenchJob>(job: J) {
     const phases: Record<string, string> = {
       archiveRead: 'Package bytes read.', archiveDecode: 'Package contents decoded.',
@@ -158,14 +179,14 @@ export class GuidedWorkbenchController {
       const selected = this.repositorySelection();
       connection = selected.repository ? { repository: selected.repository, localPath: selected.localPath, baseBranch: this.state.connection?.baseBranch ?? '' } : undefined;
     }
-    catch { this.state.repositoryVerification = { status: 'setupRequired', message: 'Reconnect the remote repository and choose its local skills project folder.' }; this.hooks.onRepositoryVerification?.(this.state.repositoryVerification); return; }
+    catch (error) { this.state.repositoryVerification = { status: 'setupRequired', message: error instanceof Error ? error.message : 'GitHub sharing settings need attention. Local skills and plugin packages can still be saved.' }; this.hooks.onRepositoryVerification?.(this.state.repositoryVerification); return; }
     const identity = JSON.stringify([root, connection?.repository, connection?.localPath]);
     const update = (state: RepositoryCheckState) => {
       if (sequence !== this.verificationSequence || root !== this.root
           || identity !== JSON.stringify([this.root, this.state.connection?.repository, this.state.connection?.localPath])) return;
       this.state.repositoryVerification = state; this.hooks.onRepositoryVerification?.(state);
     };
-    if (!connection) { update({ status: 'setupRequired', message: 'Register a remote skills repository and select its actual local project folder.' }); return; }
+    if (!connection) { update({ status: 'setupRequired', message: 'GitHub sharing is optional. You can create skills and save skill or plugin packages here without connecting a repository.' }); return; }
     update({ status: 'checking', message: 'Verifying the local project folder, Git origin, branch and remote commit…', repository: connection.repository, localPath: connection.localPath });
     try { update(await verifyProjectRepository(connection.repository, connection.localPath)); }
     catch (error) { update({ status: 'error', message: error instanceof Error ? error.message : String(error), repository: connection.repository, localPath: connection.localPath }); }
@@ -221,7 +242,7 @@ export class GuidedWorkbenchController {
     this.previewInventory = undefined;
     this.state.step = 'edit'; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined; this.state.form = undefined;
     emitWorkbenchMetric(this.hooks.onMetric, { stage: 'editorPreparation', durationMs: performance.now() - editorStarted, fileCount: this.state.files.length, outcome: 'ok' });
-    if (newWorkflow) this.resetWorkflowActivity();
+    if (newWorkflow) { this.state.exportOptions = undefined; this.exportPreview = undefined; this.resetWorkflowActivity(); }
   }
   private buffer(message: GuidedMessage) {
     if (message.editorContent === undefined && message.editorPath === undefined) return;
@@ -482,7 +503,17 @@ export class GuidedWorkbenchController {
           }
           break;
         }
-        case 'showCreate': this.workspace(); this.state.step = 'start'; this.state.form = { mode: 'create' }; break;
+        case 'showPlugin':
+          this.workspace(); this.state.workflowIntent = 'plugin'; this.state.step = 'start'; this.state.form = { mode: 'plugin' };
+          this.state.exportOptions = undefined; this.exportPreview = undefined; this.state.publish = undefined; break;
+        case 'showSkillStart':
+          this.state.workflowIntent = 'skill'; this.state.step = 'start'; this.state.form = undefined;
+          this.state.exportOptions = undefined; this.exportPreview = undefined; this.state.publish = undefined; break;
+        case 'showCreate':
+          this.workspace();
+          if (payload.intent !== undefined && payload.intent !== 'plugin' && payload.intent !== 'skill') throw new Error('Choose skill creation or a skill for this plugin.');
+          this.state.workflowIntent = payload.intent === 'plugin' ? 'plugin' : 'skill'; this.state.step = 'start'; this.state.form = { mode: 'create' };
+          this.state.exportOptions = undefined; this.exportPreview = undefined; this.state.publish = undefined; break;
         case 'createSkill': {
           this.state.form.mode = 'create';
           const skill = createGuidedSkill(this.workspace(), { name: string('name'), description: string('description'), instructions: string('instructions') });
@@ -563,15 +594,30 @@ export class GuidedWorkbenchController {
           this.state.target = target as SkillTarget; this.state.check = undefined; break;
         }
         case 'check': await this.check(); break;
-        case 'edit': this.state.step = 'edit'; break;
+        case 'edit':
+          if (this.state.step === 'done') {
+            const previous = this.state.exportOptions;
+            if (previous && previous.mode !== 'portable') this.state.exportOptions = { ...previous, pluginVersion: suggestPluginVersion(this.workspace(), previous.pluginName), pluginVersionSource: 'suggested' };
+            this.exportPreview = undefined;
+          }
+          this.state.step = 'edit'; break;
         case 'preparePublish': {
           if (!await this.check()) break;
           this.refreshRepositorySettings();
           this.state.step = 'publish';
           const preview = await this.publicationDetails();
           this.state.publish = preview.details;
-          this.state.exportOptions = initialExportOptions(this.workspace(), this.active().id, preview.details.version);
-          this.exportPreview = undefined;
+          const previous = this.state.exportOptions;
+          const defaults = initialExportOptions(this.workspace(), this.active().id, preview.details.version, this.state.workflowIntent === 'plugin' ? 'plugin' : 'portable');
+          this.state.exportOptions = previous && previous.members.some(member => member.id === this.active().id)
+            ? { ...defaults, ...previous, members: defaults.members.map(member => ({ ...member, selected: previous.members.find(item => item.id === member.id)?.selected ?? member.selected })) }
+            : defaults;
+          this.exportPreview = this.state.exportOptions.mode !== 'portable' || this.state.exportOptions.geminiZip
+            ? await captureExportPreview(this.workspace(), this.active().id, this.state.exportOptions, preview.details.version) : undefined;
+          if (this.exportPreview) {
+            this.state.exportOptions = this.exportPreview.options;
+            this.state.publish.compatibility = exportCompatibility(this.exportPreview);
+          }
           this.previewInventory = JSON.stringify(preview.inventory);
           try { this.previewDestination = this.destinationFingerprint(); }
           catch { this.previewDestination = undefined; }
@@ -781,6 +827,7 @@ export class GuidedWorkbenchController {
           this.state.step = this.state.step === 'publish' ? 'check' : this.state.step === 'check' ? 'edit' : 'start'; this.state.form = undefined; break;
         case 'startAnother':
           this.state.step = 'start'; this.state.active = undefined; this.state.editor = undefined; this.state.files = []; this.state.form = undefined; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined;
+          this.state.workflowIntent = 'skill'; this.state.exportOptions = undefined; this.exportPreview = undefined;
           this.resetWorkflowActivity(); break;
         case 'openLink': {
           const url = string('url');

@@ -35,7 +35,7 @@ function harness(overrides = {}) {
   let timerId = 0;
   let now = 0;
   const document = { activeElement: editor, getElementById: id => elements.get(id) ?? null,
-    querySelectorAll: selector => selector === 'button' ? buttons : selector === 'input,select,textarea' ? [editor, input, unavailable] : selector === 'form[data-form-action]' ? [pathForm] : [], querySelector: () => null,
+    querySelectorAll: selector => selector === 'button' ? buttons : selector === 'input,select,textarea' ? [editor, input, unavailable] : selector === 'form[data-form-action]' ? [pathForm] : selector === 'input[name="pluginMembers"]:checked' ? [...elements.values()].filter(item => item.name === 'pluginMembers' && item.checked) : [], querySelector: () => null,
     addEventListener: (name, handler) => handlers.set(name, handler) };
   const context = { document, window: { addEventListener: (name, handler) => windowHandlers.set(name, handler) },
     Date: { now: () => now },
@@ -46,8 +46,153 @@ function harness(overrides = {}) {
   const click = action => handlers.get('click')({ preventDefault() {}, target: { closest: () => ({ dataset: { action } }) } });
   const receive = message => windowHandlers.get('message')({ data: message });
   const fire = delay => { const entry = [...timers].find(([, timer]) => timer.delay === delay); assert(entry, `missing ${delay}ms timer`); timers.delete(entry[0]); entry[1].callback(); };
-  return { html, main, editor, elements, element, lifecycle, buttons, posted, timers, click, receive, fire, advance: ms => { now += ms; }, submitPath: () => formSubmit({ preventDefault() {} }) };
+  return { html, main, editor, elements, element, lifecycle, buttons, posted, timers, click, receive, fire,
+    change: id => handlers.get('change')({ target: elements.get(id) }),
+    focusElement: id => { document.activeElement = elements.get(id); },
+    advance: ms => { now += ms; }, submitPath: () => formSubmit({ preventDefault() {} }) };
 }
+
+function pluginMetadataHarness() {
+  const h = harness({ step: 'publish', workflowIntent: 'plugin' });
+  h.element('pluginName', { value: 'team-tools' });
+  h.element('pluginVersion', { value: '1.0.0' });
+  h.element('pluginDescription', { value: 'Useful team tools.' });
+  h.element('exportMode', { value: 'plugin' });
+  const versionSummary = h.element('version-summary');
+  h.element('plugin-version-details', { querySelector: () => versionSummary });
+  return h;
+}
+
+test('plugin metadata changes are passive and preserve the next field and keyboard focus', () => {
+  const h = pluginMetadataHarness();
+  h.change('pluginName');
+  const request = h.posted.at(-1).message;
+  assert.equal(request.action, 'updatePluginMetadata');
+  assert.match(request.requestId, /^[A-Za-z0-9._:-]{1,128}$/);
+  assert.deepEqual(Object.keys(request.payload).sort(), ['pluginName', 'pluginVersion']);
+  assert.equal(h.buttons[0].disabled, false);
+  assert.notEqual(h.main.attributes['aria-busy'], 'true');
+  h.focusElement('pluginDescription');
+  h.elements.get('pluginDescription').value = 'Keep this text typed after Tab.';
+  const focusCalls = h.lifecycle.focusCalls;
+  h.receive({ type: 'pluginMetadataUpdated', requestId: request.requestId, pluginName: 'team-tools', pluginVersion: '1.0.1' });
+  assert.equal(h.elements.get('pluginVersion').value, '1.0.1');
+  assert.equal(h.elements.get('version-summary').textContent, 'Version 1.0.1 — change if needed');
+  assert.equal(h.elements.get('pluginDescription').value, 'Keep this text typed after Tab.');
+  assert.equal(h.lifecycle.focusCalls, focusCalls);
+  assert.equal(h.posted.length, 1, 'metadata acknowledgement must not dispatch another action');
+});
+
+test('one save intent waits for metadata acknowledgement and sends the fresh suggested version exactly once', () => {
+  const h = pluginMetadataHarness();
+  h.change('pluginName');
+  const request = h.posted[0].message;
+  h.click('savePackage'); h.click('savePackage');
+  assert.equal(h.posted.length, 1, 'save must wait for the host suggestion');
+  h.receive({ type: 'pluginMetadataUpdated', requestId: 'old-page:1', pluginName: 'team-tools', pluginVersion: '9.9.9' });
+  assert.equal(h.posted.length, 1);
+  h.receive({ type: 'pluginMetadataUpdated', requestId: request.requestId, pluginName: 'team-tools', pluginVersion: '1.0.2' });
+  const saves = h.posted.filter(entry => entry.message.action === 'savePackage');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].message.payload.pluginVersion, '1.0.2');
+  assert.equal(saves[0].message.payload.pluginDescription, 'Useful team tools.');
+  assert.equal(saves[0].message.payload.reviewer, '');
+  h.receive({ type: 'pluginMetadataUpdated', requestId: request.requestId, pluginName: 'team-tools', pluginVersion: '1.0.2' });
+  assert.equal(h.posted.filter(entry => entry.message.action === 'savePackage').length, 1);
+});
+
+test('pending metadata edits are coalesced and preserve an actual explicit version before one queued save', () => {
+  const h = pluginMetadataHarness();
+  h.change('pluginName');
+  const first = h.posted[0].message;
+  h.elements.get('pluginVersion').value = '9.9.9';
+  h.change('pluginVersion');
+  assert.equal(h.posted.length, 1, 'a second metadata request must wait for the first acknowledgement');
+  h.click('savePackage');
+  h.receive({ type: 'pluginMetadataUpdated', requestId: first.requestId, pluginName: 'team-tools', pluginVersion: '1.0.5' });
+  const latest = h.posted.at(-1).message;
+  assert.equal(latest.action, 'updatePluginMetadata');
+  assert.notEqual(latest.requestId, first.requestId);
+  assert.equal(latest.payload.pluginVersion, '9.9.9');
+  assert.equal(h.elements.get('pluginVersion').value, '9.9.9');
+  assert.equal(h.posted.filter(entry => entry.message.action === 'savePackage').length, 0);
+  h.receive({ type: 'pluginMetadataUpdated', requestId: first.requestId, pluginName: 'team-tools', pluginVersion: '1.0.5' });
+  assert.equal(h.posted.filter(entry => entry.message.action === 'savePackage').length, 0);
+  h.receive({ type: 'pluginMetadataUpdated', requestId: latest.requestId, pluginName: 'team-tools', pluginVersion: '9.9.9' });
+  assert.equal(h.posted.filter(entry => entry.message.action === 'savePackage').length, 1);
+  assert.equal(h.posted.at(-1).message.payload.pluginVersion, '9.9.9');
+});
+
+test('rapid plugin names use each acknowledged host baseline and save the actual second history next patch', async t => {
+  const fs = require('node:fs'), path = require('node:path');
+  const { createWorkbench } = require('../out/workbench-setup.js');
+  const { GuidedWorkbenchController } = require('../out/guided-controller.js');
+  const core = require('../out/skill-workbench.js');
+  const { preparePluginRelease } = require('../out/plugin-release.js');
+  const Zip = require('adm-zip');
+  const scratch = require('./working-fixture.cjs').workingFixture('client-metadata-history');
+  fs.mkdirSync(scratch, { recursive: true });
+  const root = createWorkbench(fs.mkdtempSync(path.join(scratch, 'case-')));
+  t.after(() => {
+    const relative = path.relative(scratch, root);
+    assert(relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const controller = new GuidedWorkbenchController(root, { enforceWorkbench: true });
+  await controller.dispatch({ action: 'showPlugin' });
+  await controller.dispatch({ action: 'createSkill', payload: { name: 'race-notes', description: 'Summarize notes when requested.', instructions: '# Notes\nPreserve the source.' } });
+  assert.equal(controller.state.error, undefined);
+  const id = controller.state.active.id;
+  const release = core.prepareSkillRelease(root, id, '1.0.0', 'Member snapshot.');
+  for (const [name, version] of [['first', '2.0.0'], ['second', '7.0.0']]) {
+    preparePluginRelease(root, { name, version, description: 'Saved history.', members: [{ directory: release.directory }], changelog: 'Saved history.' });
+  }
+  await controller.dispatch({ action: 'preparePublish' });
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.exportOptions.pluginVersion, '1.0.0');
+  const h = pluginMetadataHarness();
+  h.element('current-plugin-member', { name: 'pluginMembers', value: id, checked: true });
+  h.elements.get('pluginName').value = 'first';
+  h.change('pluginName');
+  const first = h.posted[0].message;
+  const acceptedFirst = controller.updatePluginMetadata(first.payload);
+  assert.equal(acceptedFirst.pluginVersion, '2.0.1');
+  h.elements.get('pluginName').value = 'second';
+  h.change('pluginName');
+  h.click('savePackage');
+  assert.equal(h.posted.length, 1, 'rapid names must not issue parallel stale-version requests');
+  h.receive({ type: 'pluginMetadataUpdated', requestId: first.requestId, ...acceptedFirst });
+  assert.equal(h.elements.get('pluginVersion').value, '1.0.0', 'the first name suggestion is not shown for the second name');
+  const second = h.posted.at(-1).message;
+  assert.equal(second.payload.pluginName, 'second');
+  assert.equal(second.payload.pluginVersion, '2.0.1', 'the host acknowledgement, not the old display, is the next baseline');
+  const acceptedSecond = controller.updatePluginMetadata(second.payload);
+  assert.equal(acceptedSecond.pluginVersion, '7.0.1');
+  assert.equal(controller.state.exportOptions.pluginVersionSource, 'suggested');
+  h.receive({ type: 'pluginMetadataUpdated', requestId: second.requestId, ...acceptedSecond });
+  const saves = h.posted.filter(entry => entry.message.action === 'savePackage');
+  assert.equal(saves.length, 1);
+  assert.equal(saves[0].message.payload.pluginVersion, '7.0.1');
+  await controller.dispatch({ action: 'savePackage', payload: saves[0].message.payload });
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.step, 'done');
+  const artifact = controller.state.receipt.artifacts.find(item => item.kind === 'plugin');
+  const manifest = JSON.parse(new Zip(artifact.path).readAsText('.claude-plugin/plugin.json'));
+  assert.equal(manifest.name, 'second');
+  assert.equal(manifest.version, '7.0.1');
+});
+
+test('metadata errors release a queued save without losing inputs or dispatching a package write', () => {
+  const h = pluginMetadataHarness();
+  h.change('pluginName'); const request = h.posted[0].message;
+  h.click('savePackage');
+  h.receive({ type: 'pluginMetadataUpdated', requestId: request.requestId, error: 'Choose a valid plugin name.' });
+  assert.equal(h.posted.filter(entry => entry.message.action === 'savePackage').length, 0);
+  assert.equal(h.buttons[0].disabled, false);
+  assert.equal(h.elements.get('pluginName').value, 'team-tools');
+  assert.equal(h.elements.get('pluginDescription').value, 'Useful team tools.');
+  assert.match(h.elements.get('client-error').textContent, /Choose a valid plugin name/);
+});
 
 test('startup sends no automatic skill load and explicit load shows immediate activity', () => {
   const h = harness({ step: 'start', active: undefined, editor: undefined });

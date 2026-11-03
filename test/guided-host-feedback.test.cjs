@@ -18,7 +18,8 @@ function deferred() {
 
 function fixture(options = {}) {
   const root = options.root ?? managedRoot();
-  const panels = [], controllers = [], commands = new Map(), events = [], dispatchHooks = new Map(), settings = new Map(), updates = [];
+  const panels = [], controllers = [], commands = new Map(), events = [], dispatchHooks = new Map(), settings = new Map(options.initialSettings), updates = [];
+  const rememberedState = options.rememberedState ?? new Map(), rememberedUpdates = [];
   let configurationListener;
   const disposable = () => ({ dispose() {} });
   class Controller {
@@ -28,6 +29,10 @@ function fixture(options = {}) {
       controllers.push(this);
     }
     async verifyRepository() { events.push({ type: 'repository-check', controller: this }); }
+    updatePluginMetadata(input) {
+      events.push({ type: 'plugin-metadata', input, controller: this });
+      return options.metadataResult ?? input;
+    }
     refreshRepositorySettings() { events.push({ type: 'settings-refresh', controller: this }); }
     async dispatch(message) {
       events.push({ type: 'dispatch', action: message.action, message, controller: this });
@@ -70,9 +75,13 @@ function fixture(options = {}) {
       return originalLoad.call(this, id, parent, main);
     };
     require(file).activateGuidedWorkbench({ subscriptions: [], extensionPath: path.resolve(__dirname, '..'),
+      workspaceState: { get(key) { return structuredClone(rememberedState.get(key)); }, async update(key, value) {
+        rememberedUpdates.push({ key, value }); await options.onRemember?.(key, value);
+        if (value === undefined) rememberedState.delete(key); else rememberedState.set(key, structuredClone(value));
+      } },
       extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: options.getRoot ?? (async () => root) });
   } finally { Module._load = originalLoad; delete require.cache[file]; }
-  return { root, panels, controllers, commands, events, dispatchHooks, vscode, settings, updates,
+  return { root, panels, controllers, commands, events, dispatchHooks, vscode, settings, updates, rememberedState, rememberedUpdates,
     logs() { const file = path.join(root, 'logs/performance.log'); return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n') : []; },
     changeConfiguration(key, value) { settings.set(key, value); configurationListener({ affectsConfiguration: target => target === `skillBuilder.${key}` }); },
     async open() { await commands.get('skillBuilder.openWorkbench')(); return panels.at(-1); } };
@@ -116,7 +125,7 @@ test('opening initializes before a single document render and emits no startup p
   const initialized = f.events.findIndex(event => event.type === 'dispatch' && event.action === 'ready');
   const rendered = f.events.findIndex(event => event.type === 'render');
   assert(initialized >= 0 && rendered > initialized);
-  assert(panel.html.indexOf('Load skills') < panel.html.indexOf('Choose how to start'));
+  assert(panel.html.indexOf('data-action="showPlugin"') < panel.html.indexOf('data-action="loadSkills"'), 'the task control precedes optional saved-work loading');
 });
 
 test('autosave receives only its acknowledgement and keeps the rendered editor intact', async () => {
@@ -609,4 +618,154 @@ test('a missing workbench marker sends a terminal error without dispatch, autosa
   assert(completion, 'a rejected write boundary must release the client action lock');
   assert.match(completion.error, /missing|damaged/i);
   assert.equal(panel.htmlWrites, baselineRenders, 'a boundary failure must not replace the document containing the unpersisted editor buffer');
+});
+
+test('explicitly chosen workbench survives reactivation without changing project settings', async () => {
+  const fallback = managedRoot(), selected = managedRoot(), rememberedState = new Map();
+  const first = fixture({ root: fallback, rememberedState, showOpenDialog: async () => [{ fsPath: selected }] });
+  await (await first.open()).receive({ action: 'openWorkbenchFolder' });
+  assert.equal(first.controllers.at(-1).root, selected);
+  assert.equal(rememberedState.get('skillBuilder.selectedWorkbench.v1').dataRoot, selected);
+  const second = fixture({ root: fallback, rememberedState });
+  await second.open();
+  assert.equal(second.controllers.at(-1).root, selected, 'restoring the explicit choice must not revert to a global fallback');
+  assert.deepEqual(first.updates, []); assert.deepEqual(second.updates, []);
+  assert.equal(second.events.some(event => event.type === 'folder-picker'), false);
+});
+
+test('a root setting changed while inactive supersedes the remembered workbench', async () => {
+  const former = managedRoot(), later = managedRoot(), rememberedState = new Map();
+  const first = fixture({ rememberedState, showOpenDialog: async () => [{ fsPath: former }] });
+  await (await first.open()).receive({ action: 'openWorkbenchFolder' });
+  const second = fixture({ root: later, rememberedState, initialSettings: [['projectRoot', later]] });
+  await second.open();
+  assert.equal(second.controllers.at(-1).root, later);
+  assert(fs.existsSync(path.join(former, '.skilljetty-workbench.json')));
+});
+
+for (const saved of ['corrupt', { format: 99, dataRoot: '/unknown', rootSettingsFingerprint: 'newer-format' }]) {
+  test(`invalid remembered selection fails closed: ${typeof saved === 'string' ? saved : 'unknown format'}`, async () => {
+    const rememberedState = new Map([['skillBuilder.selectedWorkbench.v1', saved]]);
+    let fallbackCalls = 0;
+    const f = fixture({ rememberedState, getRoot: async () => { fallbackCalls++; return managedRoot(); } });
+    await f.open();
+    assert.equal(fallbackCalls, 0, 'corrupt state cannot silently select a different writable folder');
+    assert.equal(f.controllers.at(-1).root, undefined);
+    assert.match(f.controllers.at(-1).state.error, /saved work location is invalid/i);
+    assert.deepEqual(f.rememberedUpdates, [], 'keep corrupt state as recovery evidence until an explicit choice');
+  });
+}
+
+test('remembered workbench with a removed marker cannot fall back to another workbench', async () => {
+  const selected = managedRoot(), rememberedState = new Map();
+  const first = fixture({ rememberedState, showOpenDialog: async () => [{ fsPath: selected }] });
+  await (await first.open()).receive({ action: 'openWorkbenchFolder' });
+  fs.unlinkSync(path.join(selected, '.skilljetty-workbench.json'));
+  let fallbackCalls = 0;
+  const second = fixture({ rememberedState, getRoot: async () => { fallbackCalls++; return managedRoot(); } });
+  await second.open();
+  assert.equal(fallbackCalls, 0); assert.equal(second.controllers.at(-1).root, undefined);
+  assert.match(second.controllers.at(-1).state.error, /saved workbench is unavailable/i);
+});
+
+test('root change during selection persistence does not clear invalidation or reopen a different folder', async () => {
+  const original = managedRoot(), selected = managedRoot(), replacement = managedRoot(), entered = deferred(), release = deferred();
+  let configuredRoot = original;
+  const f = fixture({ getRoot: async () => configuredRoot, showOpenDialog: async () => [{ fsPath: selected }],
+    onRemember: async (_key, value) => { if (value?.dataRoot === selected) { entered.resolve(); await release.promise; } } });
+  const panel = await f.open(), selecting = panel.receive({ action: 'openWorkbenchFolder' });
+  await entered.promise;
+  configuredRoot = replacement; f.changeConfiguration('projectRoot', replacement);
+  release.resolve(); await selecting;
+  assert.equal(f.panels.length, 1, 'late persistence must not dispose/reopen the current panel');
+  assert.equal(f.controllers.at(-1).root, original);
+  assert(panel.messages.some(message => message.type === 'operationComplete' && /workbench changed/i.test(message.error ?? '')));
+  panel.close(); await f.open();
+  assert.equal(f.controllers.at(-1).root, replacement, 'the later setting remains authoritative');
+  for (const root of [original, selected, replacement]) assert(fs.existsSync(path.join(root, '.skilljetty-workbench.json')));
+});
+
+test('failed selection persistence keeps the selected workbench usable and explains resumption', async () => {
+  const selected = managedRoot();
+  const f = fixture({ showOpenDialog: async () => [{ fsPath: selected }], onRemember: async () => { throw new Error('Memento unavailable'); } });
+  await (await f.open()).receive({ action: 'openWorkbenchFolder' });
+  assert.equal(f.controllers.at(-1).root, selected);
+  assert.match(f.controllers.at(-1).state.notice, /location could not be remembered/);
+  assert.equal(f.panels.at(-1).messages.some(message => message.type === 'operationComplete' && message.error), false);
+});
+
+function activationSelection(opened, inspection) {
+  const file = require.resolve('../out/extension.js'), originalLoad = Module._load;
+  let hooks;
+  const configured = inspection.workspaceFolderValue ?? inspection.workspaceValue ?? inspection.globalValue ?? '';
+  const vscode = { EventEmitter: class { event() {} }, TreeItem: class {},
+    workspace: { workspaceFolders: [{ uri: { fsPath: opened } }], getConfiguration: () => ({ get: () => configured, inspect: () => inspection }) } };
+  delete require.cache[file];
+  try {
+    Module._load = function(id, parent, main) {
+      if (id === 'vscode') return vscode;
+      if (parent?.filename === file && id === './guided-workbench.js') return { activateGuidedWorkbench(_context, value) { hooks = value; } };
+      return originalLoad.call(this, id, parent, main);
+    };
+    require(file).activate({});
+  } finally { Module._load = originalLoad; delete require.cache[file]; }
+  assert(hooks); return hooks.getWorkspace();
+}
+
+test('opening an exact initialized workbench supersedes only the global root fallback', async () => {
+  const globalParent = fs.mkdtempSync(path.join(scratch, 'global-')); fixtureRoots.push(globalParent);
+  const globalRoot = createWorkbench(path.join(globalParent, '.skilljetty-prerelease')), opened = managedRoot();
+  assert.equal((await activationSelection(opened, { globalValue: globalRoot })).dataRoot, opened);
+  for (const scope of ['workspaceValue', 'workspaceFolderValue']) {
+    assert.equal((await activationSelection(opened, { globalValue: opened, [scope]: globalRoot })).dataRoot, globalRoot, `${scope} remains authoritative`);
+  }
+});
+
+test('ordinary opened folders with a managed child are not adopted over a configured root', async () => {
+  const globalParent = fs.mkdtempSync(path.join(scratch, 'global-')); fixtureRoots.push(globalParent);
+  const globalRoot = createWorkbench(path.join(globalParent, '.skilljetty-prerelease')), ordinary = fs.mkdtempSync(path.join(scratch, 'ordinary-'));
+  fixtureRoots.push(ordinary); createWorkbench(path.join(ordinary, '.skilljetty-prerelease'));
+  assert.equal((await activationSelection(ordinary, { globalValue: globalRoot })).dataRoot, globalRoot);
+});
+
+test('passive plugin metadata replies without activity locks, page replacement or unrelated payload fields', async () => {
+  const f = fixture({ metadataResult: { pluginName: 'team-tools', pluginVersion: '1.0.2' } }), panel = await f.open();
+  const baseline = panel.htmlWrites; f.events.length = 0; panel.messages.length = 0;
+  await panel.receive({ action: 'updatePluginMetadata', requestId: 'plugin-meta:1', payload: {
+    pluginName: 'team-tools', pluginVersion: '1.0.0', pluginVersionSource: 'suggested', pluginMembers: ['unreviewed'], repositoryUrl: 'https://github.com/unrelated/other' } });
+  assert.deepEqual(f.events.find(event => event.type === 'plugin-metadata').input, { pluginName: 'team-tools', pluginVersion: '1.0.0' });
+  assert.equal(panel.htmlWrites, baseline);
+  assert.deepEqual(panel.messages, [{ type: 'pluginMetadataUpdated', requestId: 'plugin-meta:1', pluginName: 'team-tools', pluginVersion: '1.0.2' }]);
+  assert.equal(f.events.some(event => event.type === 'dispatch'), false);
+  assert.deepEqual(f.updates, []);
+});
+
+test('oversized passive metadata is rejected without invoking the controller or replacing the form', async () => {
+  const f = fixture(), panel = await f.open(), baseline = panel.htmlWrites; f.events.length = 0; panel.messages.length = 0;
+  await panel.receive({ action: 'updatePluginMetadata', requestId: 'plugin-meta:bad', payload: { pluginName: 'x'.repeat(257), pluginVersion: '1.0.0' } });
+  assert.equal(f.events.some(event => event.type === 'plugin-metadata'), false);
+  assert.equal(panel.htmlWrites, baseline);
+  assert.match(panel.messages[0].error, /short text/);
+  assert.equal(panel.messages[0].requestId, 'plugin-meta:bad');
+});
+
+test('passive metadata cannot read a workbench whose marker changed', async () => {
+  const f = fixture(), panel = await f.open(), baseline = panel.htmlWrites; f.events.length = 0; panel.messages.length = 0;
+  fs.unlinkSync(path.join(f.root, '.skilljetty-workbench.json'));
+  await panel.receive({ action: 'updatePluginMetadata', requestId: 'plugin-meta:marker', payload: { pluginName: 'team-tools', pluginVersion: '1.0.0' } });
+  assert.equal(f.events.some(event => event.type === 'plugin-metadata'), false);
+  assert.equal(panel.htmlWrites, baseline);
+  assert.match(panel.messages[0].error, /missing|damaged/i);
+});
+
+test('a late message from a disposed panel cannot act on the replacement workbench', async () => {
+  const selected = managedRoot(), f = fixture({ showOpenDialog: async () => [{ fsPath: selected }] });
+  const oldPanel = await f.open(); await oldPanel.receive({ action: 'openWorkbenchFolder' });
+  const current = f.panels.at(-1); assert.notEqual(current, oldPanel);
+  const writes = current.htmlWrites; f.events.length = 0; current.messages.length = 0;
+  await oldPanel.receive({ action: 'updatePluginMetadata', requestId: 'late-old-panel', payload: { pluginName: 'wrong-workbench', pluginVersion: '9.0.0' } });
+  await oldPanel.receive({ action: 'publish', payload: { reviewer: 'someone', confirmed: true } });
+  assert.equal(f.events.some(event => event.type === 'plugin-metadata' || event.type === 'dispatch'), false);
+  assert.equal(current.htmlWrites, writes); assert.deepEqual(current.messages, []);
+  assert.equal(f.controllers.at(-1).root, selected);
 });

@@ -4,7 +4,7 @@
 
 Install the stable release of **SkillJetty by DAF-TECH** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace listing and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-The **0.15.0 pre-release** adds explicit Portable skill, Claude plugin, or Both exports, multi-skill bundles with independent versions, GitHub submission/review, and optional Gemini App ZIPs with compatibility reports. It also includes the optional managed workbench: drafts, local Git repositories, saved releases, scratch, recovery and diagnostics stay inside it. Existing work is preserved and is not adopted or moved automatically. Consult the [Release Channels wiki](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels) for current publication and verification status. Production remains unchanged.
+The preview can make a portable skill package, a Claude plugin containing one or more skills, or both. Save locally first; GitHub sharing is optional. It also supports Gemini App ZIP exports with compatibility reports. Existing work stays in place. Consult the [Release Channels wiki](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels) for the verified public version and channel status. Production remains unchanged.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -23,6 +23,24 @@ Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJett
 An explicitly configured, previously connected Skills repository continues with its existing connection and private `.skilljetty-prerelease` data folder. It does not need conversion to a managed workbench. **Manage work location (optional)** offers a separate managed setup when you want one. A local repository setting must identify the Git root containing `.git`; the GitHub setting must identify the repository, not an individual skill's `tree/` or `blob/` page.
 
 Unrelated ignored private files can remain in the local repository. Pull preserves them and stops if incoming files would collide with them; tracked edits and nonignored untracked files still require attention before pulling. No cleanup or deletion of private files is automatic.
+
+## Choose what to make
+
+**Create a skill** makes one set of instructions and supporting files. Create a
+new draft or open an existing skill, edit it, run the structural check, then save
+the `.skill` package on this computer.
+
+**Build a plugin** bundles skills for Claude:
+
+1. Choose **Build a plugin** on Start.
+2. Open a `.skill` file, open a skill folder, or choose a saved skill to include.
+3. Review its content and run the structural check.
+4. Review the plugin name, description and included skills, then save the plugin
+   ZIP on this computer. Optional publisher details can stay closed.
+
+A skill is the content; a plugin is the bundle containing that content. The
+plugin ZIP is created when you save it. Installing it into Claude is a separate
+action. Neither local route needs a Git repository or GitHub sign-in.
 
 ## Create or open your workbench
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.15.3 — clearer skill and plugin workflow (pre-release candidate)
+
+- Choose **Create a skill** or **Build a plugin** at Start. Keep that choice
+  visible through editing, checking and saving instead of hiding plugin creation
+  behind the final package-format menu.
+- Put optional repository details after the main task and describe upload-only
+  configuration problems without making local work look unavailable.
+- Group optional plugin publisher details separately from the required bundle
+  name, description and included skills.
+- Permit plugin export from an already accepted existing repository with its
+  exact selected data boundary; arbitrary unmarked folders remain rejected.
+- Keep unrelated workbenches and Git destinations separate. A new local
+  workbench does not acquire another folder's repository automatically.
+- Remember an explicitly chosen workbench across reopening, while honoring
+  later folder-setting changes and validating its boundary before reuse.
+- Prepare the initial plugin review before showing Save, so an unchanged
+  review saves on the first click.
+- Update plugin name/version suggestions without interrupting typing or losing
+  the user's Save click; preserve explicit versions and the latest edits.
+- Reject late messages from an old panel after another workbench is opened.
+
 ## 0.15.2 — existing repository recovery (pre-release candidate)
 
 - Continue an explicitly configured, previously connected Skills repository with

@@ -1,5 +1,64 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Active usability and plugin repair — November 3, 2026
+
+The owner rejected the confusing instructions after 0.15.2: the plugin choice
+was hidden at Submit and a fresh alpha-10 local workbench led with a generic
+configuration wall. Prior automated delivery is not owner usability acceptance.
+The authorized repair makes Skill versus Plugin explicit at Start, carries that
+choice through the existing workflow, and scopes repository errors to sharing.
+No user folder, Git connection or branch is adopted or migrated automatically.
+
+Readonly inspection found alpha-10 has a valid managed marker but no saved Git
+connection; global Skills preferences identify a different repository outside
+its boundary. Preserve both roots and settings. Local creation/export must work
+without cloning, authentication or fixing optional upload settings.
+
+Backend inspection also found the export planner bypassed the controller's
+accepted existing-repository worker descriptor, unintentionally requiring a
+managed marker for plugin export. The repair must retain exact-root selection
+and worker containment rather than permit arbitrary unmarked roots.
+
+Avery integrates and delivers; Ishan owns backend/intent/worker regressions;
+Mara owns readable UI and accessibility; Lena independently tests real rendered
+actions and plugin ZIP content in both modes; Morgan reviews the final boundary
+and package changes. Candidate **0.15.3** is pending implementation and review;
+0.15.2 remains the current public and installed preview until verified delivery.
+
+Real Chromium QA reached plugin creation and inspected actual ZIP text/binary
+content, but found that the first Save could hit the reviewed-inventory guard
+because plugin intent preselected the format without initializing its preview.
+That is a product defect, not an acceptable two-click instruction. Prepare the
+initial snapshot before rendering Review, keep final drift checks, and require
+one-click save in the final fresh test. UI must also refresh suggested versions
+when plugin name changes and keep optional public-listing reports separate from
+local generation errors. Old passing tests and a second successful Save are not
+acceptance of these repairs.
+
+The workbench-selection repair now remembers only explicit Create/Open choices
+in VS Code's workspace state. Restoring requires the same root-settings
+fingerprint and a valid managed marker/path. Later root settings supersede it;
+corrupt/missing-boundary state fails closed. Selecting an exact already-managed
+folder can supersede a global fallback, while explicit scoped settings retain
+authority and ordinary project folders are not adopted. The persistence-await
+race was found and fixed. Ten focused host/root regressions passed after fixture
+corrections; the earlier full host run's one stale text-order assertion remains
+recorded as a failed run, not a green result. Independent source security checks
+passed eight synthetic groups; exact-artifact and final browser/native review
+remain pending.
+
+The final client serializes/coalesces metadata lookups instead of locking the
+form on text-field blur. It waits for the latest acknowledgement before one
+explicit Save, carries the host's accepted version baseline between rapid name
+changes, and preserves explicit user versions. Focused UI/client tests passed
+74/74; the real-controller race regression produced the second plugin at its
+correct next version. Independent review reproduced and closed both the stale
+panel-origin gap and rapid-name version-provenance race. Four host passive-message
+regressions passed, in addition to ten focused selection/root cases. Actual
+Chromium has separately passed first Save, direct typing/click, Tab focus,
+stale-reply and local ZIP-content cases; its final frozen-source eight-case run
+and the exact-artifact native/browser checks still govern delivery.
+
 ## Existing repository recovery — November 3, 2026
 
 The owner directed repair after the optional managed-workbench feature became a
