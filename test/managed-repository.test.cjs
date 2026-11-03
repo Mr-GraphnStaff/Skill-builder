@@ -21,14 +21,28 @@ function fixture(t) {
   git(remote, 'add', '.'); git(remote, 'commit', '-m', 'Initial skill');
   return { base, root, remote };
 }
-test('registered repository is read-only with ordinary skill opening and native settings access', () => {
+
+test('first-upload clone-only mode refuses an existing target before transport or writes', async t => {
+  const { createWorkbench } = require('../out/workbench-setup.js');
+  const root = createWorkbench(fs.mkdtempSync(path.join(os.tmpdir(), 'clone-only-test-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, 'repositories', 'skills'); fs.mkdirSync(target);
+  const content = Buffer.from('New files placed here while first upload was preparing.');
+  fs.writeFileSync(path.join(target, 'keep.txt'), content);
+  const { pullProjectRepository } = require('../out/managed-repository.js');
+  await assert.rejects(pullProjectRepository(root, 'https://github.com/example/skills.git', target, undefined, undefined, true), /location changed during setup/);
+  assert.deepEqual(fs.readFileSync(path.join(target, 'keep.txt')), content);
+  assert.equal(fs.existsSync(path.join(root, '.skill-workbench', 'git-control')), false);
+});
+test('repository summary shows the exact remote, visible Sync and ordinary local opening', () => {
   const state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable', connection: { repository: 'https://github.com/example/skills.git', localPath: 'P:/Skills', baseBranch: 'trunk' } };
   const html = renderGuidedWorkbench(state, 'managedRepositoryNonce123');
-  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/skills.git<\/strong>/);
+  assert.match(html, /id="configured-repository" title="https:\/\/github.com\/example\/skills.git">example\/skills<\/strong>/);
   assert.match(html, /data-action="openSettings"/);
   assert.match(html, /data-action="openRepositorySkill"/);
   assert.match(html, /id="open-repository-skill"/);
-  assert.doesNotMatch(html, /data-action="pullRepository"|data-action="verifyRepository"|data-action="setRepositoryFolder"/);
+  assert.match(html, /data-action="pullRepository"[^>]*>Sync repository/);
+  assert.doesNotMatch(html, /data-action="verifyRepository"|data-action="setRepositoryFolder"/);
   assert.doesNotMatch(renderGuidedWorkbench({ ...state, connection: undefined }, 'managedRepositoryNonce123'), /data-action="openRepositorySkill"/);
 });
 test('managed Git pull downloads latest skills before work, then fast-forwards and protects local edits', async t => {

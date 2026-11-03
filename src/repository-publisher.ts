@@ -137,9 +137,15 @@ async function git(cwd: string, args: string[], localCloneSource?: string): Prom
       // and user trust fingerprints immediately before starting the clone.
       const source = path.resolve(localCloneSource);
       const selectedSource = existingWorkspaceForPath(source);
+      const ownedSourceRoot = containingWorkbench(source);
+      const ownedSource = !!ownedSourceRoot && isOwnedWorkbenchRepository(ownedSourceRoot, source);
       if (operation !== 'clone') throw new Error('Local repository trust is only valid for its clone operation.');
       if (selectedSource && path.relative(selectedSource.repositoryRoot, source) === '' && selectedSource.trustedRepositoryRoot) {
         assertWorkspaceRepository(selectedSource, selectedSource.repository, source);
+        sourceTrust.push('-c', `safe.directory=${source.replace(/\\/g, '/')}`, '-c', `safe.directory=${path.join(source, '.git').replace(/\\/g, '/')}`);
+      } else if (ownedSource && ownedSourceRoot) {
+        assertWorkbenchRepository(ownedSourceRoot, source);
+        assertWorkbenchGitMetadata(ownedSourceRoot, source);
         sourceTrust.push('-c', `safe.directory=${source.replace(/\\/g, '/')}`, '-c', `safe.directory=${path.join(source, '.git').replace(/\\/g, '/')}`);
       }
     }

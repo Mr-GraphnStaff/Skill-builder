@@ -28,8 +28,9 @@ async function guard(target: string): Promise<void> {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   }
 }
-async function renameCloneEntry(source: string, destination: string): Promise<void> {
+async function renameCloneEntry(source: string, destination: string, beforeRename?: () => void): Promise<void> {
   for (let attempt = 0; ; attempt++) {
+    beforeRename?.();
     try { await fs.rename(source, destination); return; }
     catch (error) {
       if (process.platform !== 'win32' || attempt >= 4 || !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error;
@@ -143,7 +144,7 @@ async function rejectIgnoredPathCollisions(checkout: string, ref: string, run = 
   }
 }
 /** Only the explicit user-selected project folder receives a checkout. */
-export async function pullProjectRepository(workspaceRoot: string, repository: string, localPath: string, progress?: (message: string) => void, beforeWrite?: () => void): Promise<{ path: string; branch: string; commit: string }> {
+export async function pullProjectRepository(workspaceRoot: string, repository: string, localPath: string, progress?: (message: string) => void, beforeWrite?: () => void, createOnly = false): Promise<{ path: string; branch: string; commit: string }> {
   const checkout = projectPath(localPath); remoteIdentity(repository); await guard(checkout);
   const enforce = () => { if (isManagedWorkbench(workspaceRoot)) { assertRemoteDestination(repository); assertWorkbenchRepository(workspaceRoot, checkout); assertWorkbenchGitMetadata(workspaceRoot, checkout); } };
   enforce();
@@ -155,7 +156,7 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
   const run = (cwd: string, args: string[]) => {
     enforce();
     if (isManagedWorkbench(workspaceRoot)) assertWorkbenchPath(workspaceRoot, cwd);
-    return git(cwd, args, hooks, ['fetch', 'merge'].includes(args[0]) ? async () => {
+    return git(cwd, args, hooks, (['fetch', 'merge'].includes(args[0]) || (createOnly && args[0] === 'clone')) ? async () => {
       enforce(); beforeWrite?.();
       if (args[0] === 'merge') {
         // This check runs after filter discovery, immediately before the merge
@@ -169,14 +170,17 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
   };
   let entries: string[] = [];
   try { entries = await fs.readdir(checkout); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  if (createOnly && entries.length) throw new Error('The local repository location changed during setup. Existing files were preserved; review it before syncing.');
   if (entries.length && !entries.includes('.git')) throw new Error('Setup required: this nonempty folder is not a Git repository. Its files were preserved.');
   // Identity and trust checks precede writes to any existing checkout.
   if (entries.length) await identity(checkout, repository);
+  if (createOnly) beforeWrite?.();
   await fs.mkdir(hooks, { recursive: true });
   try {
     const remote = await advertised(workspaceRoot, repository);
     if (!entries.length) {
       const staging = path.join(runtime, `clone-${randomUUID()}`);
+      if (createOnly) beforeWrite?.();
       const template = path.join(hooks, 'empty-template'); await fs.mkdir(template);
       try {
         progress?.('Downloading the registered Skills repository into the selected project folder…');
@@ -187,12 +191,21 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
         await fs.writeFile(path.join(staging, '.git', 'info', 'attributes'), '* merge -text -filter -ident -working-tree-encoding\n');
         await run(staging, ['reset', '--hard', 'HEAD']);
         enforce(); beforeWrite?.();
-        await fs.mkdir(checkout, { recursive: true });
-        if ((await fs.readdir(checkout)).length) throw new Error('The chosen folder changed while cloning; no files were overwritten.');
-        const stagedEntries = await fs.readdir(staging);
-        beforeWrite?.();
-        enforce();
-        for (const entry of stagedEntries) await renameCloneEntry(path.join(staging, entry), path.join(checkout, entry));
+        if (createOnly) {
+          // Promote the complete clone as one directory. A raced nonempty
+          // destination cannot be replaced by directory rename; never merge
+          // clone entries into a folder another process has started using.
+          try { await fs.lstat(checkout); throw new Error('The local repository location appeared during setup. Existing files were preserved.'); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+          await renameCloneEntry(staging, checkout, () => { enforce(); beforeWrite?.(); });
+        } else {
+          await fs.mkdir(checkout, { recursive: true });
+          if ((await fs.readdir(checkout)).length) throw new Error('The chosen folder changed while cloning; no files were overwritten.');
+          const stagedEntries = await fs.readdir(staging);
+          beforeWrite?.();
+          enforce();
+          for (const entry of stagedEntries) await renameCloneEntry(path.join(staging, entry), path.join(checkout, entry));
+        }
         if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkout, true);
       } finally { await fs.rm(staging, { recursive: true, force: true }); }
     }

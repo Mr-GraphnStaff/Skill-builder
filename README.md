@@ -14,6 +14,12 @@ icon. The preview's Home shows your skills, saved builds and GitHub destination.
 Your existing project stays where it is. On first use, choose a location once;
 SkillJetty remembers it and manages its own files there.
 
+The model is **Build space → Local repository ↔ Remote repository**. Build space
+holds your editable work and packages. One local Git repository connects to the
+remote. **Sync repository** brings remote changes into that local copy safely.
+For a new managed project, the first upload prepares its default local repository
+automatically; you do not have to find another folder or run a setup command.
+
 1. **Open or create.** Choose an existing skill, **New skill**, or **New plugin**.
    A skill is reusable instructions. A plugin bundles one or more skills for Claude.
 2. **Edit.** Changes save automatically. Click **Build / Share** when ready.
@@ -37,10 +43,11 @@ or folder. Imported originals stay unchanged. Earlier edits and saved versions
 remain recoverable. Failed checks, canceled selections and failed uploads keep
 your work; the result identifies any incomplete action.
 
-The header shows your project and sharing destination. **Connect repository** or
+The header shows the build space, local repository and remote repository. **Connect repository** or
 **Change connection** opens settings. Use the Git repository root as the local
-repository and its HTTPS GitHub address as the destination. Verify and Pull are
-explicit actions; editing settings never runs them automatically.
+repository and its HTTPS GitHub address as the destination. **Sync repository**
+downloads remote changes with Git's preservation checks; editing settings never
+runs a sync automatically. Uploading opens a review branch and pull request.
 
 SkillJetty preserves nested files, binary assets and application-specific metadata.
 It checks structure and file identity; it does not run imported scripts or models,

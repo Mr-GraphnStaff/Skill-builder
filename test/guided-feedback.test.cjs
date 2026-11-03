@@ -37,7 +37,7 @@ function harness(overrides = {}) {
   const document = { activeElement: editor, getElementById: id => elements.get(id) ?? null,
     querySelectorAll: selector => selector === 'button' ? buttons : selector === 'input,select,textarea' ? [editor, input, unavailable] : selector === 'form[data-form-action]' ? [pathForm] : selector === 'input[name="pluginMembers"]:checked' ? [...elements.values()].filter(item => item.name === 'pluginMembers' && item.checked) : [], querySelector: () => null,
     addEventListener: (name, handler) => handlers.set(name, handler) };
-  const context = { document, window: { addEventListener: (name, handler) => windowHandlers.set(name, handler) },
+  const context = { document, URL, window: { addEventListener: (name, handler) => windowHandlers.set(name, handler) },
     Date: { now: () => now },
     setTimeout: (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; },
     clearTimeout: id => timers.delete(id), acquireVsCodeApi: () => ({ getState: () => ({ step: state.step, activeId: 'sample' }), setState() { lifecycle.stateWrites++; },
@@ -446,6 +446,8 @@ test('targeted configuration updates preserve newer unsaved text after an earlie
   assert.equal(h.timers.size, timerCount, 'no autosave scheduled');
   assert.equal(h.posted.length, posts, 'no operation or editor acknowledgement sent');
   assert.equal(h.elements.get('local-repository-path').textContent, 'P:/Current project', 'changing Git preferences must not relabel the active project');
+  assert.equal(h.elements.get('configured-repository').textContent, 'changed/Skills');
+  assert.equal(h.elements.get('configured-repository').title, 'https://github.com/changed/Skills');
   assert.equal(h.elements.get('repository-verification').textContent, hostile);
   assert.equal(h.elements.get('repository-settings-state').textContent, 'Not yet verified');
 });

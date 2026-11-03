@@ -17,6 +17,10 @@
 - Open a saved plugin directly from Home, retaining its name and included skills.
   Keep newer editable skills and restore only missing members from the verified
   saved bundle; preserve the original ZIP and suggest the next bundle version.
+- Show the owner's simple model explicitly: build space, one persistent local
+  Git repository, and its remote. Expose Sync directly. Prepare a missing default
+  local repository on first upload, without an extra setup command or overwriting
+  a folder that appears during preparation.
 
 ## 0.15.3 — clearer skill and plugin workflow (pre-release candidate)
 

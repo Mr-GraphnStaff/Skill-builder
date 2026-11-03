@@ -43,18 +43,28 @@ function configurationSummary(state: GuidedState): string {
   // Rejected settings may contain credentials. Show accepted context only.
   const repository = invalid ? state.connection?.repository : state.configuredRepository ?? state.connection?.repository;
   const local = invalid ? state.connection?.localPath : state.configuredLocalRepository ?? state.connection?.localPath;
-  // This is a display name only. Storage selection and ownership stay host-side.
-  const managedProject = state.workFolder?.replace(/[\\/]\.skilljetty-prerelease[\\/]*$/i, '');
-  const project = state.repositoryRoot ?? (state.workspaceMode === 'managed' ? managedProject : local || state.workFolder);
-  const projectName = project?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || project;
+  // Display labels do not change storage selection or repository ownership.
+  const folderName = (folder?: string) => folder?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || folder;
+  const buildProject = state.workFolder?.replace(/[\\/]\.skilljetty-prerelease[\\/]*$/i, '');
+  const buildName = state.workFolder && buildProject !== state.workFolder ? `${folderName(buildProject)} builds` : folderName(state.workFolder);
+  const localRoot = state.repositoryRoot ?? local;
+  let remoteName = repository;
+  if (repository) {
+    try {
+      const url = new URL(repository);
+      remoteName = url.hostname.toLowerCase() === 'github.com'
+        ? url.pathname.replace(/^\/+|\/+$/g, '').replace(/\.git$/i, '') : `${url.hostname}${url.pathname}`;
+    } catch { remoteName = folderName(repository); }
+  }
   const verification = state.repositoryVerification;
   const status = invalid || verification?.status === 'error' ? 'Upload needs attention'
     : verification?.status === 'outOfSync' ? 'Local and remote differ'
     : verification?.status === 'checking' ? 'Checking connection'
     : verification?.status === 'verified' ? 'Verified' : repository ? 'Ready to check on upload' : 'Not connected';
-  return `<section id="workbench-configuration" class="project-strip" aria-label="Current project and sharing destination" data-configuration-error="${invalid}">
-    <div><span class="eyebrow">Working in</span><strong id="local-repository-path" title="${escape(project || '')}">${escape(projectName || 'Choose a location to begin')}</strong></div>
-    <div><span class="eyebrow">GitHub destination</span><strong id="configured-repository">${escape(repository || 'Not connected')}</strong><small><span id="configured-target-branch">${escape(state.connection?.baseBranch || (repository ? 'Branch checked before upload' : ''))}</span> <span id="repository-settings-state">${escape(repository || invalid ? status : '')}</span></small></div>
+  return `<section id="workbench-configuration" class="project-strip" aria-label="Build space, local repository and remote repository" data-configuration-error="${invalid}">
+    <div class="build-space-summary"><span class="eyebrow">Build space</span><strong id="active-work-folder" title="${escape(state.workFolder || '')}">${escape(buildName || 'Choose a location to begin')}</strong></div>
+    <div class="local-repository-summary"><span class="eyebrow">Local repository</span><strong id="local-repository-path" title="${escape(localRoot || '')}">${escape(folderName(localRoot) || 'Not connected')}</strong>${state.localRepositorySetupPending ? '<small>Prepared on first upload</small>' : localRoot && state.localRepositoryAvailable === false ? '<small>Needs attention</small>' : ''}${repository && !invalid ? `<div class="sync-action">${secondary('pullRepository', 'Sync repository')}</div>` : ''}</div>
+    <div><span class="eyebrow">Remote repository</span><strong id="configured-repository" title="${escape(repository || '')}">${escape(remoteName || 'Not connected')}</strong><small><span id="configured-target-branch">${escape(state.connection?.baseBranch || (repository ? 'Branch checked before upload' : ''))}</span> <span id="repository-settings-state">${escape(repository || invalid ? status : '')}</span></small></div>
     <div class="project-actions">${secondary('openSettings', repository ? 'Change connection' : 'Connect repository')}${state.githubAccount ? `<small>Signed in as ${escape(state.githubAccount)}</small>` : ''}</div>
     <p id="repository-verification" class="hint" role="status" aria-live="polite" data-status="${invalid ? 'error' : escape(verification?.status ?? 'setupRequired')}">${invalid ? 'GitHub upload needs a corrected connection. Your work can still be edited and saved locally.' : escape(verification?.status === 'error' || verification?.status === 'outOfSync' ? verification.message : '')}</p>
   </section>`;
@@ -126,7 +136,7 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
       </fieldset></form></section>`, primary: { label: 'Create and edit', form: 'create-form' }
   };
   const plugin = state.workflowIntent === 'plugin';
-  const repositorySource = !state.configurationError && state.connection?.localPath;
+  const repositorySource = !state.configurationError && state.localRepositoryAvailable !== false && state.connection?.localPath;
   return {
     title: plugin ? 'Choose skills for your plugin' : 'Your project',
     hint: plugin ? 'A plugin brings skills together. Choose your first skill below; add more when you build.' : 'Create something new, continue your work, or open a skill you already have.',
@@ -323,7 +333,7 @@ const styles = `
   .project-nav { display: flex; gap: .3rem; margin-block: .2rem 1rem; border-block-end: 1px solid var(--vscode-panel-border, GrayText); }
   .nav-button { background: transparent; color: inherit; border: 0; border-block-end: 3px solid transparent; border-radius: 0; padding: .65rem 1rem; }
   .nav-button[aria-current="page"] { border-color: var(--workbench-accent); font-weight: 700; }
-  .project-strip { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: .65rem 1.4rem; padding: .9rem 1rem; border: 1px solid var(--vscode-panel-border, GrayText); border-radius: .45rem; margin-block-end: 1.6rem; background: var(--vscode-sideBar-background, transparent); }
+  .project-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: .65rem 1.4rem; padding: .9rem 1rem; border: 1px solid var(--vscode-panel-border, GrayText); border-radius: .45rem; margin-block-end: 1.6rem; background: var(--vscode-sideBar-background, transparent); }
   .project-strip > div { min-inline-size: 0; } .project-strip strong, .project-strip small { display: block; overflow-wrap: anywhere; } .project-strip .hint:empty { display: none; } .project-strip > .hint { grid-column: 1 / -1; margin: 0; }
   .eyebrow { display: block; color: var(--vscode-descriptionForeground, GrayText); font-size: .8rem; margin-block-end: .15rem; } .project-actions { align-self: center; } .project-actions small { margin-block-start: .3rem; }
   .home-actions { display: flex; flex-wrap: wrap; gap: .6rem; padding-block: .25rem 1rem; } .home-actions > button:first-child { background: #0b635d; color: #fff; border-color: #0b635d; } .home-actions button { min-inline-size: 8rem; }
@@ -333,8 +343,9 @@ const styles = `
   .path-form { margin-block-start: 1rem; } .path-form fieldset { display: flex; align-items: end; flex-wrap: wrap; gap: .6rem; } .path-form .field { flex: 1 1 18rem; margin: 0; } .maintenance { margin-block-start: 1.4rem; } .maintenance > .hint { max-inline-size: 65rem; }
   .build-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 23rem); gap: 1rem; align-items: start; } .build-main { min-inline-size: 0; } .build-summary { min-inline-size: 0; } .destination { font-weight: 650; overflow-wrap: anywhere; } .build-summary .card { padding: 1rem; } .metadata-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 1rem; } .publisher-section, .release-notes-field, .gemini-option { border-block-start: 1px solid var(--vscode-panel-border, GrayText); padding-block-start: 1rem; margin-block-start: 1rem; } .publisher-section h3 { margin-block-start: 0; } .publisher-section .hint { font-size: .8rem; } .publisher-section input { min-block-size: 2.35rem; } .file-tools { border-block-start: 1px solid var(--vscode-panel-border, GrayText); padding-block-start: .5rem; margin-block-start: .8rem; } .file-tools h3 { margin-block: .25rem .6rem; } .file-tools .field { margin-block-end: .5rem; } .file-tools .hint { font-size: .78rem; } .file-tools button { inline-size: 100%; } .edit-history { margin-block-start: 1.5rem; padding: 1rem; }
   .diagnostic-actions { margin-block-start: .3rem; } .diagnostic-actions .hint { display: none; } .diagnostic-actions button { min-block-size: 1.7rem; padding: .1rem .4rem; font-size: .75rem; } .activity-heading { display: none; } .activity-status { padding: .45rem .7rem; margin-block-end: .7rem; } .activity-history { max-block-size: 4.5rem; } .brand-lockup { margin-block-end: .5rem; } .brand-logo { inline-size: 46px; block-size: 46px; } .brand-product { font-size: 1.4rem; }
-  @media (max-width: 950px) { .build-layout { grid-template-columns: 1fr; } .build-summary { order: -1; } .project-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .project-actions { grid-column: 1 / -1; } }
-  @media (max-width: 560px) { .project-strip, .metadata-grid { grid-template-columns: 1fr; } .project-nav { gap: 0; } .nav-button { flex: 1; padding-inline: .4rem; } .action-bar { flex-wrap: wrap; gap: .5rem; } .action-bar .primary { flex-basis: 100%; } }
+  .sync-action { margin-block-start: .35rem; } .sync-action button { min-block-size: 2rem; padding: .25rem .5rem; font-size: .85rem; }
+  @media (max-width: 950px) { .build-layout { grid-template-columns: 1fr; } .build-summary { order: -1; } .project-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .project-actions { grid-column: 1 / -1; } }
+  @media (max-width: 560px) { .project-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .build-space-summary { grid-column: 1 / -1; } .metadata-grid { grid-template-columns: 1fr; } .project-nav { gap: 0; } .nav-button { flex: 1; padding-inline: .4rem; } .action-bar { flex-wrap: wrap; gap: .5rem; } .action-bar .primary { flex-basis: 100%; } }
 
   .activity-status { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
   .activity-current { flex: 1; min-inline-size: 0; }
@@ -748,7 +759,18 @@ const script = `
       // project that owns the active draft. Keep that identity until reopened.
       for (const [id, key, fallback] of [['configured-repository', 'repository', 'Not connected'], ['configured-target-branch', 'targetBranch', 'Branch checked before upload']]) {
         const output = document.getElementById(id);
-        if (output) output.textContent = typeof display[key] === 'string' && display[key] ? display[key] : fallback;
+        if (output) {
+          const value = typeof display[key] === 'string' && display[key] ? display[key] : fallback;
+          output.textContent = value;
+          if (id === 'configured-repository') {
+            output.title = value === fallback ? '' : value;
+            try {
+              const url = new URL(value);
+              output.textContent = url.hostname.toLowerCase() === 'github.com'
+                ? url.pathname.replace(/^\\/+|\\/+$/g, '').replace(/\\.git$/i, '') : url.hostname + url.pathname;
+            } catch { /* Keep the safe host-projected value or fallback. */ }
+          }
+        }
       }
       const summary = document.getElementById('repository-settings-state');
       if (summary) summary.textContent = display.invalid === true ? 'Needs attention' : 'Not yet verified';

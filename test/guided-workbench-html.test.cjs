@@ -13,6 +13,15 @@ function state(overrides = {}) {
   };
 }
 
+test('a remote-only project does not offer a missing local checkout as editable work', () => {
+  const html = renderGuidedWorkbench(state({ localRepositoryAvailable: false,
+    connection: { repository: 'https://github.com/example/Skills.git', localPath: 'P:/Project/.skilljetty-prerelease/repositories/skills', baseBranch: 'main' } }), nonce);
+  assert.doesNotMatch(html, /data-action="openRepositorySkill"/);
+  assert.match(html, /data-action="openPackage"/);
+  assert.match(html, /data-action="showCreate"/);
+  assert.match(html, /https:\/\/github.com\/example\/Skills.git/);
+});
+
 test('older versions remain an explicit reviewed recovery action', () => {
 const initial = renderGuidedWorkbench(state(), nonce);
   assert.match(initial, /data-action="previewArchive"[^>]*>Review older saved releases/);
@@ -217,7 +226,7 @@ for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
     assert.equal((html.match(/id="open-settings"/g) || []).length, 1);
     assert.match(html, /id="open-settings"[^>]*data-action="openSettings"[^>]*aria-label="Open SkillJetty settings"/);
     assert.doesNotMatch(html, /<button[^>]*id="open-settings"[^>]*\bdisabled/);
-    assert.match(html, /id="configured-repository">https:\/\/github.com\/desired\/Skills<\/strong>/);
+    assert.match(html, /id="configured-repository" title="https:\/\/github.com\/desired\/Skills">desired\/Skills<\/strong>/);
     assert.match(html, /id="local-repository-path" title="P:\/Desired &lt;repo&gt;">Desired &lt;repo&gt;<\/strong>/);
     assert(html.indexOf('id="workbench-configuration"') < html.indexOf('<main'));
   }
@@ -225,7 +234,7 @@ for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
 
 test('blank settings do not pretend a saved repository is selected', () => {
 const html = renderGuidedWorkbench(state({ configuredRepository: '', configuredLocalRepository: '', hasWorkspace: false }), nonce);
-  assert.match(html, /id="configured-repository">Not connected<\/strong>/);
+  assert.match(html, /id="configured-repository" title="">Not connected<\/strong>/);
   assert.match(html, /Choose a location to begin/);
   assert.match(html, /data-action="createWorkbench"[^>]*>Choose a location/);
   assert.match(html, /id="open-settings"/);
@@ -243,16 +252,34 @@ const html = renderGuidedWorkbench(state({ hasWorkspace: false, connection: unde
 
 test('project identity uses the repository root while preserving the exact storage location', () => {
 const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository', repositoryRoot: 'P:/Projects/Skills', workFolder: 'P:/Projects/Skills/.skilljetty-prerelease', configuredLocalRepository: 'P:/Projects/Skills', configuredRepository: 'https://github.com/example/Skills' }), nonce);
-  assert.match(html, /Working in<\/span><strong id="local-repository-path" title="P:\/Projects\/Skills">Skills<\/strong>/);
-  assert.doesNotMatch(html, /Saved in|P:\/Projects\/Skills\/.skilljetty-prerelease/);
+  assert.match(html, /Build space<\/span><strong id="active-work-folder" title="P:\/Projects\/Skills\/.skilljetty-prerelease">Skills builds<\/strong>/);
+  assert.match(html, /Local repository<\/span><strong id="local-repository-path" title="P:\/Projects\/Skills">Skills<\/strong>/);
+  assert.match(html, /Remote repository<\/span><strong id="configured-repository" title="https:\/\/github.com\/example\/Skills">example\/Skills<\/strong>/);
+  assert.doesNotMatch(html, /Saved in|>P:\/Projects\/Skills\/.skilljetty-prerelease/);
   assert.match(html, /id="configured-target-branch">main<\/span>/);
   assert.doesNotMatch(html, /What goes in each|Create another workbench|<details/);
 });
 
 test('managed project identity shows its chosen project once and keeps internal directories out of the task', () => {
   const html = renderGuidedWorkbench(state({ workspaceMode: 'managed', workFolder: 'P:\\Projects\\Alpha10\\.skilljetty-prerelease', connection: undefined }), nonce);
-  assert.match(html, /Working in<\/span><strong id="local-repository-path" title="P:\\Projects\\Alpha10">Alpha10<\/strong>/);
-  assert.doesNotMatch(html, /\.skilljetty-prerelease|Saved in/);
+  assert.match(html, /Build space<\/span><strong id="active-work-folder" title="P:\\Projects\\Alpha10\\.skilljetty-prerelease">Alpha10 builds<\/strong>/);
+  assert.doesNotMatch(html, />P:\\Projects\\Alpha10|Saved in/);
+});
+
+test('the local and remote repository model exposes sync and only promises implicit preparation when authorized', () => {
+  const model = { workspaceMode: 'managed', workFolder: 'P:/Alpha/.skilljetty-prerelease', configuredLocalRepository: 'P:/Alpha/.skilljetty-prerelease/repositories/skills', localRepositoryAvailable: false };
+  const pending = renderGuidedWorkbench(state({ ...model, localRepositorySetupPending: true }), nonce);
+  assert.match(pending, /Build space<\/span>/);
+  assert.match(pending, /Local repository<\/span>/);
+  assert.match(pending, /Remote repository<\/span>/);
+  assert.match(pending, /Prepared on first upload/);
+  assert.match(pending, /data-action="pullRepository"[^>]*>Sync repository/);
+  assert.doesNotMatch(pending, /data-action="openRepositorySkill"/);
+  const custom = renderGuidedWorkbench(state({ ...model, localRepositorySetupPending: false }), nonce);
+  assert.doesNotMatch(custom, /Prepared on first upload/);
+  assert.match(custom, /Needs attention/);
+  const rejected = renderGuidedWorkbench(state({ ...model, configurationError: 'Rejected settings' }), nonce);
+  assert.doesNotMatch(rejected, /data-action="pullRepository"/);
 });
 
 test('built plugins are editable project objects with a direct action', () => {
@@ -278,7 +305,7 @@ test('invalid settings do not disclose rejected credentials or claim the new con
   assert.doesNotMatch(html, new RegExp(secret));
   assert.doesNotMatch(html, /Rejected &lt;folder&gt;|Saved connection verified/);
   assert.match(html, /id="repository-settings-state">Upload needs attention<\/span>/);
-  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/Skills.git<\/strong>/);
+  assert.match(html, /id="configured-repository" title="https:\/\/github.com\/example\/Skills.git">example\/Skills<\/strong>/);
 });
 
 test('invalid native settings keep local packaging available without enabling upload through a saved connection', () => {

@@ -110,6 +110,21 @@ export class GuidedWorkbenchController {
       const selected = this.repositorySelection();
       this.state.configuredRepository = selected.repository;
       this.state.configuredLocalRepository = selected.localPath;
+      this.state.localRepositoryAvailable = false;
+      this.state.localRepositorySetupPending = false;
+      if (selected.localPath) {
+        let folderMissing = false;
+        try {
+          const folder = fs.lstatSync(selected.localPath);
+          if (folder.isDirectory() && !folder.isSymbolicLink()) {
+            try { const git = fs.lstatSync(path.join(selected.localPath, '.git')); this.state.localRepositoryAvailable = git.isDirectory() && !git.isSymbolicLink(); }
+            catch { /* An existing non-repository is never treated as an implicit clone destination. */ }
+          }
+        } catch (error) { folderMissing = (error as NodeJS.ErrnoException).code === 'ENOENT'; }
+        this.state.localRepositorySetupPending = folderMissing && !!this.hooks.enforceWorkbench
+          && settings.localRepositoryPath === undefined
+          && !path.relative(path.join(this.root!, 'repositories', 'skills'), selected.localPath);
+      }
       this.state.configurationError = undefined;
       this.state.connection = selected.repository ? {
         repository: selected.repository,
@@ -121,6 +136,8 @@ export class GuidedWorkbenchController {
       // fallback for a malformed explicit native setting in an operation.
       this.state.connection = saved;
       this.state.configuredRepository = undefined; this.state.configuredLocalRepository = undefined;
+      this.state.localRepositoryAvailable = false;
+      this.state.localRepositorySetupPending = false;
       this.state.configurationError = error instanceof Error ? error.message : 'Correct the repository settings before sharing.';
     }
     if (previous !== JSON.stringify(this.state.connection) || this.state.configurationError) {
@@ -128,11 +145,27 @@ export class GuidedWorkbenchController {
       this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
     }
   }
-  private async resolveRepositoryConnection(beforeSave: () => void, requireLocal = false) {
+  private async resolveRepositoryConnection(beforeSave: () => void, requireLocal = false, forPublication = false) {
     const selected = this.repositorySelection();
     if (!selected.repository) throw new Error('Set the repository address in SkillJetty Settings before sharing. Your local draft is retained.');
     if (requireLocal && !selected.localPath) throw new Error('Set the local repository folder in SkillJetty Settings before this repository action.');
-    const connection = await connectWorkspaceRepository(this.workspace(), selected.repository, { localPath: selected.localPath, beforeSave });
+    let localPath = selected.localPath;
+    const settings = this.hooks.getRepositorySettings?.() ?? {};
+    if (forPublication && localPath && this.hooks.enforceWorkbench && settings.localRepositoryPath === undefined
+      && !path.relative(path.join(this.workspace(), 'repositories', 'skills'), localPath)) {
+      // First upload prepares the one persistent local repository automatically.
+      // Explicit paths and existing repositories retain their identity checks.
+      try { fs.lstatSync(localPath); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        beforeSave();
+        this.progress('Preparing your local repository from the connected remote…');
+        this.state.repositoryCheckout = await pullProjectRepository(this.workspace(), selected.repository, localPath,
+          message => this.progress(message), beforeSave, true);
+        beforeSave();
+      }
+    }
+    const connection = await connectWorkspaceRepository(this.workspace(), selected.repository, { localPath, beforeSave });
     this.refreshRepositorySettings();
     return connection;
   }
@@ -751,7 +784,7 @@ export class GuidedWorkbenchController {
             this.state.receipt = { name: first.skillName, version: first.version, directory: first.directory, packagePath: first.packagePath,
               local: true, artifacts: plan.artifacts, compatibility: plan.compatibility, note: 'All requested packages are prepared locally. No upload has been attempted. Editable drafts are retained.' };
             if (message.action === 'savePackage') { this.state.step = 'done'; break; }
-            const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite) : this.state.connection;
+            const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite, false, true) : this.state.connection;
             if (!connection) throw new Error('Connect a repository before submitting. Your prepared packages are retained.');
             const supported = !!githubRepository(connection.repository);
             if (supported) await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(connection.repository);
@@ -812,7 +845,7 @@ export class GuidedWorkbenchController {
             this.previewConfigurationGeneration = generation;
             throw new Error('The repository settings changed since this sharing summary was shown. Review the updated destination and submit again. Nothing was uploaded.');
           }
-          const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite) : this.state.connection;
+          const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite, false, true) : this.state.connection;
           if (!connection) throw new Error('Connect your repository before publishing.');
           this.state.step = 'publish';
           this.state.busy = true; this.progress('Sanity checking and packaging this version…');

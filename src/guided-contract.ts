@@ -45,6 +45,8 @@ export type GuidedState = {
   repositoryRoot?: string;
   configuredRepository?: string;
   configuredLocalRepository?: string;
+  localRepositoryAvailable?: boolean;
+  localRepositorySetupPending?: boolean;
   configurationError?: string;
   connection?: { repository: string; baseBranch: string; localPath?: string };
   repositoryVerification?: RepositoryCheckState;

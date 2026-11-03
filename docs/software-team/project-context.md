@@ -2,6 +2,48 @@
 
 ## Current assignment — November 3: project experience redesign, preview 0.15.4
 
+### Final owner model: build space, local repository, remote repository
+
+The owner's latest clarification is authoritative: "local build space, local repo
+synced to remote repo, very simple." The header now names those three roles with
+short labels and exact locations in tooltips. Sync repository is a visible action;
+Build / Share keeps the full destination and branch visible before upload. No
+extra folder selections or rearrangement of existing work are introduced.
+
+For a managed project whose implicit default repository has never been created,
+first upload now creates the persistent local Git copy, then reuses it for the
+submission. The unshipped remote-only fallback experiment was superseded. Explicit
+paths, existing default caches and legacy mappings keep their original validation.
+New clone-only promotion refuses a raced existing target and moves the whole
+directory rather than merging clone entries into user files. Boundary/configuration
+guards run after the final awaited stat and before every Windows rename retry.
+Owned managed source clones receive exact process-only root and `.git` trust;
+no global or wildcard trust is written.
+
+CI1005 passed 484 tests with zero failures and one Linux skip; production audit
+zero findings, packaging tools six moderate findings, configured gates passed.
+Its source was `c0b35152123cb2932204eddf2f9c0de155bef2c4`, package SHA-256
+`f7354b4f26ced87c3db61c9301faa28553e7b63173d0ba257e7b14df7d49b85b`.
+That candidate was never approved or uploaded. Cancellation of its pending gate
+was requested because the owner's persistent-local clarification superseded it:
+`working/runs/7ecfacd3bcb94bb1a129bca16bacbd68/reports/superseded-build.json`.
+Its exact-artifact security PASS remains scoped to that earlier package.
+
+Final-model focused evidence: UI/human 51/51
+(`working/runs/88c505c748f2447a92e0cdcebd0d43f3/reports/ui-tests.tap`), broader
+UI/feedback 80/80 (`working/runs/e76f5770ac8941e298f1bd2c7fef56ca/reports/full-tests.log`),
+four persistent-clone/explicit-path/summary cases passed
+(`working/runs/b5fd221e4a2d4729b7c82dff8e223a63/reports/full-tests.log`).
+The integration uses real Git cloning, commits and pushes to an owned local Git
+remote with a fixed transport adapter; GitHub review API responses are fixtures.
+It does not establish a live GitHub or user skill upload. Earlier failed integration
+attempts were fixture receive-pack ownership failures, retained in their logs.
+Independent source review passed native promotion/configuration races
+(`working/runs/71350aa112b74b6c9e3444edd3f190ae/reports/security-persistent-clone-race.json`)
+and Windows retry invalidation
+(`working/runs/73bf520920fd4272ad5a182388191830/reports/security-persistent-clone-retry.json`).
+Fresh full CI and exact native/browser/package reviews still govern final delivery.
+
 The owner explicitly rejected incremental menu/copy changes and authorized a
 whole-experience revamp: "revamp", "make this stupid simple". Replace the numbered
 wizard and internal-folder lessons with Home → Editor → Build / Share. Existing

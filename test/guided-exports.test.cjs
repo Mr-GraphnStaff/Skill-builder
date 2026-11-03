@@ -27,6 +27,78 @@ async function summary(controller) {
 }
 const options = (ids, extra = {}) => ({ exportMode: 'both', pluginName: 'team-notes', pluginVersion: '1.0.0', pluginDescription: 'Team note skills.', pluginAuthor: 'DAF-TECH', pluginMembers: ids, geminiZip: true, ...extra });
 
+test('fresh managed project prepares one persistent local repo then builds and uploads without a separate Pull (local Git transport fixture)', async t => {
+  const root = fixture(t), guided = require('../out/guided-workspace.js');
+  const cp = require('node:child_process'), { pathToFileURL } = require('node:url');
+  const { GitHubReviewService } = require('../out/github-review.js');
+  const originals = { connect: guided.connectWorkspaceRepository, publish: guided.publishPreparedGuidedRelease,
+    review: guided.reviewLibraryRelease, preflight: GitHubReviewService.prototype.preflight, spawn: cp.spawn };
+  t.after(() => { guided.connectWorkspaceRepository = originals.connect; guided.publishPreparedGuidedRelease = originals.publish;
+    guided.reviewLibraryRelease = originals.review; GitHubReviewService.prototype.preflight = originals.preflight; cp.spawn = originals.spawn; });
+  const repository = 'https://github.com/example/skills.git', calls = [];
+  const remote = path.join(root, 'scratch', 'fixture-remote'); fs.mkdirSync(remote);
+  const env = { ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const git = args => cp.execFileSync('git', ['-c', `safe.directory=${remote.replaceAll('\\', '/')}`, ...args], { cwd: remote, env, windowsHide: true, encoding: 'utf8', stdio: 'pipe' }).trim();
+  git(['init', '-b', 'main']);
+  git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Initial']);
+  const transportConfig = path.join(root, 'scratch', 'fixture-transport.gitconfig');
+  fs.writeFileSync(transportConfig, `[safe]\n directory = ${remote.replaceAll('\\', '/')}\n directory = ${remote.replaceAll('\\', '/')}/.git\n`);
+  // Redirect only this known test destination through real local Git. Origin
+  // remains the reviewed HTTPS identity; no GitHub/network success is invented.
+  const transport = ['-c', `url.${pathToFileURL(remote).href}.insteadOf=${repository}`, '-c', 'protocol.file.allow=always',
+    '-c', `safe.directory=${remote.replaceAll('\\', '/')}`, '-c', `safe.directory=${remote.replaceAll('\\', '/')}/.git`];
+  cp.spawn = (command, args, spawnOptions) => originals.spawn(command,
+    command === 'git' && args.some(value => ['clone', 'fetch', 'push', 'ls-remote'].includes(value)) ? [...transport, ...args] : args,
+    command === 'git' ? { ...spawnOptions, env: { ...spawnOptions.env, GIT_CONFIG_GLOBAL: transportConfig, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' } } : spawnOptions);
+  guided.connectWorkspaceRepository = async (_root, remote, selection) => {
+    selection.beforeSave(); calls.push({ stage: 'connect', localPath: selection.localPath });
+    return originals.connect(_root, remote, selection);
+  };
+  GitHubReviewService.prototype.preflight = async () => undefined;
+  guided.reviewLibraryRelease = async () => ({ pr: { supported: true, status: 'awaiting_review', number: 24, identityVerified: true } });
+  guided.publishPreparedGuidedRelease = async (_root, directory, connection, _progress, guard) => {
+    guard(); calls.push({ stage: 'publish', localPath: connection.localPath });
+    return originals.publish(_root, directory, connection, _progress, guard);
+  };
+  const controller = new GuidedWorkbenchController(root, { enforceWorkbench: true, getRepositorySettings: () => ({ repositoryUrl: repository }) });
+  const id = await create(controller, 'fresh-notes'); await summary(controller);
+  assert.equal(controller.state.localRepositoryAvailable, false);
+  assert.equal(controller.state.localRepositorySetupPending, true);
+  const payload = options([id], { exportMode: 'plugin', geminiZip: false });
+  await controller.dispatch({ action: 'updateExportOptions', payload });
+  await controller.dispatch({ action: 'publish', payload });
+  assert.equal(controller.state.error, undefined, JSON.stringify(controller.state.receipt?.artifacts));
+  const local = path.join(root, 'repositories', 'skills');
+  assert.deepEqual(calls, [{ stage: 'connect', localPath: local }, { stage: 'publish', localPath: local }]);
+  assert.equal(controller.state.receipt.local, false);
+  assert.equal(controller.state.receipt.artifacts[0].status, 'uploaded');
+  assert(fs.statSync(path.join(local, '.git')).isDirectory(), 'one persistent local repository was prepared');
+  assert.equal(controller.state.localRepositoryAvailable, true);
+  assert.equal(controller.state.localRepositorySetupPending, false);
+  assert.equal(git(['rev-parse', 'refs/heads/plugins/team-notes/1.0.0']), controller.state.receipt.commit, 'the actual local fixture remote received the Git upload');
+  assert(fs.statSync(controller.state.receipt.packagePath).isFile(), 'package generation and Git operations are real; GitHub review API is a fixture');
+});
+
+test('publication keeps explicit missing paths, existing defaults and Pull selections instead of bypassing identity checks', async t => {
+  const root = fixture(t), guided = require('../out/guided-workspace.js'), original = guided.connectWorkspaceRepository;
+  const repository = 'https://github.com/example/skills.git', expected = [];
+  t.after(() => { guided.connectWorkspaceRepository = original; });
+  guided.connectWorkspaceRepository = async (_root, remote, selection) => {
+    expected.push(selection.localPath);
+    return { repository: remote, baseBranch: 'main', localPath: selection.localPath };
+  };
+  const implicit = path.join(root, 'repositories', 'skills'), custom = path.join(root, 'repositories', 'custom');
+  for (const localRepositoryPath of [implicit, custom]) {
+    const controller = new GuidedWorkbenchController(root, { enforceWorkbench: true, getRepositorySettings: () => ({ repositoryUrl: repository, localRepositoryPath }) });
+    await controller.resolveRepositoryConnection(() => {}, false, true);
+  }
+  const controller = new GuidedWorkbenchController(root, { enforceWorkbench: true, getRepositorySettings: () => ({ repositoryUrl: repository }) });
+  await controller.resolveRepositoryConnection(() => {}, true, false);
+  fs.mkdirSync(implicit);
+  await controller.resolveRepositoryConnection(() => {}, false, true);
+  assert.deepEqual(expected, [implicit, custom, implicit, implicit]);
+});
+
 function savedPlugin(t) {
   const root = fixture(t), releases = [], drafts = [];
   for (const name of ['alpha-notes', 'beta-notes']) {
