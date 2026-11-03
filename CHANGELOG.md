@@ -12,6 +12,12 @@
 - Explain repository-root versus individual-skill selections and reject GitHub
   tree/file addresses before repository operations.
 - Describe the running installed build without implying Marketplace publication.
+- Allow unrelated ignored private files during repository verification and safe
+  fast-forward pulls. Stop before merging when incoming paths overlap ignored
+  files or folders, with Git's own no-overwrite guard protecting late file races.
+- Inspect and merge one immutable commit fetched into an operation-specific ref;
+  preserve shared FETCH_HEAD and stop if the selected branch or starting commit
+  changes. Cleanup removes only the owned ref with its expected value.
 
 ## 0.13.2 — 2026-11-01 (public pre-release documentation correction)
 

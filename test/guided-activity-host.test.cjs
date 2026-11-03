@@ -7,7 +7,7 @@ const core = require('../out/skill-workbench.js');
 const AdmZip = require('adm-zip');
 
 function workflowFixture(t) {
-  const qa = path.resolve(__dirname, '../dist'); fs.mkdirSync(qa, { recursive: true });
+  const qa = require('./working-fixture.cjs').workingFixture('guided-activity-host'); fs.mkdirSync(qa, { recursive: true });
   const root = fs.mkdtempSync(path.join(qa, 'activity-workflows-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
@@ -132,7 +132,7 @@ test('activity remains bounded across actions and autosave does not replace acti
 });
 
 test('an invalid structural check reports findings without a successful action or phase', async t => {
-  const qa = path.resolve(__dirname, '../dist'); fs.mkdirSync(qa, { recursive: true });
+  const qa = require('./working-fixture.cjs').workingFixture('guided-activity-host'); fs.mkdirSync(qa, { recursive: true });
   const root = fs.mkdtempSync(path.join(qa, 'activity-invalid-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const input = path.join(root, 'input'); fs.mkdirSync(input);

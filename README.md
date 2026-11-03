@@ -22,6 +22,8 @@ Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJett
 
 An explicitly configured, previously connected Skills repository continues with its existing connection and private `.skilljetty-prerelease` data folder. It does not need conversion to a managed workbench. **Manage work location (optional)** offers a separate managed setup when you want one. A local repository setting must identify the Git root containing `.git`; the GitHub setting must identify the repository, not an individual skill's `tree/` or `blob/` page.
 
+Unrelated ignored private files can remain in the local repository. Pull preserves them and stops if incoming files would collide with them; tracked edits and nonignored untracked files still require attention before pulling. No cleanup or deletion of private files is automatic.
+
 ## Create or open your workbench
 
 Choose **Create workbench** and select its parent folder. Review the exact `.skilljetty-prerelease` destination and folder descriptions, then confirm. Setup accepts a new or empty folder and creates a readable `README.md`. It does not clone, pull, upload or move existing files. **Open existing workbench** accepts a previously initialized workbench; an ordinary opened project is never adopted automatically.

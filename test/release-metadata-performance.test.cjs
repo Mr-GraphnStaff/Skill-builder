@@ -7,7 +7,7 @@ const library = require('../out/workbench-library.js');
 const { runWorkbenchJob } = require('../out/workbench-jobs.js');
 
 function fixture(t) {
-  const qa = path.resolve(__dirname, '../dist'); fs.mkdirSync(qa, { recursive: true });
+  const qa = require('./working-fixture.cjs').workingFixture('release-metadata-performance'); fs.mkdirSync(qa, { recursive: true });
   const root = fs.mkdtempSync(path.join(qa, 'release-metadata-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const input = path.join(root, 'input'); fs.mkdirSync(input);

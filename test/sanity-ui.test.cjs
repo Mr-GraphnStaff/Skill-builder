@@ -10,7 +10,7 @@ const base = { step: 'check', hasWorkspace: true, target: 'portable', repositori
 const nonce = 'sanityCheckUiNonce';
 
 test('guided Sanity check keeps application advice outside structural findings', async t => {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('sanity-ui'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'sanity-ui-'));
   t.after(() => { assert.equal(path.dirname(root), dist); fs.rmSync(root, { recursive: true, force: true }); });
   const controller = new GuidedWorkbenchController(root);

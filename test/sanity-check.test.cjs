@@ -9,7 +9,7 @@ const wb = require('../out/skill-workbench.js');
 const manifest = '---\nname: sanity-sample\ndescription: Useful notes.\ncustom-vendor-option: preserved\n---\n# Notes\n';
 const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('sanity-check'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'sanity-check-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(root)), dist); fs.rmSync(root, { recursive: true, force: true }); });
   const workspace = path.join(root, 'workspace'); fs.mkdirSync(workspace);

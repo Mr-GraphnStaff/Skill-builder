@@ -7,7 +7,7 @@ const { verifyProjectRepository, pullProjectRepository, validateProjectRepositor
 const { withWorkbenchMetrics } = require('../out/workbench-metrics.js');
 
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('managed-repository-performance'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'managed-performance-'));
   const keys = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_NOSYSTEM'];
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));

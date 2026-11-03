@@ -7,7 +7,7 @@ const { deleteBranchWithLease } = require('../out/github-branch-delete.js');
 const { runPublisherProcess } = require('../out/repository-publisher.js');
 const context = { repository: 'https://github.com/example/skills.git', branch: 'skills/sample/1.0.0', baseBranch: 'main', commit: 'a'.repeat(40), skillName: 'sample', version: '1.0.0' };
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('github-branch-delete'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'branch-delete-qa-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(root)), dist); fs.rmSync(root, { recursive: true, force: true }); }); return root;
 }

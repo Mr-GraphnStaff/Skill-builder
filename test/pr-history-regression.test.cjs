@@ -170,7 +170,7 @@ test('a changed branch or changed candidate detail is not accepted as the upload
 });
 
 test('create repair replaces a stale recorded PR number and preserves the prior receipt bytes', async t => {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('pr-history-regression'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'pr-history-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(root)), dist); fs.rmSync(root, { recursive: true, force: true }); });
   const source = path.join(root, 'input'); fs.mkdirSync(source);
@@ -202,7 +202,7 @@ test('a stale numbered PR exposes the repair action without another upload', () 
 });
 
 test('explicit create adopts the newer open PR after an exact closed receipt and keeps its old bytes', async t => {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('pr-history-regression'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'pr-exact-history-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(root)), dist); fs.rmSync(root, { recursive: true, force: true }); });
   const source = path.join(root, 'input'); fs.mkdirSync(source);
@@ -224,7 +224,7 @@ test('explicit create adopts the newer open PR after an exact closed receipt and
 });
 
 test('merge integration never creates a PR or requests a reviewer even when a reviewer payload is supplied', async t => {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('pr-history-regression'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'pr-merge-side-effects-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(root)), dist); fs.rmSync(root, { recursive: true, force: true }); });
   const source = path.join(root, 'input'); fs.mkdirSync(source);

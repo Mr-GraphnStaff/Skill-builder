@@ -7,7 +7,7 @@ const { emitWorkbenchMetric, METRIC_STAGES } = require('../out/workbench-metrics
 const { openSkillPackage } = require('../out/skill-workbench.js');
 const { runWorkbenchJob } = require('../out/workbench-jobs.js');
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('workbench-metrics'); fs.mkdirSync(dist, { recursive: true });
   const base = fs.mkdtempSync(path.join(dist, 'metrics-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(base)), dist); fs.rmSync(base, { recursive: true, force: true }); });
   const root = path.join(base, 'workspace'); fs.mkdirSync(root);

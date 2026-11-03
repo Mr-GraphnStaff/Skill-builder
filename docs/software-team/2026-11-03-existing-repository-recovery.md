@@ -59,6 +59,15 @@ describes the installed pre-release build instead of asserting public delivery.
 
 ## Preservation and limits
 
+Final actual-repository review also found that ignored `working/` content caused
+the old dirty check to refuse every pull. The generic repair permits unrelated
+ignored private content, separately rejects incoming path collisions in both
+ancestor directions (case-insensitive on Windows), and adds Git's
+`--no-overwrite-ignore` guard for files created after the collision inventory.
+It does not special-case an agent folder or erase ignored files. A new build and
+exact-artifact review are required after this change; build 993 is retained as
+an intermediate candidate, not the final publication artifact.
+
 Recovery evidence and raw reports are inside ignored `working/` managed runs;
 recovery runs have retention markers. No user repository was moved, reset,
 reinitialized, committed, or pushed by configuration recovery. No GUI or
@@ -69,3 +78,44 @@ The previous full local run ended with one failure whose name was lost in
 truncated console output. It is unresolved evidence, not a confirmed flaky test.
 The next full run must retain raw output and failure details before printing a
 bounded summary.
+
+## Verification ledger while recovery continues
+
+- CI build 991 ran 431 checks: 430 passed; the sole failure was an identity test
+  hard-coding 0.15.0 while the candidate was 0.15.2. The corrected test checks
+  numeric versioning, lockfile consistency, and the package filename; its focused
+  rerun passed. Commit `58fc1a7` contains only this test correction after the main
+  recovery commit `e9178e4`.
+- CI build 993 passed 431/431, with production dependencies clean and the
+  configured high-severity development-tool gate passing (six moderate existing
+  tool findings). Its intermediate VSIX SHA-256 is
+  `3ac2003e42c0bd913d8730e97d1c843ac052a6fab8623f50d90c5b34f12da3ae`.
+  Receipt/source binding and all 196 installed payload files were verified in an
+  isolated native test directory. This artifact is superseded by the later pull
+  preservation work and must not be published as the final repair.
+- The full Windows run retained its complete TAP: 419 passed, one old version-pin
+  assertion failed, eleven physical/platform fixtures were skipped. The corrected
+  assertion passed separately. Do not describe that historical full run as green.
+- The first native attempt activated the exact 993 package and resolved its saved
+  existing workspace, but its test instrumentation failed to suppress automatic
+  verification. A synthetic remote read failed; no credentials or upload were
+  used. That attempt is FAIL, with logs preserved. The fresh harness locates the
+  actual activated module rather than preloading a duplicate Windows path-case
+  module. No user editor was operated.
+- The ignored-file fix passed fifteen real-Git repository checks plus one original
+  ignored-overwrite regression. Four additional independent adversarial cases
+  preserved ignored files and HEAD at the actual Git merge boundary.
+- Security review then reproduced a separate race: another fetch could replace
+  mutable `FETCH_HEAD` between inspection and merge, introducing an uninspected
+  control path. The final pull repair must use an immutable, operation-specific
+  fetched commit for both inspections and merge. Final security review, a new CI
+  artifact, fresh native execution, and public delivery remain pending.
+- Twelve older test fixture bases were changed from `dist/` to the checked
+  `workingFixture` helper. Existing user files were not relocated or deleted.
+- The private-fetch repair is implemented and compiled: one unique local ref,
+  no shared FETCH_HEAD write, a validated immutable commit for inspections and
+  merge, final origin/branch/starting-HEAD checks, and no-dereference expected-OID
+  cleanup. Nine focused real-Git race/preservation checks passed. Morgan's
+  unchanged original race reproduction now passes, and the four independent
+  ignored-byte adversarial checks pass again. No remaining confirmed source
+  security blocker was reported; the rebuilt artifact is still required.

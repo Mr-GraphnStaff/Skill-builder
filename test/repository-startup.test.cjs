@@ -8,7 +8,7 @@ const { connectWorkspaceRepository, setWorkspaceRepositoryFolder, getWorkspaceCo
 const { GuidedWorkbenchController } = require('../out/guided-controller.js');
 const remote = 'https://github.com/example/startup-skills';
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('repository-startup'); fs.mkdirSync(dist, { recursive: true });
   const base = fs.mkdtempSync(path.join(dist, 'repository-startup-'));
   const root = path.join(base, 'workspace'); fs.mkdirSync(root);
   const originalBranch = publisher.resolveRepositoryDefaultBranch;

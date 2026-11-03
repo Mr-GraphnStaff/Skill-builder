@@ -8,7 +8,7 @@ const publisher = require('../out/repository-publisher.js');
 const { pullManagedRepository } = require('../out/managed-repository.js');
 
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('repository-execution-guards'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'execution-guards-'));
   const keys = ['TEMP', 'TMP', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_NOSYSTEM', 'SKILLJETTY_EXECUTION_MARKER'];
   const previous = Object.fromEntries(keys.map(key => [key, process.env[key]]));

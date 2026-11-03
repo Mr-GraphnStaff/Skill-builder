@@ -11,7 +11,7 @@ const { createGuidedSkill } = require('../out/guided-workspace.js');
 const { runWorkbenchJob } = require('../out/workbench-jobs.js');
 
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('runtime-diagnostics'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'runtime-diagnostics-'));
   t.after(() => { assert.equal(path.dirname(path.resolve(root)), dist); fs.rmSync(root, { recursive: true, force: true }); });
   return root;

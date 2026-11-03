@@ -10,7 +10,7 @@ export type RepositoryVerification = {
   remoteCommit?: string; dirty?: boolean; trustRequired?: boolean;
 };
 const controls = new Set(['.skill-workbench', '.skilljetty-prerelease', '.skilljetty-beta', '.vscode']);
-const metadataOnlyCommands = new Set(['config', 'rev-parse', 'remote', 'branch', 'for-each-ref', 'ls-remote', 'ls-tree', 'fetch']);
+const metadataOnlyCommands = new Set(['config', 'rev-parse', 'remote', 'branch', 'for-each-ref', 'ls-remote', 'ls-tree', 'fetch', 'update-ref']);
 const isControl = (name: string) => controls.has(name.replace(/\\/g, '/').split('/')[0].toLowerCase());
 function projectPath(localPath?: string): string {
   if (!localPath?.trim() || !path.isAbsolute(localPath)) throw new Error('Setup required: choose an explicit absolute local Skills repository folder.');
@@ -44,13 +44,13 @@ function remoteIdentity(repository: string): string {
   try { if (new URL(repository).password) throw new Error('Repository credentials must not be embedded in its URL.'); } catch (error) { if (error instanceof Error && error.message.startsWith('Repository credentials')) throw error; }
   return repository.replace(/[\\/]$/, '');
 }
-async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skilljetty-disabled-hooks-${randomUUID()}`), beforeWrite?: () => void): Promise<string> {
+async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skilljetty-disabled-hooks-${randomUUID()}`), beforeWrite?: () => void | Promise<void>): Promise<string> {
   const base = ['--no-optional-locks', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${hooks}`, '-c', 'submodule.recurse=false'];
   // Metadata/object transport cannot apply worktree clean/smudge filters. Avoid
   // a second Git process for those commands, but discover drivers immediately
   // before every content operation so a newly configured driver is disabled too.
   if (metadataOnlyCommands.has(args[0])) {
-    try { beforeWrite?.(); return await repositoryGit(cwd, [...base, ...args]); }
+    try { await beforeWrite?.(); return await repositoryGit(cwd, [...base, ...args]); }
     catch (error) {
       if (/spawn git.*ENOENT/i.test(String(error))) throw new Error('Setup required: Git is not installed or is unavailable on PATH. The selected folder was preserved.');
       throw error;
@@ -63,7 +63,7 @@ async function git(cwd: string, args: string[], hooks = path.join(cwd, `.skillje
     if (/dubious ownership|safe\.directory|spawn git/i.test(String(error))) throw error;
   }
   for (const key of new Set(configuration.trim().split(/\r?\n/).filter(Boolean).map(key => key.slice(0, key.lastIndexOf('.'))))) base.push('-c', `${key}.process=`, '-c', `${key}.smudge=`, '-c', `${key}.clean=`, '-c', `${key}.required=false`);
-  beforeWrite?.();
+  await beforeWrite?.();
   return repositoryGit(cwd, [...base, ...args]);
 }
 async function advertised(cwd: string, repository: string): Promise<{ branch: string; commit: string }> {
@@ -91,10 +91,10 @@ export async function validateProjectRepositoryForPublish(repository: string, lo
   return checkout;
 }
 async function dirty(checkout: string): Promise<boolean> {
-  const rows = (await git(checkout, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored'])).split('\0');
+  const rows = (await git(checkout, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).split('\0');
   for (const row of rows) {
     if (!row) continue;
-    if ((row.startsWith('?? ') || row.startsWith('!! ')) && isControl(row.slice(3))) continue;
+    if (row.startsWith('?? ') && isControl(row.slice(3))) continue;
     return true;
   }
   return false;
@@ -112,7 +112,7 @@ export async function verifyProjectRepository(repository: string, localPath?: st
     const upstream = (await git(checkout, ['for-each-ref', '--format=%(upstream)', `refs/heads/${result.branch}`])).trim();
     const aligned = result.branch === remote.branch && upstream === `refs/remotes/origin/${remote.branch}` && result.localCommit === remote.commit && !result.dirty;
     result.status = aligned ? 'verified' : 'outOfSync';
-    result.message = aligned ? 'The local Skills repository is verified and up to date.' : result.dirty ? 'The local repository has changes or ignored files; your files are preserved.' : 'The local branch, upstream or commit differs from the registered default branch.';
+    result.message = aligned ? 'The local Skills repository is verified and up to date.' : result.dirty ? 'The local repository has local changes; your files are preserved.' : 'The local branch, upstream or commit differs from the registered default branch.';
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     result.trustRequired = /dubious ownership|safe\.directory/i.test(message) || undefined;
@@ -125,6 +125,23 @@ async function rejectControlPaths(checkout: string, ref: string, run = git): Pro
   const files = (await run(checkout, ['ls-tree', '-r', '-z', '--name-only', ref])).split('\0').filter(Boolean);
   if (files.some(isControl)) throw new Error('The remote contains private workbench control paths. Pull stopped to preserve local controls.');
 }
+/** Ignored private files do not make Git dirty, but incoming content must never
+ * replace them. Compare both path directions to protect file/directory changes. */
+async function rejectIgnoredPathCollisions(checkout: string, ref: string, run = git): Promise<void> {
+  const ignored = (await run(checkout, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '--no-empty-directory', '-z'])).split('\0').filter(Boolean);
+  if (!ignored.length) return;
+  const incoming = (await run(checkout, ['ls-tree', '-r', '-z', '--name-only', ref])).split('\0').filter(Boolean);
+  const normalized = (name: string) => {
+    const value = name.replace(/\/+$/, '');
+    return process.platform === 'win32' ? value.toLowerCase() : value;
+  };
+  const paths = incoming.map(normalized);
+  for (const ignoredPath of ignored.map(normalized)) {
+    if (paths.some(remotePath => remotePath === ignoredPath || remotePath.startsWith(`${ignoredPath}/`) || ignoredPath.startsWith(`${remotePath}/`))) {
+      throw new Error('Incoming changes overlap ignored files or folders. Pull stopped before merging; your local files were preserved.');
+    }
+  }
+}
 /** Only the explicit user-selected project folder receives a checkout. */
 export async function pullProjectRepository(workspaceRoot: string, repository: string, localPath: string, progress?: (message: string) => void, beforeWrite?: () => void): Promise<{ path: string; branch: string; commit: string }> {
   const checkout = projectPath(localPath); remoteIdentity(repository); await guard(checkout);
@@ -132,7 +149,24 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
   enforce();
   const runtime = path.join(path.resolve(workspaceRoot), '.skill-workbench', 'git-control'); await guard(runtime);
   const hooks = path.join(runtime, `disabled-hooks-${randomUUID()}`);
-  const run = (cwd: string, args: string[]) => { enforce(); if (isManagedWorkbench(workspaceRoot)) assertWorkbenchPath(workspaceRoot, cwd); return git(cwd, args, hooks, ['fetch', 'merge'].includes(args[0]) ? () => { enforce(); beforeWrite?.(); } : undefined); };
+  let selectedBranch: string | undefined, startingHead: string | undefined;
+  const fetchRef = `refs/skilljetty/pull/${randomUUID()}`;
+  let fetchedCommit: string | undefined;
+  const run = (cwd: string, args: string[]) => {
+    enforce();
+    if (isManagedWorkbench(workspaceRoot)) assertWorkbenchPath(workspaceRoot, cwd);
+    return git(cwd, args, hooks, ['fetch', 'merge'].includes(args[0]) ? async () => {
+      enforce(); beforeWrite?.();
+      if (args[0] === 'merge') {
+        // This check runs after filter discovery, immediately before the merge
+        // command. Never merge into a branch the user changed while fetching.
+        await identity(checkout, repository);
+        const currentBranch = (await git(checkout, ['branch', '--show-current'], hooks)).trim();
+        const currentHead = (await git(checkout, ['rev-parse', '--verify', 'HEAD^{commit}'], hooks)).trim();
+        if (currentBranch !== selectedBranch || currentHead !== startingHead) throw new Error('The local branch or commit changed while preparing Pull. No merge ran; your current branch and files were preserved.');
+      }
+    } : undefined);
+  };
   let entries: string[] = [];
   try { entries = await fs.readdir(checkout); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   if (entries.length && !entries.includes('.git')) throw new Error('Setup required: this nonempty folder is not a Git repository. Its files were preserved.');
@@ -165,15 +199,30 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
     await identity(checkout, repository);
     const branch = (await run(checkout, ['branch', '--show-current'])).trim();
     if (branch !== remote.branch) throw new Error('The local checkout is on a different branch. Preserve changes and switch to the default branch before pulling.');
-    if (await dirty(checkout)) throw new Error('The local checkout has local changes or ignored files. Preserve, commit or move them before pulling; your files were kept.');
+    selectedBranch = branch;
+    startingHead = (await run(checkout, ['rev-parse', '--verify', 'HEAD^{commit}'])).trim();
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(startingHead)) throw new Error('The selected local commit could not be verified. No merge ran.');
+    if (await dirty(checkout)) throw new Error('The local checkout has local changes. Preserve or commit them before pulling; your files were kept.');
     progress?.('Checking incoming changes before pulling the selected Skills repository…');
     beforeWrite?.();
-    await run(checkout, ['fetch', '--no-tags', '--refmap=', 'origin', `refs/heads/${branch}`]);
-    await rejectControlPaths(checkout, 'FETCH_HEAD', run);
+    if ((await run(checkout, ['for-each-ref', '--format=%(refname)', fetchRef])).trim()) throw new Error('The private Pull reference already exists. No fetch or merge ran.');
+    await run(checkout, ['fetch', '--no-tags', '--refmap=', '--no-write-fetch-head', 'origin', `refs/heads/${branch}:${fetchRef}`]);
+    fetchedCommit = (await run(checkout, ['rev-parse', '--verify', `${fetchRef}^{commit}`])).trim();
+    if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(fetchedCommit)) { fetchedCommit = undefined; throw new Error('The fetched commit could not be verified. No merge ran.'); }
+    await rejectControlPaths(checkout, fetchedCommit, run);
+    await rejectIgnoredPathCollisions(checkout, fetchedCommit, run);
     beforeWrite?.();
-    await run(checkout, ['merge', '--ff-only', '--no-edit', 'FETCH_HEAD']);
+    // Git checks ignored-file collisions again at the actual write boundary,
+    // covering files created after the inventory above.
+    await run(checkout, ['merge', '--ff-only', '--no-edit', '--no-overwrite-ignore', fetchedCommit]);
     return { path: checkout, branch, commit: (await run(checkout, ['rev-parse', 'HEAD'])).trim() };
-  } finally { await fs.rm(hooks, { recursive: true, force: true }); }
+  } finally {
+    if (fetchedCommit) {
+      try { await run(checkout, ['update-ref', '--no-deref', '-d', fetchRef, fetchedCommit]); }
+      catch { /* Retain a changed or uncertain private ref; never delete another value. */ }
+    }
+    await fs.rm(hooks, { recursive: true, force: true });
+  }
 }
 /** Legacy callers must now supply an explicit selected project folder. */
 export function managedRepositoryPath(root: string, _repository: string, localPath?: string): string { const selected = projectPath(localPath); if (root && isManagedWorkbench(root)) assertWorkbenchRepository(root, selected); return selected; }

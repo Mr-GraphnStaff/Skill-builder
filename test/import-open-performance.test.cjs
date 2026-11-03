@@ -8,7 +8,7 @@ const guided = require('../out/guided-workspace.js');
 const { GuidedWorkbenchController } = require('../out/guided-controller.js');
 const manifest = '---\nname: quick-import\ndescription: Summarize supplied notes when asked.\n---\nKeep supplied facts.\n';
 function fixture(t) {
-  const dist = path.resolve(__dirname, '../dist'); fs.mkdirSync(dist, { recursive: true });
+  const dist = require('./working-fixture.cjs').workingFixture('import-open-performance'); fs.mkdirSync(dist, { recursive: true });
   const root = fs.mkdtempSync(path.join(dist, 'import-open-test-'));
   t.after(() => { assert.equal(path.dirname(root), dist); fs.rmSync(root, { recursive: true, force: true }); });
   const zip = new AdmZip(); zip.addFile('quick-import/SKILL.md', Buffer.from(manifest));
