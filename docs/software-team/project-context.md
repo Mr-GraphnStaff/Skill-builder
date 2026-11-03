@@ -75,6 +75,16 @@ browser has reached the local repository source, picker and ZIP successfully wit
 zero remote attempts; the complete final eight-case verdict and replacement CI
 are still required.
 
+The final frozen-source browser suite passed all eight cases
+(`working/runs/8dcb071deddd43739b431f11ca275c66/reports/browser-integration.json`),
+including repository-source opening and zero remote attempts. CI1001 then ran
+471 tests: 469 passed, one cancellation fixture failed because its empty `.git`
+directory was not a real repository, and one Windows-only case was skipped.
+The fixture now clones its own local test repository and checks original source
+and Git configuration remain unchanged after cancellation; focused rerun passed.
+No runtime validation was weakened. Exact artifact delivery remains pending the
+replacement full build and installed browser/native checks.
+
 ## Existing repository recovery — November 3, 2026
 
 The owner directed repair after the optional managed-workbench feature became a

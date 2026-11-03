@@ -62,11 +62,15 @@ test('cancel opening a pulled skill keeps the current create screen', async t =>
   await connectWorkspaceRepository(f.root, f.remote);
   setWorkspaceRepositoryFolder(f.root, path.join(f.base, 'skills-project'));
   const checkout = path.join(f.base, 'skills-project');
-  fs.mkdirSync(path.join(checkout, '.git'), { recursive: true });
+  git(f.base, 'clone', f.remote, checkout);
+  const originalSource = fs.readFileSync(path.join(checkout, 'notes/SKILL.md'));
+  const originalConfig = fs.readFileSync(path.join(checkout, '.git/config'));
   const controller = new GuidedWorkbenchController(f.root, { pickFolder: async () => undefined });
   await controller.dispatch({ action: 'showCreate' });
   await controller.dispatch({ action: 'openRepositorySkill' });
   assert.equal(controller.state.error, undefined);
   assert.equal(controller.state.form.mode, 'create');
   assert.match(controller.state.notice, /canceled/);
+  assert.deepEqual(fs.readFileSync(path.join(checkout, 'notes/SKILL.md')), originalSource);
+  assert.deepEqual(fs.readFileSync(path.join(checkout, '.git/config')), originalConfig);
 });
