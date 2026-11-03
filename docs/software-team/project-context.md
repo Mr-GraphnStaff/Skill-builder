@@ -52,6 +52,17 @@ approval/upload to include that call-site guard. Its pending publication gate
 was canceled, retaining the receipt
 `working/runs/5b185343d8f849a696f0817d037fe2d9/reports/superseded-build.json`.
 
+Independent review then reproduced one further first-Sync race: a repository
+appearing during asynchronous connection resolution could clear the pending-setup
+projection and downgrade clone-only into ordinary Pull. Sync now captures its
+initial setup intent before that await. The unchanged independent reproduction
+passes (`working/runs/2045dac7a7b24604bbca9c59b249ec43/reports/security-first-sync-intent.json`);
+the root regression creates a raced target and preserves its exact contents
+(`working/runs/06928fb64b7f482eba3032e0fa2dcefa/reports/full-tests.log`).
+CI1007 at `4195789a8f9d031c5fbdac512935af805c900e45` is superseded before approval
+or upload to include this final guard; its pending gate is being canceled. All
+candidate evidence remains scoped to its original source/build/package.
+
 The owner explicitly rejected incremental menu/copy changes and authorized a
 whole-experience revamp: "revamp", "make this stupid simple". Replace the numbered
 wizard and internal-folder lessons with Home → Editor → Build / Share. Existing

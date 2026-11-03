@@ -523,9 +523,10 @@ export class GuidedWorkbenchController {
         }
         case 'pullRepository': {
           this.refreshConnection();
+          const firstSetup = this.state.localRepositorySetupPending === true;
           const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite, true) : this.state.connection;
           if (!connection?.localPath) throw new Error('Choose the actual local skills project folder before Git pull.');
-          this.state.repositoryCheckout = await pullProjectRepository(this.workspace(), connection.repository, connection.localPath, message => this.progress(message), remoteGuard, this.state.localRepositorySetupPending === true);
+          this.state.repositoryCheckout = await pullProjectRepository(this.workspace(), connection.repository, connection.localPath, message => this.progress(message), remoteGuard, firstSetup);
           await this.verifyRepository();
           this.state.notice = 'Git pull complete in the selected local skills project folder.';
           break;
