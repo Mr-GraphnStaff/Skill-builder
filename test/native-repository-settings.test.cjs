@@ -11,7 +11,7 @@ const publisher = require('../out/repository-publisher.js');
 const managed = require('../out/managed-repository.js');
 const { createGitHubSessionRunner } = require('../out/github-session.js');
 function fixture(t) {
-  const base = path.resolve('dist/native-settings-qa'); fs.mkdirSync(base, { recursive: true });
+  const base = require('./working-fixture.cjs').workingFixture('native-settings-qa'); fs.mkdirSync(base, { recursive: true });
   const root = fs.mkdtempSync(path.join(base, 'case-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true })); return root;
 }
@@ -24,6 +24,17 @@ test('native tuple distinguishes unset, disconnect, cleared local and a changed 
   assert.equal(settings.selectRepositorySettings({ repositoryUrl: 'https://github.com/example/b' }, saved).localPath, undefined);
   assert.throws(() => settings.selectRepositorySettings({ repositoryUrl: 3 }, saved), /must be text/);
   assert.throws(() => settings.selectRepositorySettings({ repositoryUrl: 'https://secret@example.com/repo' }, saved), /unsafe|credentials/);
+  for (const repositoryUrl of ['https://github.com/example/a/tree/main/notes/1.0.0', 'https://github.com/example/a/blob/main/SKILL.md']) {
+    assert.throws(() => settings.selectRepositorySettings({ repositoryUrl }, saved), /repository address.*rather than/i);
+  }
+});
+
+test('a skill folder is rejected as a repository root with an actionable error and no changes', async t => {
+  const root = fixture(t), skill = path.join(root, 'notes'); fs.mkdirSync(skill);
+  const bytes = '# Existing skill\n'; fs.writeFileSync(path.join(skill, 'SKILL.md'), bytes);
+  await assert.rejects(settings.validateLocalRepositorySelection('https://github.com/example/a', skill), /repository root containing \.git/);
+  assert.deepEqual(fs.readdirSync(skill), ['SKILL.md']);
+  assert.equal(fs.readFileSync(path.join(skill, 'SKILL.md'), 'utf8'), bytes);
 });
 test('malformed native getter renders attention while ready, local edits and packaging remain usable', async t => {
   const root = fixture(t), source = path.join(root, 'input'); fs.mkdirSync(source);

@@ -30,6 +30,10 @@ export function selectRepositorySettings(settings: RepositorySettings, saved?: W
     try { password = !!new URL(repository).password; } catch { /* Local Git paths and SCP-style SSH are supported. */ }
     if (repository.startsWith('-') || /[\r\n\0]/.test(repository) || /^(?:ext|fd)::/i.test(repository)
         || /https?:\/\/[^/\s]*@/.test(repository) || password) throw new Error('The configured repository address is unsafe or contains embedded credentials. Correct it in SkillJetty Settings.');
+    if (/^https?:\/\/github\.com\//i.test(repository)
+        && !/^https:\/\/github\.com\/[A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/i.test(repository)) {
+      throw new Error('Use the GitHub repository address, such as https://github.com/owner/repository, rather than a skill folder, file, or tree URL. Import individual skills from Start.');
+    }
   }
   if (localPath) {
     if (/[\r\n\0]/.test(localPath)) throw new Error('The configured local repository path contains invalid characters.');
@@ -52,5 +56,12 @@ export async function validateLocalRepositorySelection(repository: string, local
   try { entries = await fs.readdir(selected); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
   // A missing or empty path is a valid explicit clone destination for Pull.
-  if (entries.length) await validateProjectRepositoryForPublish(repository, selected);
+  if (entries.length) {
+    try { await fs.lstat(path.join(selected, '.git')); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new Error('Select the Git repository root containing .git, rather than an individual skill or version folder. Existing files were not changed.');
+      throw error;
+    }
+    await validateProjectRepositoryForPublish(repository, selected);
+  }
 }

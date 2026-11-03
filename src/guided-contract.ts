@@ -38,6 +38,8 @@ export type GuidedState = {
   notice?: string;
   hasWorkspace: boolean;
   workFolder?: string;
+  workspaceMode?: 'existing-repository' | 'managed';
+  repositoryRoot?: string;
   configuredRepository?: string;
   configuredLocalRepository?: string;
   configurationError?: string;

@@ -10,6 +10,7 @@ import { analyzeSkill, parseEvalSuite, runEvalPreflight, type SkillFile } from '
 import { activateWorkbench } from './workbench-view.js';
 import { activateGuidedWorkbench } from './guided-workbench.js';
 import { isManagedWorkbench } from './workbench-boundary.js';
+import { resolveExistingRepositoryWorkspace, type WorkspaceSelection } from './workspace-selection.js';
 
 const yaml = require('js-yaml') as {
   load(source: string): unknown;
@@ -127,15 +128,20 @@ const RESERVED_SKILL_NAMES = new Set(['anthropic', 'claude']);
 
 export function activate(context: vscode.ExtensionContext) {
   const provider = new SkillTreeProvider();
-  activateGuidedWorkbench(context, { getRoot: async () => {
+  const resolveWorkspace = async (): Promise<WorkspaceSelection | undefined> => {
     const root = getWorkspaceRoot();
     const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
     if (!root && (!configured || !path.isAbsolute(configured))) return undefined;
     // The public prerelease always receives an isolated child data tree. Opening the same
     // VS Code workspace as production does not share its drafts or repository.
     const selected = prereleaseWorkspaceRoot(root ?? configured, configured);
-    return selected.split(/[\\/]/).some(segment => segment.toLowerCase() === '.codex') || !isManagedWorkbench(selected) ? undefined : selected;
-  } });
+    if (selected.split(/[\\/]/).some(segment => segment.toLowerCase() === '.codex')) return undefined;
+    if (isManagedWorkbench(selected)) return { kind: 'managed', dataRoot: selected };
+    // Only a previously saved, explicitly configured repository mapping can
+    // continue without the optional new managed-workbench layout.
+    return configured && path.isAbsolute(configured) ? resolveExistingRepositoryWorkspace(configured) : undefined;
+  };
+  activateGuidedWorkbench(context, { getRoot: async () => (await resolveWorkspace())?.dataRoot, getWorkspace: resolveWorkspace });
 
   // The preview has one write-capable workflow. Older command handlers bypass
   // its selected workbench, so they must never be registered in this channel.

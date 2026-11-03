@@ -46,7 +46,7 @@ function fixture(options = {}) {
     window: {
       async showOpenDialog(...args) { events.push({ type: 'folder-picker', args }); return options.showOpenDialog?.(...args); },
       async showInformationMessage(...args) { events.push({ type: 'information', args }); return options.showInformationMessage?.(...args); },
-      async showErrorMessage(...args) { events.push({ type: 'error-dialog', args }); },
+      async showErrorMessage(...args) { events.push({ type: 'error-dialog', args }); return options.showErrorMessage?.(...args); },
       async showTextDocument(document) { events.push({ type: 'log-opened', document }); },
       createOutputChannel() { return { appendLine: line => events.push({ type: 'log', line }), show() { events.push({ type: 'log-opened' }); }, dispose() {} }; },
       registerWebviewViewProvider: disposable,
@@ -80,7 +80,7 @@ function fixture(options = {}) {
 
 test('actual host delivers activity before dispatch and sends stage updates without replacing the page', async () => {
   const f = fixture(), panel = await f.open();
-  assert.match(panel.html, /Public pre-release 0\.11\.4/);
+  assert.match(panel.html, /Installed pre-release 0\.11\.4/);
   assert.doesNotMatch(panel.html, /UAT only/);
   const entered = deferred(), release = deferred();
   f.dispatchHooks.set('check', async controller => {
@@ -436,6 +436,104 @@ test('concurrent native setup commands serialize their folder pickers', async ()
   assert.equal(panel.messages.filter(message => message.type === 'operationComplete').length, 2);
   assert.deepEqual(fs.readdirSync(path.join(f.root, 'scratch')), []);
 });
+
+test('invalid workbench selection releases controls while its error notification remains unanswered', async () => {
+  const notificationAnswer = deferred();
+  let root;
+  const f = fixture({
+    showOpenDialog: async () => [{ fsPath: path.join(root, 'scratch') }],
+    showErrorMessage: async () => notificationAnswer.promise
+  });
+  root = f.root;
+  const panel = await f.open();
+  let timer;
+  const selection = panel.receive({ action: 'openWorkbenchFolder' });
+  try {
+    const finished = await Promise.race([
+      selection.then(() => true),
+      new Promise(resolve => { timer = setTimeout(() => resolve(false), 1500); })
+    ]);
+    assert.equal(finished, true, 'an unanswered error notification must not hold setup');
+    const completion = panel.messages.find(message => message.type === 'operationComplete');
+    assert.match(completion.error, /not adopted automatically/);
+    assert.equal(f.panels.length, 1, 'invalid selection must preserve the current panel');
+    await panel.receive({ action: 'save' });
+    assert.equal(panel.messages.at(-1).type, 'saved', 'the setup queue must be released');
+    assert.deepEqual(fs.readdirSync(path.join(root, 'scratch')), []);
+  } finally {
+    clearTimeout(timer);
+    notificationAnswer.resolve(undefined);
+    await selection;
+  }
+});
+
+test('a rejected workbench picker reports its actual error and releases controls', async () => {
+  const f = fixture({ showOpenDialog: async () => { throw new Error('Folder picker unavailable.'); } });
+  const panel = await f.open();
+  await panel.receive({ action: 'openWorkbenchFolder' });
+  assert.equal(panel.messages.at(-1).type, 'operationComplete');
+  assert.equal(panel.messages.at(-1).error, 'Folder picker unavailable.');
+  await panel.receive({ action: 'save' });
+  assert.equal(panel.messages.at(-1).type, 'saved');
+});
+
+for (const outcome of ['selected', 'canceled', 'failed']) {
+  test(`package picker remains usable with an unanswered setup notification: ${outcome}`, async () => {
+    const notificationEntered = deferred(), notificationAnswer = deferred(), pickerEntered = deferred();
+    const selectedRoot = managedRoot();
+    const selectedPackage = path.join(selectedRoot, 'scratch', 'example.skill');
+    const f = fixture({
+      showOpenDialog: async options => {
+        if (options.canSelectFolders) return [{ fsPath: selectedRoot }];
+        pickerEntered.resolve(options);
+        if (outcome === 'failed') throw new Error('Native picker unavailable.');
+        return outcome === 'selected' ? [{ fsPath: selectedPackage }] : undefined;
+      },
+      showInformationMessage: async message => {
+        if (message.startsWith('Workbench ready.')) {
+          notificationEntered.resolve();
+          return notificationAnswer.promise;
+        }
+      }
+    });
+    const originalPanel = await f.open();
+    const setup = originalPanel.receive({ action: 'openWorkbenchFolder' });
+    await notificationEntered.promise;
+    const panel = f.panels.at(-1);
+    assert.notEqual(panel, originalPanel, 'setup has already rendered the usable replacement workbench');
+    let selected;
+    f.dispatchHooks.set('openPackage', async controller => {
+      // Exercise the actual host hook, including pickerRoot and showOpenDialog.
+      selected = await controller.hooks.pickPackage();
+      controller.state.notice = selected ? 'Selected package.' : 'Opening canceled.';
+    });
+    const opening = panel.receive({ action: 'openPackage' });
+    let timer;
+    try {
+      const options = await Promise.race([
+        pickerEntered.promise,
+        new Promise(resolve => { timer = setTimeout(() => resolve(undefined), 1500); })
+      ]);
+      assert(options, 'the optional unanswered notification must not block the real package picker hook');
+      assert.equal(options.title, 'Open a .skill package');
+      assert.deepEqual(options.filters, { 'Skill packages': ['skill'] });
+      assert.equal(options.canSelectFiles, true);
+      assert.equal(options.canSelectFolders, false);
+      await opening;
+      assert.equal(selected, outcome === 'selected' ? selectedPackage : undefined);
+      const completion = panel.messages.find(message => message.type === 'operationComplete');
+      assert(completion, 'selection, cancellation and picker failure must all terminate the operation');
+      assert.equal(completion.error, outcome === 'failed' ? 'Native picker unavailable.' : undefined);
+      await panel.receive({ action: 'save' });
+      assert.equal(panel.messages.at(-1).type, 'saved', 'a completed picker must release the host queue');
+    } finally {
+      clearTimeout(timer);
+      notificationAnswer.resolve(undefined);
+      await setup;
+      await opening;
+    }
+  });
+}
 
 test('settings changed during GitHub sign-in prevent dispatch to a newer destination', async () => {
   const entered = deferred(), release = deferred();

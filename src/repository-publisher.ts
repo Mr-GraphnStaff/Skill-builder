@@ -1,6 +1,7 @@
 import { workbenchGitAskpass, disposeWorkbenchGitAskpass, currentWorkbenchGitToken } from './workbench-git-auth.js';
 export { withWorkbenchGitCredentials } from './workbench-git-auth.js';
 import { assertWorkbenchPath, assertWorkbenchGitMetadata, assertWorkbenchRepository, assertRemoteDestination, containingWorkbench, isManagedWorkbench, workbenchScratch, workbenchGitEnvironment, recordOwnedWorkbenchRepository, isOwnedWorkbenchRepository } from './workbench-boundary.js';
+import { existingWorkspaceForPath, assertWorkspaceRepository } from './workspace-selection.js';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
@@ -120,12 +121,19 @@ async function git(cwd: string, args: string[]): Promise<string> {
   let managedRoot: string | undefined;
   try {
     managedRoot = containingWorkbench(cwd);
-    if (managedRoot) {
-      assertWorkbenchGitMetadata(managedRoot, cwd);
+    const existing = managedRoot ? undefined : existingWorkspaceForPath(cwd);
+    const metadataBoundary = managedRoot ?? existing?.repositoryRoot;
+    managedRoot ??= existing?.dataRoot;
+    const existingRepositoryRoot = !!existing && path.relative(existing.repositoryRoot, path.resolve(cwd)) === '';
+    const owned = !!managedRoot && !existingRepositoryRoot
+      && isOwnedWorkbenchRepository(managedRoot, cwd);
+    const preserveExistingTrust = existingRepositoryRoot && existing?.trustedRepositoryRoot === true;
+    if (managedRoot && metadataBoundary) {
+      assertWorkbenchGitMetadata(metadataBoundary, cwd);
       if (['ls-remote', 'fetch', 'push', 'clone'].includes(operation)) authentication = workbenchGitAskpass(managedRoot);
     }
-    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...(isOwnedWorkbenchRepository(managedRoot, cwd) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...args], {
-      cwd, env: managedRoot ? { ...workbenchGitEnvironment(managedRoot), ...authentication?.environment } : { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...((owned || preserveExistingTrust) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...args], {
+      cwd, env: managedRoot ? { ...workbenchGitEnvironment(managedRoot), GIT_CEILING_DIRECTORIES: metadataBoundary, ...authentication?.environment } : { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
     outcome = 'ok'; exitCode = 0; return result.stdout;
   } catch (error) {
@@ -276,6 +284,8 @@ export async function prepareRepositoryPublish(
   }
   const workspaceRoot = path.resolve(options.workspaceRoot ?? path.join(root, '..', '..', '..'));
   assertWorkbenchPath(workspaceRoot, root);
+  const existingWorkspace = existingWorkspaceForPath(workspaceRoot);
+  if (existingWorkspace) assertWorkspaceRepository(existingWorkspace, repository, options.localPath);
   if (isManagedWorkbench(workspaceRoot)) { assertRemoteDestination(repository); if (options.localPath) assertWorkbenchRepository(workspaceRoot, options.localPath); }
   const temp = workbenchScratch(workspaceRoot, 'skill-workbench-publish-');
   const checkoutPath = path.join(temp, 'repository');
@@ -292,7 +302,7 @@ export async function prepareRepositoryPublish(
       const local = await validateProjectRepositoryForPublish(repository, options.localPath);
       report(onProgress, 'Reusing your local repository to prepare an isolated submission…');
       await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--', local, checkoutPath]);
-      if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
+      if (isManagedWorkbench(workspaceRoot) || existingWorkspaceForPath(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
       await git(checkoutPath, ['remote', 'set-url', 'origin', repository]);
       report(onProgress, 'Fetching the latest destination branch; existing downloaded data is reused…');
       await git(checkoutPath, ['fetch', '--no-tags', '--refmap=', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
@@ -303,7 +313,7 @@ export async function prepareRepositoryPublish(
       report(onProgress, 'Downloading the destination repository for this submission…');
       await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
     }
-    if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
+    if (isManagedWorkbench(workspaceRoot) || existingWorkspaceForPath(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
     report(onProgress, 'Preparing the destination checkout.');
     // Prevent user/repository filters and line-ending conversions from running or
     // altering a release. info/attributes takes precedence over tracked attributes.
@@ -407,6 +417,8 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   const expected = previews.get(preview.checkoutPath);
   if (!expected) throw new Error('Publication preview expired; prepare it again.');
   assertWorkbenchPath(expected.workspaceRoot, preview.checkoutPath);
+  const existingWorkspace = existingWorkspaceForPath(expected.workspaceRoot);
+  if (existingWorkspace) assertWorkspaceRepository(existingWorkspace, expected.repository);
   if (preview.repository !== expected.repository || preview.branch !== expected.branch || preview.relativePath !== expected.relativePath || preview.skillName !== expected.skillName || preview.version !== expected.version) throw new Error('Publication destination changed after review; prepare a fresh preview.');
   if (isManagedWorkbench(expected.workspaceRoot)) { assertRemoteDestination(expected.repository); assertWorkbenchGitMetadata(expected.workspaceRoot, preview.checkoutPath); }
   const current = await inventory(path.join(preview.checkoutPath, preview.relativePath));

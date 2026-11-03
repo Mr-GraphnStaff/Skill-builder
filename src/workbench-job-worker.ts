@@ -14,7 +14,7 @@ const onMetric = (metric: WorkbenchMetric) => emitWorkbenchMetric(value => paren
 function perform(job: WorkbenchJob): unknown {
   if (!job || typeof job !== 'object') throw new Error('Choose a supported local operation.');
   if (workerData.boundaryRoot) {
-    const root = requireWorkbench(workerData.boundaryRoot);
+    const root = workerData.requireManaged !== false ? requireWorkbench(workerData.boundaryRoot) : assertWorkbenchPath(workerData.boundaryRoot, workerData.boundaryRoot);
     if ('root' in job) assertWorkbenchPath(root, job.root);
     if ('skill' in job) assertWorkbenchPath(root, job.skill.sourcePath);
     if ('directory' in job) assertWorkbenchPath(root, job.directory);

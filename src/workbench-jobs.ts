@@ -6,6 +6,7 @@ import type { WorkbenchSkill, ValidationReport, WorkbenchRelease, OpenedSkillPac
 import type { LibraryRelease, SkillChangeSummary } from './workbench-library.js';
 import type { connectedReviewReleases } from './guided-workspace.js';
 import { requireWorkbench } from './workbench-setup.js';
+import { assertWorkbenchPath } from './workbench-boundary.js';
 import type { PluginReleaseOptions, PluginRelease, GeminiRelease, PluginDirectoryReadiness } from './plugin-release.js';
 import type { ReleaseArchivePlan } from './release-archive.js';
 
@@ -51,15 +52,18 @@ const DEFAULT_TIMEOUT = 120_000;
 
 /** Execute only our installed, fixed job module. A skill never selects code to run.
  * The controller serializes state transitions, including calls to this function. */
-export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeoutMs?: number; onMetric?: WorkbenchMetricSink; boundaryRoot?: string } = {}): Promise<WorkbenchJobResult<J>> {
-  if (options.boundaryRoot) requireWorkbench(options.boundaryRoot);
+export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeoutMs?: number; onMetric?: WorkbenchMetricSink; boundaryRoot?: string; requireManaged?: boolean } = {}): Promise<WorkbenchJobResult<J>> {
+  if (options.boundaryRoot) {
+    if (options.requireManaged !== false) requireWorkbench(options.boundaryRoot);
+    else assertWorkbenchPath(options.boundaryRoot, options.boundaryRoot);
+  }
   const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > DEFAULT_TIMEOUT) return Promise.reject(new Error('Invalid local operation timeout.'));
   const metric = (value: WorkbenchMetric) => emitWorkbenchMetric(options.onMetric, { ...value, jobKind: job.kind });
   return new Promise((resolve, reject) => {
     const started = performance.now(); let readyAt: number | undefined;
     const worker = new Worker(path.join(__dirname, 'workbench-job-worker.js'), {
-      workerData: { ...job, boundaryRoot: options.boundaryRoot },
+      workerData: { ...job, boundaryRoot: options.boundaryRoot, requireManaged: options.requireManaged !== false },
       resourceLimits: { maxOldGenerationSizeMb: 384, stackSizeMb: 4 },
       // Do not propagate parent execArgv startup-module hooks.
       execArgv: []

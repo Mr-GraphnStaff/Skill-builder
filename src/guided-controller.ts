@@ -21,9 +21,11 @@ import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
 import type { ValidationReport } from './skill-workbench.js';
 import { activityForAction, actionNeedsInput, nextActivityMessage } from './guided-activity.js';
 import { selectRepositorySettings, repositoryIdentity, RepositoryConfigurationChangedError, type RepositorySettings } from './repository-settings.js';
+import { assertWorkspaceSelection, assertWorkspaceRepository, type WorkspaceSelection } from './workspace-selection.js';
 
 export type GuidedHooks = {
   enforceWorkbench?: boolean;
+  workspaceSelection?: WorkspaceSelection;
   getRepositorySettings?(): RepositorySettings;
   captureConfigurationGeneration?(): number;
   assertConfigurationGeneration?(generation: number): void;
@@ -59,6 +61,10 @@ export class GuidedWorkbenchController {
   private repositorySelection() {
     const settings = this.hooks.getRepositorySettings?.() ?? {};
     const selected = selectRepositorySettings(settings, this.savedConnection(settings));
+    if (this.hooks.workspaceSelection) {
+      assertWorkspaceSelection(this.hooks.workspaceSelection);
+      if (selected.repository) assertWorkspaceRepository(this.hooks.workspaceSelection, selected.repository, selected.localPath);
+    }
     if (this.hooks.enforceWorkbench && this.root) {
       requireWorkbench(this.root);
       if (selected.repository) {
@@ -76,7 +82,7 @@ export class GuidedWorkbenchController {
     return JSON.stringify([selected.repository ? repositoryIdentity(selected.repository) : null, selected.localPath ?? null]);
   }
   private assertReviewDestination(directory: string): void {
-    if (!this.hooks.enforceWorkbench) return;
+    if (!this.hooks.enforceWorkbench && !this.hooks.workspaceSelection) return;
     const selected = this.repositorySelection();
     const { context } = libraryReviewContext(this.workspace(), directory);
     if (!selected.repository || repositoryIdentity(selected.repository) !== repositoryIdentity(context.repository)) {
@@ -87,6 +93,8 @@ export class GuidedWorkbenchController {
   refreshRepositorySettings(): void {
     const previous = JSON.stringify(this.state.connection);
     this.state.workFolder = this.root;
+    this.state.workspaceMode = this.hooks.workspaceSelection?.kind ?? (this.hooks.enforceWorkbench && this.root ? 'managed' : undefined);
+    this.state.repositoryRoot = this.hooks.workspaceSelection?.kind === 'existing-repository' ? this.hooks.workspaceSelection.repositoryRoot : undefined;
     this.state.hasWorkspace = !!this.root;
     let saved: ReturnType<typeof getWorkspaceConnection>;
     try {
@@ -127,7 +135,7 @@ export class GuidedWorkbenchController {
       extractWrite: 'Extracted files written.', extractedReadback: 'Extracted files read back and inventoried.',
       originalPreservation: 'Original package bytes preserved.', catalogWrite: 'Draft registration saved.'
     };
-    const result = await runWorkbenchJob(job, { boundaryRoot: this.hooks.enforceWorkbench ? this.workspace() : undefined, onMetric: metric => {
+    const result = await runWorkbenchJob(job, { boundaryRoot: this.workspace(), requireManaged: !!this.hooks.enforceWorkbench, onMetric: metric => {
       this.hooks.onMetric?.(metric);
       if (this.state.busy && metric.outcome === 'ok' && phases[metric.stage]) this.activity(phases[metric.stage], 'succeeded');
     } });
@@ -162,7 +170,15 @@ export class GuidedWorkbenchController {
     try { update(await verifyProjectRepository(connection.repository, connection.localPath)); }
     catch (error) { update({ status: 'error', message: error instanceof Error ? error.message : String(error), repository: connection.repository, localPath: connection.localPath }); }
   }
-  private workspace(): string { if (!this.root) throw new Error('Create or open a SkillJetty workbench before continuing.'); if (this.hooks.enforceWorkbench) requireWorkbench(this.root); return this.root; }
+  private workspace(): string {
+    if (!this.root) throw new Error('Choose a local workspace before continuing.');
+    if (this.hooks.workspaceSelection) {
+      if (path.relative(this.hooks.workspaceSelection.dataRoot, this.root)) throw new Error('The workspace selection changed. Reopen SkillJetty.');
+      assertWorkspaceSelection(this.hooks.workspaceSelection);
+    } else if (this.hooks.enforceWorkbench) requireWorkbench(this.root);
+    assertWorkbenchPath(this.root, this.root);
+    return this.root;
+  }
   private active(): WorkbenchSkill {
     const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === this.state.active?.id);
     if (!skill) throw new Error('Choose a draft to continue editing. Your saved files have not been removed.');
@@ -340,7 +356,8 @@ export class GuidedWorkbenchController {
     catch (error) { settingsReadError = error; }
     const operationRoot = this.root;
     const beforeWrite = () => {
-      if (this.hooks.enforceWorkbench) this.workspace();
+      if (this.hooks.enforceWorkbench || this.hooks.workspaceSelection) this.workspace();
+      if (this.hooks.workspaceSelection) this.repositorySelection();
       if (['mergePullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action) && typeof message.payload?.directory === 'string') this.assertReviewDestination(message.payload.directory);
       if (settingsReadError) throw settingsReadError;
       if (operationRoot !== this.root || originalSettings !== JSON.stringify(this.hooks.getRepositorySettings?.() ?? null)) throw new RepositoryConfigurationChangedError();
@@ -354,7 +371,7 @@ export class GuidedWorkbenchController {
     const string = (key: string, fallback = '') => typeof payload[key] === 'string' ? payload[key] as string : fallback;
     this.state.error = undefined; this.state.notice = undefined;
     try {
-      if (this.hooks.enforceWorkbench && this.root) this.workspace();
+      if ((this.hooks.enforceWorkbench || this.hooks.workspaceSelection) && this.root) this.workspace();
       if (message.action !== 'save' && message.action !== 'ready') {
         this.state.busy = true;
         this.progress(activityForAction(message.action), actionNeedsInput(message.action));

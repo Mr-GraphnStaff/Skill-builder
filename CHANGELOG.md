@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.2 — existing repository recovery (pre-release candidate)
+
+- Continue an explicitly configured, previously connected Skills repository with
+  its existing drafts and saved connection. Managed workbench setup is optional;
+  existing repositories are not moved, cloned, or converted into managed layouts.
+- Keep private working files and repository paths distinct, revalidate the exact
+  saved repository and remote, and preserve Git credential and worker boundaries.
+- Show selected-folder checking and inline setup errors instead of leaving the
+  controls waiting for optional notifications.
+- Explain repository-root versus individual-skill selections and reject GitHub
+  tree/file addresses before repository operations.
+- Describe the running installed build without implying Marketplace publication.
+
 ## 0.13.2 — 2026-11-01 (public pre-release documentation correction)
 
 - Correct installation copy to SkillJetty by DAF-TECH. The publisher display name is SeñorFarris.
@@ -333,4 +346,15 @@ Channels and Release Notes wiki pages.
 - Claude public-directory advisory preflight reports exact oversized files,
   licensing/README/metadata findings and required manual portal checks without
   stripping databases or claiming directory approval.
+
+# 0.15.1 — local candidate (not published)
+
+- Keep file opening and other workbench actions responsive when the optional
+  post-setup "Workbench ready" notification is left unanswered. Opening the
+  workbench folder remains an explicit optional action; setup confirmation and
+  workbench boundary checks are preserved.
+- Verify selected, canceled and failed package-picker paths after setup while
+  the optional notification remains open.
+- Report invalid workbench selections and folder-picker failures in Activity,
+  releasing the controls without waiting for an error notification to close.
 

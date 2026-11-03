@@ -102,6 +102,30 @@ test('native pickers and account selection show human-input feedback without a p
   }
 });
 
+test('workbench setup reports the actual queued, dialog and checking phases without stealing focus', () => {
+  for (const action of ['createWorkbench', 'openWorkbenchFolder']) {
+    const h = harness({ step: 'start', active: undefined, editor: undefined });
+    const focusBefore = h.lifecycle.focusCalls;
+    h.click(action);
+    assert.match(h.posted[0].label, /^Requesting/);
+    assert.equal(h.posted[0].spinning, true, 'a request is not proof that the native chooser opened');
+    assert.equal(h.elements.get('operation-status').dataset.waitingForInput, 'false');
+    h.receive({ type: 'progress', message: 'Choose a workbench folder in VS Code.', waitingForInput: true });
+    assert.equal(h.elements.get('operation-indicator').hidden, true);
+    assert.equal(h.elements.get('operation-status').dataset.waitingForInput, 'true');
+    assert.equal(h.timers.size, 0);
+    h.receive({ type: 'progress', message: 'Checking the selected folder…', waitingForInput: false });
+    assert.equal(h.elements.get('operation-indicator').hidden, false);
+    assert.equal(h.elements.get('operation-status').dataset.waitingForInput, 'false');
+    h.receive({ type: 'operationComplete', error: 'Select an initialized workbench folder.' });
+    assert.equal(h.buttons[0].disabled, false);
+    assert.equal(h.elements.get('operation-indicator').hidden, true);
+    assert.match(h.elements.get('client-error').textContent, /Select an initialized workbench folder/);
+    assert.equal(h.timers.size, 0);
+    assert.equal(h.lifecycle.focusCalls, focusBefore, 'host phases must not move keyboard focus');
+  }
+});
+
 test('selected input starts the processing indicator and slow timer only after the explicit processing phase', () => {
   const h = harness(); h.click('openPackage');
   h.receive({ type: 'progress', message: 'Choose a package in the dialog.', waitingForInput: true });

@@ -176,12 +176,13 @@ test('workbench setup explains local folders and has explicit, cancellable setup
 });
 
 test('folder guide distinguishes drafts, local repositories, remote destination and target branch', () => {
-  const html = renderGuidedWorkbench(state({ workFolder: 'P:/Workbench/.skilljetty-prerelease',
+  const html = renderGuidedWorkbench(state({ workspaceMode: 'managed', workFolder: 'P:/Workbench/.skilljetty-prerelease',
     configuredLocalRepository: 'P:/Workbench/.skilljetty-prerelease/repositories/skills' }), nonce);
   assert.match(html, /<summary>What goes in each workbench folder\?<\/summary>/);
-  assert.match(html, /Local repository — inside repositories\//);
-  assert.match(html, /Remote repository — sharing destination/);
-  assert.match(html, /<dt>Target branch<\/dt><dd id="configured-target-branch">main<\/dd>/);
+  assert.match(html, /<dt>Working files<\/dt>/);
+  assert.match(html, /<dt>Local Git repository<\/dt>/);
+  assert.match(html, /<dt>GitHub repository<\/dt>/);
+  assert.match(html, /<dt>Branch<\/dt><dd id="configured-target-branch">main<\/dd>/);
   assert.match(html, /Opening a different project in VS Code does not choose a new destination/);
   assert.match(html, /changing settings does not clone, pull or upload/);
   assert.match(html, /<dl class="action-help"><dt><code>skills\//);
@@ -191,6 +192,25 @@ test('folder guide distinguishes drafts, local repositories, remote destination 
   assert.match(html, /This preview connects to GitHub using an HTTPS address/);
   assert.match(html, /SSH addresses, local paths and file URLs are unavailable as remote destinations/);
   assert.match(html, /Earlier edits and completed draft archives/);
+});
+
+test('an existing repository keeps normal Start and makes managed workbench setup a closed optional disclosure', () => {
+  const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository',
+    workFolder: 'P:/Projects/Skills/.skilljetty-prerelease',
+    configuredLocalRepository: 'P:/Projects/Skills', skillsLoaded: true,
+    drafts: [{ id: 'saved-draft', name: 'saved-draft' }],
+    connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' }
+  }), nonce);
+  assert.match(html, /data-action="showCreate"[^>]*>Create a new skill/);
+  assert.match(html, /data-action="openPackage"[^>]*>Open a \.skill file/);
+  assert.match(html, /Resume saved-draft/);
+  assert.match(html, /id="local-repository-path">P:\/Projects\/Skills<\/dd>/);
+  assert.match(html, /<dt>Branch<\/dt><dd id="configured-target-branch">main<\/dd>/);
+  assert.match(html, /<details id="optional-workbench-setup" class="optional" data-persist-open><summary>Manage work location \(optional\)<\/summary>/);
+  assert.doesNotMatch(html, /<details[^>]*id="optional-workbench-setup"[^>]*\sopen(?:\s|>)/);
+  assert.match(html, /Using your existing workspace\. Managed workbench setup is optional/);
+  assert.doesNotMatch(html, /Give SkillJetty a workbench|Local repository — inside repositories\/|What goes in each workbench folder/);
+  assert(html.indexOf('Choose how to start') < html.indexOf('Manage work location (optional)'));
 });
 
 test('invalid settings do not disclose rejected credentials or claim the new configuration is verified', () => {

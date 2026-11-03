@@ -73,6 +73,12 @@ function workbenchFolderGuide(): string {
       <dt><code>.skill-workbench/</code> — internal records</dt><dd>SkillJetty tracks drafts, saved connections and receipts here. Keep this folder with the workbench.</dd></dl>
     <p>Files elsewhere can be imported as read-only sources. SkillJetty blocks destinations outside this workbench, including AI-tool install folders outside it. A remote repository is an explicitly connected sharing destination, not another local work folder.</p><p>This preview connects to GitHub using an HTTPS address such as <code>https://github.com/your-org/skills.git</code> and VS Code sign-in. SSH addresses, local paths and file URLs are unavailable as remote destinations.</p><p>The workbench’s <code>README.md</code> repeats this folder guide and the first-use steps.</p><div class="button-row">${secondary('createWorkbench', 'Create another workbench')}${secondary('openWorkbenchFolder', 'Open existing workbench')}</div><p class="hint">Save your current draft and close its workbench panel before switching. Existing workbenches and their files stay in place.</p></details>`;
 }
+function optionalWorkbenchSetup(): string {
+  return `<details id="optional-workbench-setup" class="optional" data-persist-open><summary>Manage work location (optional)</summary>
+    <p>You can keep using your existing working files and local Git repository. A managed workbench is an optional separate home for drafts, repository copies, saved packages and recovery files.</p>
+    <p id="optional-workbench-help" class="hint">Create workbench reviews a new destination before creating folders. Open existing workbench selects one you already set up. Existing files and repository connections are not moved automatically.</p>
+    <div class="button-row">${secondary('createWorkbench', 'Create workbench', 'aria-describedby="optional-workbench-help"')}${secondary('openWorkbenchFolder', 'Open existing workbench', 'aria-describedby="optional-workbench-help"')}</div></details>`;
+}
 function configurationSummary(state: GuidedState): string {
   const invalid = !!state.configurationError;
   // A rejected setting may contain credentials. Show only a previously accepted
@@ -82,10 +88,10 @@ function configurationSummary(state: GuidedState): string {
   const verification = state.repositoryVerification;
   return `<section id="workbench-configuration" class="configuration-summary" aria-labelledby="configuration-heading" data-configuration-error="${invalid}">
     <div class="configuration-heading"><h2 id="configuration-heading">Configuration</h2><button type="button" id="open-settings" class="secondary settings-gear" data-action="openSettings" data-settings="true" aria-label="Open SkillJetty settings" title="Open SkillJetty settings" aria-describedby="settings-help"><span aria-hidden="true">⚙</span></button></div>
-    <dl class="configuration-values"><div><dt>Workbench folder — local write boundary</dt><dd id="active-work-folder">${escape(state.workFolder ?? 'Not selected')}</dd></div><div><dt>Local repository — inside repositories/</dt><dd id="local-repository-path">${escape(local || 'Not configured')}</dd></div><div><dt>Remote repository — sharing destination</dt><dd id="configured-repository">${escape(repository || 'Not configured')}</dd></div><div><dt>Target branch</dt><dd id="configured-target-branch">${escape(state.connection?.baseBranch || 'Detected when you verify the connection')}</dd></div>${state.githubAccount ? `<div><dt>GitHub account</dt><dd>${escape(state.githubAccount)}</dd></div>` : ''}<div><dt>Connection</dt><dd id="repository-settings-state">${invalid ? 'Needs attention' : repositoryStatusLabel(verification?.status)}</dd></div></dl>
+    <dl class="configuration-values"><div><dt>Working files</dt><dd id="active-work-folder">${escape(state.workFolder ?? 'Not selected')}</dd></div><div><dt>Local Git repository</dt><dd id="local-repository-path">${escape(local || 'Not configured')}</dd></div><div><dt>GitHub repository</dt><dd id="configured-repository">${escape(repository || 'Not configured')}</dd></div><div><dt>Branch</dt><dd id="configured-target-branch">${escape(state.connection?.baseBranch || 'Detected when you verify the connection')}</dd></div>${state.githubAccount ? `<div><dt>GitHub account</dt><dd>${escape(state.githubAccount)}</dd></div>` : ''}<div><dt>Connection</dt><dd id="repository-settings-state">${invalid ? 'Needs attention' : repositoryStatusLabel(verification?.status)}</dd></div></dl>
     <p id="repository-verification" class="hint" role="status" aria-live="polite" data-status="${invalid ? 'error' : escape(verification?.status ?? 'setupRequired')}">${invalid ? 'Settings need attention. Open SkillJetty settings to correct your folders or repository. Any saved connection shown above is not a verification of the new settings.' : escape(verification?.message ?? 'Repository verification has not completed. Local skill work is available without a repository.')}</p>
     <p id="settings-help" class="hint">Use the gear to review repository settings. Verify and Pull are separate Command Palette actions; changing settings does not clone, pull or upload. GitHub sign-in is also available in the Command Palette.</p>
-    ${state.hasWorkspace ? workbenchFolderGuide() : '<p class="hint">Choose Create workbench or Open existing workbench below before creating or editing skills. No folder is selected from your open project automatically.</p>'}</section>`;
+    ${state.hasWorkspace ? state.workspaceMode === 'managed' ? workbenchFolderGuide() : state.workspaceMode === 'existing-repository' ? '<p class="hint">Using your existing workspace. Managed workbench setup is optional.</p>' : '' : '<p class="hint">Choose a work location below before creating or editing skills. Existing folders are not adopted automatically.</p>'}</section>`;
 }
 function reviewLabel(pr?: PullRequestRecord): string {
   if (!pr) return 'Uploaded — PR not checked';
@@ -165,7 +171,8 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
       <div class="start-option">${secondary('openFolder', 'Open a skill folder', 'aria-describedby="folder-choice-help"')}<p class="hint" id="folder-choice-help">Choose a folder containing SKILL.md and any supporting files.</p></div>
       ${state.connection?.localPath ? `<div class="start-option">${secondary('openRepositorySkill', 'Open skill from project…', 'id="open-repository-skill" aria-describedby="repository-open-help"')}<p class="hint" id="repository-open-help">Copy a skill from your configured local repository into an editable draft.</p></div>` : ''}
       </div><details class="optional"><summary>Open by file path</summary><p class="hint">If the file chooser is unavailable, paste the full path to a .skill package.</p><form id="package-path-form" action="#" method="post" data-form-action="openPackagePath"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Open a package by file path</legend>${field('packagePath', 'Full package path (required)', state.form?.path ?? '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"', 'Use the complete path, including the .skill filename.')}<button type="submit" class="secondary">Open this package</button></fieldset></form></details></section>
-      ${state.connection ? `<section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">To upload later, set your repository in SkillJetty settings using the gear above.</p>'}`,
+      ${state.connection ? `<section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">To upload later, set your repository in SkillJetty settings using the gear above.</p>'}
+      ${state.workspaceMode === 'existing-repository' ? optionalWorkbenchSetup() : ''}`,
     primary: undefined
   };
 }
@@ -497,7 +504,7 @@ const script = `
     main.setAttribute('aria-busy', String(locked));
   }
   function actionMessage(action) {
-    return ({ ready: 'Opening your workbench…', createWorkbench: 'Choose and review a home for your workbench…', openWorkbenchFolder: 'Choose an existing workbench…', refresh: 'Refreshing your saved work…', loadSkills: 'Loading and checking saved skills…', unloadSkills: 'Clearing the loaded skills list…', openPackagePath: 'Opening and checking the selected skill package…', chooseWorkspace: 'Choose a folder for your beta work…',
+    return ({ ready: 'Opening your workbench…', createWorkbench: 'Requesting a folder for a new workbench…', openWorkbenchFolder: 'Requesting the existing-workbench folder chooser…', refresh: 'Refreshing your saved work…', loadSkills: 'Loading and checking saved skills…', unloadSkills: 'Clearing the loaded skills list…', openPackagePath: 'Opening and checking the selected skill package…', chooseWorkspace: 'Choose a folder for your beta work…',
       openPackage: 'Choose a skill package to open…', openFolder: 'Choose a skill folder to open…', createSkill: 'Creating your draft…',
       resume: 'Opening your draft…', restoreVersion: 'Preparing a draft from the saved release…', openFile: 'Opening the selected file…',
       addFile: 'Choose a supporting file to add…', createFile: 'Creating the new file…', reloadFile: 'Loading the saved file…',
@@ -568,7 +575,7 @@ const script = `
       document.getElementById('save-status').textContent = 'Saving locally…';
     } else {
       lockActions(true);
-      beginActivity(actionMessage(action), ['createWorkbench', 'openWorkbenchFolder', 'setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action));
+      beginActivity(actionMessage(action), ['setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action));
       if (moveToStatus) focusActivity();
       if (action === 'startAnother') { saved = {}; vscode.setState(saved); }
     }

@@ -18,7 +18,9 @@ The preview acknowledges clicks with an activity indicator and explains what is 
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.15.0** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. The header reports the running installed build. Check **Extensions** for the installed version and the linked wiki for public channel status. Switching channels changes the installed version in that profile; it does not migrate your work data.
+
+An explicitly configured, previously connected Skills repository continues with its existing connection and private `.skilljetty-prerelease` data folder. It does not need conversion to a managed workbench. **Manage work location (optional)** offers a separate managed setup when you want one. A local repository setting must identify the Git root containing `.git`; the GitHub setting must identify the repository, not an individual skill's `tree/` or `blob/` page.
 
 ## Create or open your workbench
 

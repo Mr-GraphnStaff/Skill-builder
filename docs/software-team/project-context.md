@@ -1,5 +1,36 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Existing repository recovery — November 3, 2026
+
+The owner directed repair after the optional managed-workbench feature became a
+mandatory setup gate and saved repository settings were no longer usable. This
+is a bug-fix recovery of the existing workflow, not a new product redesign.
+Avery coordinates on Codex Windows; Ishan owns compatibility and host handling,
+Mara owns UI, Lena provides independent QA, and Morgan provides independent
+security review. These are agent roles, not human acceptance.
+
+Candidate 0.15.2 restores only explicitly configured, previously saved repository
+mappings with matching Git origin/root, keeping private preview data in its
+existing child directory. No marker adoption, repository relocation, reset, or
+automatic clone is part of recovery. Managed workbenches remain optional with
+their existing restrictions. Exact-root Git operations preserve preexisting user
+trust narrowly; workers retain their data-directory boundary in both layouts.
+
+The two erroneous preview preferences identifying a skill/version folder were
+restored to the verified saved repository root and remote. Original settings and
+connection records are retained under ignored working-area recovery receipts.
+The actual repository resolver/controller tuple passed a read-only local check.
+
+The fresh catalog audit found public stable 0.12.2 and preview 0.15.0; the old
+local 0.15.1 VSIX was not public. A later gallery installation superseded the
+Default profile's local candidate. Installed files, active runtime, public
+catalog and user acceptance must be reported separately throughout this repair.
+
+Validation and delivery are still in progress. Do not describe this candidate as
+running in the user's editor, publicly available, or human-accepted until the
+corresponding evidence exists. Production and publisher-transfer decisions stay
+unchanged. See `2026-11-03-existing-repository-recovery.md` for current evidence.
+
 ## Managed workbench candidate — November 2, 2026
 
 The owner authorized this scoped feature exception for the next pre-release and
