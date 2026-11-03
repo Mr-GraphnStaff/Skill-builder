@@ -324,4 +324,10 @@
   block export without modifying the authored skill. Live account acceptance is
   separate from package checks.
 - Includes the optional managed workbench candidate; existing work is preserved.
+- Stable active plugin folders retain one current version, with prior versions in
+  Git history/local releases. Explicit older-local-release archive/restore uses
+  inventories and hashes and protects newest versions and pending uploads.
+- Claude public-directory advisory preflight reports exact oversized files,
+  licensing/README/metadata findings and required manual portal checks without
+  stripping databases or claiming directory approval.
 

@@ -4,6 +4,14 @@ Status: proposed, November 3, 2026. Documentation only; no implementation,
 Marketplace publication, organization deployment, or release-freeze exception
 is established by this proposal.
 
+Subsequent owner authorization: implement and publish the complete pre-release
+after verification, including public-directory local preflight and explicit
+local archiving. The active plugin repository folder is now `Plugins/<name>`
+(install root `Plugins/<name>/source`), updated through review PRs. Earlier
+versioned-remote-layout examples below are superseded by this decision; immutable
+local releases and Git history preserve prior versions. Portable-only paths stay
+unchanged. Existing legacy repository cleanup is never automatic.
+
 ## Goal
 
 SkillJetty by DAF-TECH should author one portable skill source and support

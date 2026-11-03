@@ -13,6 +13,27 @@ function state(overrides = {}) {
   };
 }
 
+test('older release archives require a reviewed local plan and show recoverable restore actions', () => {
+  const initial = renderGuidedWorkbench(state(), nonce);
+  assert.match(initial, /data-action="previewArchive"[^>]*>Review older saved releases/);
+  assert.doesNotMatch(initial, /data-action="archiveReleases"/);
+  const html = renderGuidedWorkbench(state({ archivePreview: { entries: [
+    { label: 'example <bundle> 1.0.0', directory: 'P:/Workbench/releases/<old>', bytes: 1024, fileCount: 3 }
+  ], skipped: ['Latest <bundle> 2.0.0 kept', 'Pending PR retained'] }, archives: [{ id: 'safe-id"', label: 'Earlier <release>' }] }), nonce);
+  assert.match(html, /id="archive-management"[^>]*open/);
+  assert.match(html, /data-action="archiveReleases" data-confirmed="true"/);
+  assert.match(html, /1,024 bytes · 3 files/);
+  assert.match(html, /P:\/Workbench\/releases\/&lt;old&gt;/);
+  assert.match(html, /Latest &lt;bundle&gt; 2.0.0 kept/);
+  assert.match(html, /data-action="restoreArchive" data-id="safe-id&quot;"/);
+  assert.match(html, /does not permanently delete them/);
+  assert.match(html, /without replacing newer work/);
+  assert.doesNotMatch(html, /data-action="archiveReleases"[^>]*data-directory|<bundle>|<old>/);
+  const empty = renderGuidedWorkbench(state({ archivePreview: { entries: [], skipped: ['Latest kept'] } }), nonce);
+  assert.match(empty, /No older releases are currently eligible/);
+  assert.doesNotMatch(empty, /data-action="archiveReleases"/);
+});
+
 test('Submit keeps portable default and exposes explicit plugin and Gemini export choices', () => {
   const html = renderGuidedWorkbench(state({ step: 'publish', active: { id: 'a', name: 'skill-a' },
     publish: { version: '1.0.0', changelog: '', fileCount: 2 } }), nonce);

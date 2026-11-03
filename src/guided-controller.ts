@@ -10,6 +10,7 @@ import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
 import { assertWorkbenchPath } from './workbench-boundary.js';
 import { initialExportOptions, readExportOptions, captureExportPreview, exportCompatibility, prepareExportPlan, type ExportPreview } from './guided-exports.js';
 import { exportRelativePath } from './plugin-release.js';
+import type { ReleaseArchivePlan } from './release-archive.js';
 import { suggestReleaseVersion } from './workbench-library.js';
 import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
@@ -46,6 +47,7 @@ export class GuidedWorkbenchController {
   private previewDestination?: string;
   private previewConfigurationGeneration?: number;
   private exportPreview?: ExportPreview;
+  private archivePlan?: ReleaseArchivePlan;
   private activitySequence = 0;
   private operationActivity?: number;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
@@ -362,6 +364,29 @@ export class GuidedWorkbenchController {
       if (message.action !== 'reloadFile') this.buffer(message);
       this.state.form = Object.fromEntries(Object.entries(payload).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
       switch (message.action) {
+        case 'previewArchive': {
+          this.archivePlan = await this.runJob({ kind: 'previewArchive', root: this.workspace() });
+          this.state.archivePreview = { entries: this.archivePlan.entries.map(({ label, directory, bytes, fileCount }) => ({ label, directory, bytes, fileCount })), skipped: this.archivePlan.skipped };
+          this.state.archives = await this.runJob({ kind: 'listArchives', root: this.workspace() });
+          this.state.step = 'start'; break;
+        }
+        case 'archiveReleases': {
+          if (payload.confirmed !== true || !this.archivePlan?.entries.length) throw new Error('Review the archive inventory and explicitly confirm it first.');
+          await this.runJob({ kind: 'archiveReleases', root: this.workspace(), plan: this.archivePlan });
+          this.archivePlan = undefined; this.state.archivePreview = undefined;
+          this.state.archives = await this.runJob({ kind: 'listArchives', root: this.workspace() });
+          this.state.notice = 'Reviewed older releases archived with their inventories and hashes. Drafts, newest versions and GitHub were unchanged.';
+          this.state.step = 'start'; if (this.state.skillsLoaded) await this.loadSkills(); break;
+        }
+        case 'restoreArchive': {
+          const id = string('id');
+          if (!this.state.archives?.some(archive => archive.id === id)) throw new Error('Choose a recorded archive from this workbench.');
+          await this.runJob({ kind: 'restoreArchive', root: this.workspace(), id });
+          this.state.archives = await this.runJob({ kind: 'listArchives', root: this.workspace() });
+          this.archivePlan = undefined; this.state.archivePreview = undefined;
+          this.state.notice = 'Archived releases restored after integrity checks. Existing paths were not overwritten.';
+          this.state.step = 'start'; if (this.state.skillsLoaded) await this.loadSkills(); break;
+        }
         case 'ready': this.refreshConnection(); break;
         case 'loadSkills': case 'refresh': this.workspace(); await this.loadSkills(); break;
         case 'unloadSkills':
@@ -599,7 +624,7 @@ export class GuidedWorkbenchController {
                 const plugin = artifact.kind === 'plugin';
                 const repo = githubRepository(connection.repository);
                 if (repo) {
-                  const prefix = plugin ? `Plugins/${encodeURIComponent(release.skillName)}/${encodeURIComponent(release.version)}` : `${encodeURIComponent(release.skillName)}/${encodeURIComponent(release.version)}`;
+                  const prefix = exportRelativePath(release).split('/').map(encodeURIComponent).join('/');
                   artifact.url = `https://github.com/${repo.fullName}/blob/${encodeURIComponent(result.publication.commit)}/${prefix}/${encodeURIComponent(path.basename(release.packagePath))}`;
                 }
                 if (release.directory === first.directory) Object.assign(this.state.receipt, receipt, { artifacts: plan.artifacts, compatibility: plan.compatibility });

@@ -55,7 +55,7 @@ test('plugin PR describes the bundle and members with correctly typed artifact l
   assert.equal(result.identityVerified, true);
   const request = m.calls.find(call => call.method === 'POST' && call.endpoint.endsWith('/pulls'));
   assert.match(request.body.body, /SkillJetty plugin version 2\.0\.0/);
-  assert.match(request.body.body, /Plugins\/team-bundle\/2\.0\.0\/source\)/);
+  assert.match(request.body.body, /Plugins\/team-bundle\/source\)/);
   assert.match(request.body.body, /team-bundle-2\.0\.0\.zip/);
   assert.match(request.body.body, /fixture-skill 1\.0\.0/); assert.match(request.body.body, /second-skill 3\.1\.0/);
   assert.doesNotMatch(request.body.body, /team-bundle-2\.0\.0\.skill/);

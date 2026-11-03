@@ -159,7 +159,7 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
   };
   return {
     title: 'What would you like to improve?', hint: 'Bring an existing skill or start with an idea. Work locally; SkillJetty handles the release numbering when you are ready to share.',
-    html: `${savedWork(state)}<section class="card start-card"><h2>Choose how to start</h2><p>No repository connection is needed to create, open, or edit a skill.</p><div class="start-choices">
+    html: `${savedWork(state)}${archiveManagement(state)}<section class="card start-card"><h2>Choose how to start</h2><p>No repository connection is needed to create, open, or edit a skill.</p><div class="start-choices">
       <div class="start-option">${secondary('showCreate', 'Create a new skill', 'aria-describedby="create-choice-help"')}<p class="hint" id="create-choice-help">Start from an idea. Write the name, purpose, and instructions.</p></div>
       <div class="start-option">${secondary('openPackage', 'Open a .skill file', 'aria-describedby="package-choice-help"')}<p class="hint" id="package-choice-help">Its instructions and supporting files become an editable draft. The original package stays preserved.</p></div>
       <div class="start-option">${secondary('openFolder', 'Open a skill folder', 'aria-describedby="folder-choice-help"')}<p class="hint" id="folder-choice-help">Choose a folder containing SKILL.md and any supporting files.</p></div>
@@ -168,6 +168,17 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
       ${state.connection ? `<section class="card"><h2>Review submitted skills</h2><p>See which uploaded versions need a PR, are awaiting review, or have been merged.</p>${secondary('checkPullRequests', 'Check PRs')}</section>` : '<p class="hint">To upload later, set your repository in SkillJetty settings using the gear above.</p>'}`,
     primary: undefined
   };
+}
+function archiveManagement(state: GuidedState): string {
+  const preview = state.archivePreview;
+  const bytes = (value: number) => Number.isSafeInteger(value) && value >= 0 ? `${value.toLocaleString()} bytes` : 'size unavailable';
+  return `<details id="archive-management" class="optional" data-persist-open ${preview || state.archives?.length ? 'open' : ''}><summary>Manage older saved releases</summary>
+    <p>Keep one active plugin version in each submission folder. Older saved releases can be moved into local recovery after you review them. Archiving preserves their files and a recovery receipt; it does not delete GitHub history, remove installed plugins, or alter a Claude organization.</p>
+    <p class="hint" id="archive-protection-help">SkillJetty protects the latest saved releases, editable drafts, and releases with pending review work. The current runtime and submission folders stay available.</p>
+    ${secondary('previewArchive', 'Review older saved releases', 'aria-describedby="archive-protection-help"')}
+    ${preview ? `<section aria-labelledby="archive-preview-heading"><h3 id="archive-preview-heading">Review before archiving</h3>${preview.entries.length ? `<ul class="artifact-results">${preview.entries.map(entry => `<li><strong>${escape(entry.label)}</strong><p>${escape(bytes(entry.bytes))} · ${escape(entry.fileCount)} files</p><p class="detail"><code>${escape(entry.directory)}</code></p></li>`).join('')}</ul>${secondary('archiveReleases', 'Archive reviewed releases', 'data-confirmed="true" aria-describedby="archive-confirmation-help"')}<p class="hint" id="archive-confirmation-help">This moves only the reviewed local release folders to recovery. It does not permanently delete them. If the reviewed files change, review a fresh plan before archiving.</p>` : '<p>No older releases are currently eligible. Nothing will be moved.</p>'}${preview.skipped.length ? `<h3>Kept in place</h3><ul>${preview.skipped.map(reason => `<li>${escape(reason)}</li>`).join('')}</ul>` : ''}</section>` : ''}
+    ${state.archives?.length ? `<section aria-labelledby="archive-restore-heading"><h3 id="archive-restore-heading">Local recovery archives</h3><ul class="work-list">${state.archives.map(archive => `<li><span>${escape(archive.label)}</span>${secondary('restoreArchive', `Restore ${archive.label}`, `data-id="${escape(archive.id)}"`)}</li>`).join('')}</ul><p class="hint">Restore brings the preserved release folders back without replacing newer work. It does not install a plugin or publish to GitHub.</p></section>` : ''}
+  </details>`;
 }
 function skillIdentity(state: GuidedState): string {
   const skill = state.active;

@@ -21,6 +21,14 @@ establishes work. No FinOps review is triggered: no new paid service is added.
 
 ## Shared acceptance contract
 
+Later owner steering requires one current active plugin folder and an archive
+provision: remote plugin destination is `Plugins/<name>` with installable source
+at `Plugins/<name>/source`; higher versions replace only a verified same-plugin
+release through review. Local older-release archive uses a reviewable inventory,
+explicit confirmation, before/after hashes, recovery receipts and collision-safe
+restore. Latest versions and pending uploads are protected. Legacy Skills-repo
+cleanup is not an automatic side effect and requires a separate migration.
+
 - Portable remains the default and retains the established path and review flow.
 - Plugin mode supports selected workbench drafts (explicitly open/import/restore
   already-authored repository or library skills first), independent bundle

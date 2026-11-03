@@ -39,10 +39,10 @@ test('plugin bundles preserve each snapshot byte-for-byte, independent versions 
       assert.deepEqual(fs.readFileSync(path.join(result.directory, 'source', 'skills', member.skillName, file.path)), original);
     }
     assert.equal(verifyPluginRelease(result.directory).manifest.packageSha256, result.manifest.packageSha256);
-    assert.equal(exportRelativePath(result), 'Plugins/team-bundle/2.1.0');
+    assert.equal(exportRelativePath(result), 'Plugins/team-bundle');
     assert.equal(verifyExportRelease(one.directory).packagePath, one.packagePath);
     assert.equal(listPluginReleaseMetadata(f.root).length, 1);
-    assert.equal(JSON.parse(fs.readFileSync(path.join(result.directory, 'marketplace-entry.json'))).source, './Plugins/team-bundle/2.1.0/source');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(result.directory, 'marketplace-entry.json'))).source, './Plugins/team-bundle/source');
     assert.equal(preparePluginRelease(f.root, options([one, two])).directory, result.directory, 'retry reuses identical prepared output');
     assert.throws(() => preparePluginRelease(f.root, options([one], { changelog: 'Different content' })), /already exists/);
     assert.equal(verifySkillRelease(one.directory).manifest.packageSha256, one.manifest.packageSha256, 'portable artifact untouched');
@@ -59,7 +59,7 @@ test('directory readiness reports exact oversized database paths while preservin
     assert.equal(report.portalRequired, true);
     const find = code => report.checks.filter(check => check.code === code);
     assert.equal(find('readme')[0].result, 'pass'); assert.equal(find('license')[0].result, 'block');
-    assert.equal(find('directory-name')[0].result, 'block'); assert.equal(find('directory-icon')[0].result, 'block');
+    assert.equal(find('directory-name')[0].result, 'block'); assert.equal(find('directory-icon')[0].result, 'warning');
     const size = find('file-size').find(check => check.paths?.includes('skills/alpha/data/hub_users.db'));
     assert.equal(size.result, 'block'); assert.match(size.message, /5\.00 MiB \(5242880 bytes\)/);
     assert.ok(find('review-size').some(check => check.paths?.includes('skills/alpha/references/policy.txt') && check.result === 'hold'));

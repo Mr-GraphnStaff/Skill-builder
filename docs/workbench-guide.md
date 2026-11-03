@@ -107,7 +107,9 @@ branches/PRs for the selected portable releases and plugin. Done shows individua
 outcomes and PR links. A partial submission retains prepared packages, drafts and
 verified upload receipts; use Check PRs before retrying. Review and merge each PR
 explicitly. Plugin releases live in `plugin-releases/`; their GitHub destination
-is `Plugins/<bundle>/<version>/`. Portable destinations are unchanged.
+is `Plugins/<bundle>/`, with the installable plugin at `Plugins/<bundle>/source`.
+Only the current bundle occupies that active folder; Git history and local
+saved releases retain older versions. Portable destinations are unchanged.
 
 Optionally request Gemini App ZIPs. SkillJetty checks documented file types and
 size limits and blocks unsupported content without deleting it. ZIPs and reports
@@ -129,10 +131,17 @@ Optional listing fields include a bundled icon path and HTTPS privacy,
 documentation and support URLs. Portal validation and security/policy review
 remain required; local readiness is not directory acceptance.
 
-For a versioned export, point the portal at `Plugins/<name>/<version>/source`,
+For a plugin export, point the portal at `Plugins/<name>/source`,
 which contains `.claude-plugin/plugin.json`, rather than a skill's release-history
-folder or its `.skill` archive. An immutable version path stays on that version;
-the portal's repository/folder identity cannot be changed after submission. A
-continuously updated directory listing therefore needs a separately maintained
-stable plugin folder or a new submission for a different folder. SkillJetty does
-not silently create or overwrite a stable deployment folder.
+folder or its `.skill` archive. Higher bundle versions update this stable folder
+through a review branch/PR. The publisher verifies that an existing active folder
+is a valid release of the same plugin before replacement. An older version-folder
+layout or unrecorded/modified content requires a separately reviewed migration.
+
+On Start, use **Review older saved releases** to see a local archive inventory.
+The newest saved release, editable drafts and pending/unverified uploads are
+protected. Confirming the reviewed inventory moves eligible older releases into
+workbench recovery with a before/after hash receipt. Restore checks integrity and
+refuses to overwrite existing files. This local archive does not delete GitHub
+folders or rewrite Git history; legacy repository cleanup is a separate reviewed
+migration. Keep the whole workbench, including recovery, in your backup.

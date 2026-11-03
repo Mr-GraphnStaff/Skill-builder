@@ -9,7 +9,8 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { currentWorkbenchMetrics, emitWorkbenchMetric } from './workbench-metrics.js';
-import { verifyExportRelease, exportRelativePath, type PluginManifest } from './plugin-release.js';
+import { verifyExportRelease, verifyPluginRelease, exportRelativePath, type PluginManifest } from './plugin-release.js';
+import { compareReleaseVersions } from './skill-identity.js';
 
 const execute = promisify(execFile);
 const previews = new Map<string, { inventory: Map<string, string>; indexTree: string; workspaceRoot: string; repository: string; branch: string; relativePath: string; skillName: string; version: string }>();
@@ -343,12 +344,31 @@ export async function prepareRepositoryPublish(
         if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe repository destination: ${part}`);
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     }
-    try {
-      const stat = await fs.lstat(destination);
-      if (!replaceExisting) throw new Error(`Version ${manifest.version} already exists in this repository.`);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('Unsafe repository version destination.');
+    let replacingActivePlugin = false;
+    const destinationStat = await fs.lstat(destination).catch(error => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (destinationStat) {
+      if (destinationStat.isSymbolicLink() || !destinationStat.isDirectory()) throw new Error('Unsafe repository version destination.');
+      if (plugin) {
+        // Only replace a verified active plugin release. Legacy version folders
+        // and unrecorded files require a separate explicit migration/cleanup.
+        let active: ReturnType<typeof verifyPluginRelease>;
+        try { active = verifyPluginRelease(destination, true); }
+        catch { throw new Error(`Existing plugin folder ${relativePath} is not a verified active release. Review a separate cleanup or migration plan; no plugin files were changed.`); }
+        const precedence = compareReleaseVersions(manifest.version, active.version);
+        if (precedence < 0) throw new Error(`Plugin ${manifest.skillName} already has active version ${active.version}. Publishing ${manifest.version} would downgrade it. Choose a strictly newer bundle version.`);
+        if (precedence === 0) {
+          const identical = equalInventory(sourceInventory, await inventory(destination));
+          throw new Error(identical
+            ? `Plugin version ${manifest.version} already exists with identical content; no upload is needed. Use the recorded submission or choose a strictly newer bundle version.`
+            : `Plugin version ${active.version} already exists with different content. Choose a strictly newer bundle version; generic replacement cannot overwrite a published plugin version.`);
+        }
+        replacingActivePlugin = true;
+      } else if (!replaceExisting) throw new Error(`Version ${manifest.version} already exists in this repository.`);
       await fs.rm(destination, { recursive: true });
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
     report(onProgress, 'Copying and checking the complete release.');
     await fs.mkdir(path.dirname(destination), { recursive: true });
     await fs.cp(root, destination, { recursive: true, errorOnExist: true, force: false });
@@ -361,7 +381,7 @@ export async function prepareRepositoryPublish(
     const files = (await git(checkoutPath, ['diff', '--cached', '--no-renames', '--name-only', '-z'])).split('\0').filter(Boolean).sort();
     const expected = [...copied.keys()].map(file => `${relativePath}/${file}`).sort();
     const outside = files.filter(file => !file.startsWith(`${relativePath}/`));
-    if (replaceExisting ? JSON.stringify(outside) !== JSON.stringify(pulledPaths) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
+    if (replaceExisting || replacingActivePlugin ? JSON.stringify(outside) !== JSON.stringify(pulledPaths) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
     const preview: PublishPreview = { checkoutPath, repository, branch, relativePath, files: expected, changedFiles: files,
       skillName: manifest.skillName, version: manifest.version,
       ...(plugin ? { kind: 'plugin' as const, members: (manifest as PluginManifest).members.map(member => ({ name: member.name, version: member.version })) } : {}) };

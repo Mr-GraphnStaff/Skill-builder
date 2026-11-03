@@ -7,12 +7,17 @@ import type { LibraryRelease, SkillChangeSummary } from './workbench-library.js'
 import type { connectedReviewReleases } from './guided-workspace.js';
 import { requireWorkbench } from './workbench-setup.js';
 import type { PluginReleaseOptions, PluginRelease, GeminiRelease, PluginDirectoryReadiness } from './plugin-release.js';
+import type { ReleaseArchivePlan } from './release-archive.js';
 
 export type WorkbenchJob =
   | { kind: 'preparePlugin'; root: string; options: PluginReleaseOptions }
   | { kind: 'prepareGemini'; root: string; directory: string }
   | { kind: 'verifyExport'; directory: string }
   | { kind: 'pluginReadiness'; directory: string }
+  | { kind: 'previewArchive'; root: string }
+  | { kind: 'archiveReleases'; root: string; plan: ReleaseArchivePlan }
+  | { kind: 'restoreArchive'; root: string; id: string }
+  | { kind: 'listArchives'; root: string }
   | { kind: 'library'; root: string; skillName?: string }
   | { kind: 'reviews'; root: string }
   | { kind: 'validate'; skill: WorkbenchSkill }
@@ -30,6 +35,10 @@ export type WorkbenchJobResult<J extends WorkbenchJob> =
   J extends { kind: 'prepareGemini' } ? GeminiRelease :
   J extends { kind: 'verifyExport' } ? WorkbenchRelease :
   J extends { kind: 'pluginReadiness' } ? PluginDirectoryReadiness :
+  J extends { kind: 'previewArchive' } ? ReleaseArchivePlan :
+  J extends { kind: 'archiveReleases' } ? string :
+  J extends { kind: 'restoreArchive' } ? void :
+  J extends { kind: 'listArchives' } ? Array<{ id: string; label: string }> :
   J extends { kind: 'openPackage' } ? OpenedSkillPackage :
   J extends { kind: 'library' } ? LibraryRelease[] :
   J extends { kind: 'reviews' } ? ReturnType<typeof connectedReviewReleases> :
@@ -37,7 +46,7 @@ export type WorkbenchJobResult<J extends WorkbenchJob> =
   J extends { kind: 'prepareRelease' | 'verifyRelease' } ? WorkbenchRelease :
   J extends { kind: 'snapshot' } ? WorkbenchSnapshot : WorkbenchSkill;
 
-const WRITING_JOBS = new Set(['openPackage', 'importPackage', 'registerFolder', 'prepareRelease', 'restoreRelease', 'preparePlugin', 'prepareGemini']);
+const WRITING_JOBS = new Set(['openPackage', 'importPackage', 'registerFolder', 'prepareRelease', 'restoreRelease', 'preparePlugin', 'prepareGemini', 'archiveReleases', 'restoreArchive']);
 const DEFAULT_TIMEOUT = 120_000;
 
 /** Execute only our installed, fixed job module. A skill never selects code to run.

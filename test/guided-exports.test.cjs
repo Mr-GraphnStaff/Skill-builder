@@ -166,8 +166,8 @@ test('plugin-only submission receipt links use the plugin tree and exact uploade
   await controller.dispatch({ action: 'updateExportOptions', payload });
   await controller.dispatch({ action: 'publish', payload }); assert.equal(controller.state.error, undefined);
   const receipt = controller.state.receipt, base = `https://github.com/example/skills`, commit = 'b'.repeat(40);
-  assert.equal(receipt.sourceUrl, `${base}/tree/${commit}/Plugins/team-notes/1.0.0/source`);
-  assert.equal(receipt.packageUrl, `${base}/blob/${commit}/Plugins/team-notes/1.0.0/team-notes-1.0.0.zip`);
-  assert.equal(receipt.changelogUrl, `${base}/blob/${commit}/Plugins/team-notes/1.0.0/CHANGELOG.md`);
+  assert.equal(receipt.sourceUrl, `${base}/tree/${commit}/Plugins/team-notes/source`);
+  assert.equal(receipt.packageUrl, `${base}/blob/${commit}/Plugins/team-notes/team-notes-1.0.0.zip`);
+  assert.equal(receipt.changelogUrl, `${base}/blob/${commit}/Plugins/team-notes/CHANGELOG.md`);
   assert.equal(receipt.artifacts[0].reviewUrl, `${base}/pull/23`);
 });

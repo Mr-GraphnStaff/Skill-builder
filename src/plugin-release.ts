@@ -149,9 +149,10 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
   const readme = bundleReadme(plugin, members);
   const directory = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-releases', plugin.name, plugin.version));
   const changelog = Buffer.from(notes + '\n', 'utf8');
+  const marketplace = json({ name: plugin.name, source: `./Plugins/${plugin.name}/source`, description: plugin.description });
   if (fs.existsSync(directory)) {
     const existing = verifyPluginRelease(directory);
-    if (!same(existing.manifest.plugin, plugin) || !same(existing.manifest.members, members) || existing.manifest.changelogSha256 !== hash(changelog) || existing.manifest.files.find(file => file.path === 'README.md')?.sha256 !== hash(readme)) throw new Error('Plugin version already exists with different content. Choose a new bundle version.');
+    if (!same(existing.manifest.plugin, plugin) || !same(existing.manifest.members, members) || existing.manifest.changelogSha256 !== hash(changelog) || existing.manifest.marketplaceSha256 !== hash(marketplace) || existing.manifest.files.find(file => file.path === 'README.md')?.sha256 !== hash(readme)) throw new Error('Plugin version already exists with different content. Choose a new bundle version.');
     return existing;
   }
   const files: CapturedFile[] = [{ path: '.claude-plugin/', bytes: Buffer.alloc(0) }, { path: '.claude-plugin/plugin.json', bytes: json(plugin) }, { path: 'README.md', bytes: readme }, { path: 'skills/', bytes: Buffer.alloc(0) }];
@@ -166,7 +167,6 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
   }
   if (files.length > MAX_FILES || files.reduce((sum, file) => sum + file.bytes.length, 0) > MAX_TOTAL) throw new Error('Plugin bundle exceeds SkillJetty packaging limits.');
   const packed = zipBytes(files);
-  const marketplace = json({ name: plugin.name, source: `./Plugins/${plugin.name}/${plugin.version}/source`, description: plugin.description });
   const manifest: PluginManifest = { kind: 'plugin', format: 1, plugin, members, skillName: plugin.name, version: plugin.version, createdAt: new Date().toISOString(), files: digests(files), packageSha256: hash(packed), changelogSha256: hash(changelog), marketplaceSha256: hash(marketplace) };
   const parent = assertWorkbenchPath(workspaceRoot, path.dirname(directory)); fs.mkdirSync(parent, { recursive: true });
   const staging = assertWorkbenchPath(workspaceRoot, path.join(parent, `.preparing-${randomUUID()}`)); fs.mkdirSync(staging);
@@ -180,18 +180,21 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
   } finally { if (fs.existsSync(staging)) { assertWorkbenchPath(workspaceRoot, staging); fs.rmSync(staging, { recursive: true }); } }
   return verifyPluginRelease(directory);
 }
-export function readPluginReleaseMetadata(directory: string): PluginRelease {
+export function readPluginReleaseMetadata(directory: string, activeDirectory = false): PluginRelease {
   directory = path.resolve(directory); assertWorkbenchPath(directory, directory);
   const file = assertWorkbenchPath(directory, path.join(directory, 'release.json'));
   const manifest = JSON.parse(fs.readFileSync(file, 'utf8')) as PluginManifest;
   if (manifest.kind !== 'plugin' || manifest.format !== 1 || !manifest.plugin || !Array.isArray(manifest.members) || !manifest.members.length || !Array.isArray(manifest.files)) throw new Error('Invalid plugin release receipt.');
   identifier(manifest.skillName); version(manifest.version);
-  if (manifest.plugin.name !== manifest.skillName || manifest.plugin.version !== manifest.version || path.basename(directory) !== manifest.version || path.basename(path.dirname(directory)) !== manifest.skillName) throw new Error('Plugin release identity does not match its directory.');
+  const matchesDirectory = activeDirectory
+    ? path.basename(directory) === manifest.skillName && path.basename(path.dirname(directory)) === 'Plugins'
+    : path.basename(directory) === manifest.version && path.basename(path.dirname(directory)) === manifest.skillName;
+  if (manifest.plugin.name !== manifest.skillName || manifest.plugin.version !== manifest.version || !matchesDirectory) throw new Error('Plugin release identity does not match its directory.');
   for (const key of ['packageSha256', 'changelogSha256', 'marketplaceSha256'] as const) if (!/^[a-f0-9]{64}$/.test(manifest[key])) throw new Error('Plugin receipt is missing valid hashes.');
   return { directory, version: manifest.version, skillName: manifest.skillName, packagePath: assertWorkbenchPath(directory, path.join(directory, `${manifest.skillName}-${manifest.version}.zip`)), manifest };
 }
-export function verifyPluginRelease(directory: string): PluginRelease {
-  const release = readPluginReleaseMetadata(directory), manifest = release.manifest;
+export function verifyPluginRelease(directory: string, activeDirectory = false): PluginRelease {
+  const release = readPluginReleaseMetadata(directory, activeDirectory), manifest = release.manifest;
   const source = assertWorkbenchPath(directory, path.join(directory, 'source'));
   const actual = inventory(source); if (!same(digests(actual), manifest.files)) throw new Error('Plugin source inventory does not match its receipt.');
   const plugin = descriptor({ ...manifest.plugin, author: manifest.plugin.author?.name, members: [], changelog: 'verification' });
@@ -231,7 +234,7 @@ export function verifyExportRelease(directory: string): WorkbenchRelease {
 }
 export function exportRelativePath(release: WorkbenchRelease): string {
   identifier(release.skillName); version(release.version);
-  return `${(release.manifest as Partial<PluginManifest>).kind === 'plugin' ? 'Plugins/' : ''}${release.skillName}/${release.version}`;
+  return (release.manifest as Partial<PluginManifest>).kind === 'plugin' ? `Plugins/${release.skillName}` : `${release.skillName}/${release.version}`;
 }
 export function listPluginReleaseMetadata(workspaceRoot: string): PluginRelease[] {
   const base = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-releases')); if (!fs.existsSync(base)) return [];

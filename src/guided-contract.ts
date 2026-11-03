@@ -54,6 +54,8 @@ export type GuidedState = {
   reviewQueueError?: string;
   githubAccount?: string;
   libraryError?: string;
+  archivePreview?: { entries: { label: string; directory: string; bytes: number; fileCount: number }[]; skipped: string[] };
+  archives?: { id: string; label: string }[];
   active?: { id: string; name: string; version?: string; versionNote?: string };
   history?: { id: string; path: string; at: string }[];
   files: { path: string; size: number; text: boolean }[];
@@ -72,5 +74,6 @@ export type GuidedState = {
 export type GuidedAction = 'ready' | 'openSettings' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
   | 'verifyRepository' | 'setRepositoryFolder' | 'pullRepository' | 'openRepositorySkill' | 'showCreate' | 'createSkill' | 'openPackage' | 'openPackagePath' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
-  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage' | 'updateExportOptions';
+  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage' | 'updateExportOptions'
+  | 'previewArchive' | 'archiveReleases' | 'restoreArchive';
 export type GuidedMessage = { action: GuidedAction; payload?: Record<string, unknown>; editorSkillId?: string; editorPath?: string; editorContent?: string };

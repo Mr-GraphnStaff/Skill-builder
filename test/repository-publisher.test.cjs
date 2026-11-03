@@ -43,17 +43,77 @@ test('publishes a plugin as a complete versioned plugin tree without changing po
     const bundle = preparePluginRelease(f.caller, { name: 'team-bundle', description: 'Team workflows', version: '2.0.0', author: 'Example Team', members: [{ directory: f.release }], changelog: 'Bundle sample 1.0.0.' });
     preview = await prepareRepositoryPublish(bundle.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller });
     assert.equal(preview.branch, 'plugins/team-bundle/2.0.0');
-    assert.equal(preview.relativePath, 'Plugins/team-bundle/2.0.0');
+    assert.equal(preview.relativePath, 'Plugins/team-bundle');
     assert.equal(preview.kind, 'plugin'); assert.deepEqual(preview.members, [{ name: 'sample', version: '1.0.0' }]);
     const originalPath = preview.relativePath; preview.relativePath = '../../elsewhere';
     await assert.rejects(pushPreparedRelease(preview), /destination changed/); preview.relativePath = originalPath;
     git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
     const uploaded = await pushPreparedRelease(preview);
     const tree = git(f.remote, 'ls-tree', '-r', '--name-only', uploaded.commit);
-    assert.match(tree, /Plugins\/team-bundle\/2\.0\.0\/source\/\.claude-plugin\/plugin\.json/);
-    assert.match(tree, /Plugins\/team-bundle\/2\.0\.0\/source\/skills\/sample\/SKILL\.md/);
+    assert.match(tree, /Plugins\/team-bundle\/source\/\.claude-plugin\/plugin\.json/);
+    assert.match(tree, /Plugins\/team-bundle\/source\/skills\/sample\/SKILL\.md/);
     assert.match(tree, /team-bundle-2\.0\.0\.zip/);
     assert.doesNotMatch(tree, /PRIVATE|STAGED/);
+  } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('a newer plugin replaces only its stable active folder and preserves the previous commit', async () => {
+  const f = fixture(); let preview;
+  const bundle = version => preparePluginRelease(f.caller, { name: 'team-bundle', description: 'Team workflows', version, members: [{ directory: f.release }], changelog: `Bundle ${version}.` });
+  try {
+    const first = bundle('2.0.0');
+    preview = await prepareRepositoryPublish(first.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller });
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const uploaded = await pushPreparedRelease(preview); await disposePublishPreview(preview); preview = undefined;
+    // Simulate the reviewed commit becoming main in this disposable bare repository.
+    git(f.remote, 'update-ref', 'refs/heads/main', uploaded.commit);
+    await assert.rejects(prepareRepositoryPublish(first.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller }), /already exists/);
+    const next = bundle('2.1.0');
+    preview = await prepareRepositoryPublish(next.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller });
+    assert.equal(preview.relativePath, 'Plugins/team-bundle');
+    const active = path.join(preview.checkoutPath, 'Plugins', 'team-bundle');
+    assert.equal(fs.existsSync(path.join(active, 'team-bundle-2.0.0.zip')), false);
+    assert.equal(fs.existsSync(path.join(active, 'team-bundle-2.1.0.zip')), true);
+    assert.ok(preview.changedFiles.includes('Plugins/team-bundle/team-bundle-2.0.0.zip'));
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const newer = await pushPreparedRelease(preview);
+    const activeTree = git(f.remote, 'ls-tree', '-r', '--name-only', newer.commit);
+    assert.match(activeTree, /Plugins\/team-bundle\/team-bundle-2\.1\.0\.zip/);
+    assert.doesNotMatch(activeTree, /team-bundle-2\.0\.0\.zip/);
+    assert.equal(JSON.parse(git(f.remote, 'show', `${uploaded.commit}:Plugins/team-bundle/release.json`)).version, '2.0.0');
+    assert.equal(fs.existsSync(first.packagePath), true, 'local immutable history remains available');
+  } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('stable plugin publication refuses to adopt or remove legacy version folders', async () => {
+  const f = fixture();
+  try {
+    const legacy = path.join(f.target, 'Plugins', 'team-bundle', '1.0.0'); fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'keep.txt'), 'Existing historical work'); git(f.target, 'add', 'Plugins'); git(f.target, 'commit', '-m', 'Legacy layout'); git(f.target, 'push', f.remote, 'main');
+    const bundle = preparePluginRelease(f.caller, { name: 'team-bundle', description: 'Team workflows', version: '2.0.0', members: [{ directory: f.release }], changelog: 'New bundle.' });
+    const originalHead = git(f.remote, 'rev-parse', 'main');
+    await assert.rejects(prepareRepositoryPublish(bundle.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller }), /cleanup or migration/);
+    assert.equal(git(f.remote, 'rev-parse', 'main'), originalHead); assert.equal(fs.readFileSync(path.join(legacy, 'keep.txt'), 'utf8'), 'Existing historical work');
+  } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('stable plugin cannot downgrade or replace same-version bytes from a fresh workbench', async () => {
+  const f = fixture(); let preview;
+  try {
+    const first = preparePluginRelease(f.caller, { name: 'team-bundle', description: 'Team workflows', version: '2.0.0', members: [{ directory: f.release }], changelog: 'First bundle.' });
+    preview = await prepareRepositoryPublish(first.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller });
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const uploaded = await pushPreparedRelease(preview); await disposePublishPreview(preview); preview = undefined;
+    git(f.remote, 'update-ref', 'refs/heads/main', uploaded.commit);
+    const fresh = path.join(f.root, 'fresh-workbench'), changedSource = path.join(f.root, 'changed-source'); fs.mkdirSync(fresh); fs.mkdirSync(changedSource);
+    fs.writeFileSync(path.join(changedSource, 'SKILL.md'), '---\nname: sample\ndescription: Different content on another workstation.\n---\nChanged instructions.\n');
+    const changedSkill = registerSkillFolder(fresh, changedSource), changed = prepareSkillRelease(fresh, changedSkill.id, '1.0.0', 'Changed snapshot.');
+    const variant = version => preparePluginRelease(fresh, { name: 'team-bundle', description: 'Team workflows', version, members: [{ directory: changed.directory }], changelog: 'Fresh workstation bundle.' });
+    await assert.rejects(prepareRepositoryPublish(variant('2.0.0').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh }), /different content.*strictly newer/s);
+    await assert.rejects(prepareRepositoryPublish(variant('1.9.9').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh }), /downgrade.*strictly newer/s);
+    await assert.rejects(prepareRepositoryPublish(first.directory, f.remote, 'main', undefined, true, { workspaceRoot: f.caller }), /identical content.*no upload/s);
+    assert.equal(git(f.remote, 'rev-parse', 'main').trim(), uploaded.commit);
+    assert.equal(JSON.parse(git(f.remote, 'show', 'main:Plugins/team-bundle/release.json')).version, '2.0.0');
   } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

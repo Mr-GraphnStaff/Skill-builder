@@ -228,7 +228,7 @@ export class GitHubReviewService {
       // No skill text or user changelog is embedded: avoid automatic mentions
       // and issue-closing instructions from imported content.
       const plugin = context.kind === 'plugin';
-      const prefix = `${plugin ? 'Plugins/' : ''}${encodeURIComponent(context.skillName)}/${encodeURIComponent(context.version)}`;
+      const prefix = plugin ? `Plugins/${encodeURIComponent(context.skillName)}` : `${encodeURIComponent(context.skillName)}/${encodeURIComponent(context.version)}`;
       const base = `https://github.com/${repo.fullName}/blob/${context.commit}/${prefix}`;
       const members = plugin ? (context.members ?? []).map(member => {
         if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(member.name) || !/^[A-Za-z0-9.+-]+$/.test(member.version)) throw new Error('Invalid plugin member identity.');
