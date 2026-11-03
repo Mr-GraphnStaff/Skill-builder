@@ -119,3 +119,14 @@ bounded summary.
   unchanged original race reproduction now passes, and the four independent
   ignored-byte adversarial checks pass again. No remaining confirmed source
   security blocker was reported; the rebuilt artifact is still required.
+- CI build 995 ran 442 checks: 440 passed, one Windows-only case skipped, and
+  one old test expected shared FETCH_HEAD to be written. The product now
+  intentionally preserves that shared record. Its corrected focused test passed,
+  proving objects were fetched while HEAD, files, and the shared record were
+  preserved and only the owned temporary ref was cleaned.
+- Settings descriptions now distinguish the saved existing-repository layout
+  from managed setup. The Default fallback root was changed narrowly from the
+  unconnected Projects parent to the verified Skills root; a separate retained
+  before-copy/hash/concurrency/readback receipt preserves every other preference
+  and all workspace overrides. This prevents an empty/new window falling back to
+  the broad parent. It does not itself update the running 0.15.0 extension.

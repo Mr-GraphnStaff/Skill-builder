@@ -72,13 +72,18 @@ test('settings changed after real Git fetch preserve the selected worktree and H
   fs.writeFileSync(path.join(remote, 'notes.txt'), 'old'); git(remote, 'add', '.'); git(remote, 'commit', '-m', 'initial');
   await managed.pullProjectRepository(root, remote, checkout);
   const head = git(checkout, 'rev-parse', 'HEAD');
+  const fetchHead = path.join(checkout, '.git', 'FETCH_HEAD');
+  const sharedFetchBefore = fs.existsSync(fetchHead) ? fs.readFileSync(fetchHead) : undefined;
   fs.writeFileSync(path.join(remote, 'notes.txt'), 'new'); git(remote, 'add', '.'); git(remote, 'commit', '-m', 'update');
   const original = publisher.repositoryGit; let fetched = false;
   publisher.repositoryGit = async (...args) => { const result = await original(...args); if (args[1].includes('fetch')) fetched = true; return result; };
   try { await assert.rejects(managed.pullProjectRepository(root, remote, checkout, undefined, () => { if (fetched) throw new Error('settings changed after fetch'); }), /settings changed after fetch/); }
   finally { publisher.repositoryGit = original; }
   assert.equal(fetched, true); assert.equal(git(checkout, 'rev-parse', 'HEAD'), head); assert.equal(fs.readFileSync(path.join(checkout, 'notes.txt'), 'utf8'), 'old');
-  assert.equal(git(checkout, 'rev-parse', 'FETCH_HEAD'), git(remote, 'rev-parse', 'HEAD'));
+  assert.equal(git(checkout, 'cat-file', '-t', git(remote, 'rev-parse', 'HEAD')), 'commit', 'fetch downloaded the incoming object');
+  if (sharedFetchBefore) assert.deepEqual(fs.readFileSync(fetchHead), sharedFetchBefore);
+  else assert.equal(fs.existsSync(fetchHead), false, 'the shared fetch record is not created');
+  assert.equal(git(checkout, 'for-each-ref', '--format=%(refname)', 'refs/skilljetty/pull/'), '', 'only the owned temporary ref was cleaned');
   // A content command discovers filter settings asynchronously before spawning.
   // Changing configuration during that read must still prevent the merge itself.
   let changedDuringDiscovery = false, secondFetch = false, merges = 0;

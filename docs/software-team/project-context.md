@@ -20,6 +20,9 @@ The two erroneous preview preferences identifying a skill/version folder were
 restored to the verified saved repository root and remote. Original settings and
 connection records are retained under ignored working-area recovery receipts.
 The actual repository resolver/controller tuple passed a read-only local check.
+The Default-profile fallback root was also narrowed from the unconnected
+Projects parent to the same verified Skills root, with its own retained backup
+and exact readback. Workspace overrides and unrelated preferences were preserved.
 
 The fresh catalog audit found public stable 0.12.2 and preview 0.15.0; the old
 local 0.15.1 VSIX was not public. A later gallery installation superseded the
