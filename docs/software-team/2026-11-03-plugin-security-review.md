@@ -203,3 +203,42 @@ The one skip and hard-link diagnostic remain physical-host fixture limitations
 (`EISDIR`), not claimed as executed enforcement evidence. Stable active-plugin
 real-Git regression and the full suite are separate coordinator/CI evidence.
 Final exact CI artifact inspection remains pending.
+
+## Final exact CI988 package inspection
+
+Package-security verdict: **ready within the reviewed scope**. Final overall
+release and publication verification remain Avery's responsibility; native smoke
+and platform functional acceptance remain separate QA evidence.
+
+- Artifact: `working/runs/ff2352c689dc4039b9ef60492d1a9a0e/ci988/skilljetty-prerelease-vsix/skill-builder-prerelease-0.15.0.vsix`.
+- SHA-256: `faac47898d3e01d8920f1eb4a66a85e9c6acae6fa762c704330d94005ce3c02f`.
+- Receipt verified against source `b834fdabc4823c6a741bbf76d5a2cc72afd9454c`,
+  build `988`, branch `refs/heads/codex/public-prerelease` and established identity
+  `DavidFarris.skill-builder`, version `0.15.0`, true pre-release channel.
+- Inspected 196 files and 62 compiled files. Required plugin, export, archive,
+  publisher, controller, UI and worker modules are included. Package manifest
+  equals the current local manifest. Working HEAD equals the receipt's source;
+  the only source-tree difference at inspection was the excluded QA document.
+- No case-duplicate payload paths, parent-traversal path components or special-file
+  attributes were found. The package inspector's development/user-state guards
+  passed. No DB/SQLite, `.skill`, nested VSIX, recovery, scratch, working or local
+  plugin/Gemini release payload was present.
+
+Initial strict raw compiled comparison failed for exactly
+`extension/out/guided-workbench-html.js`; that failed probe remains recorded at
+`working/runs/8ace8da05ea44e02a1c5592421134673`. It was investigated rather than
+waived: CI has 106,390 bytes and zero CRLF pairs, while the Windows local output
+has 106,910 bytes and 520 CRLF pairs. Replacing CRLF with LF yields identical
+complete text, with no remaining line differences. The other 61 compiled files
+match byte-for-byte. This is evidence of a line-ending-only UI-template
+difference, not a claim that the complete local and CI packages are byte-identical.
+
+The full package probe then passed with that single explained comparison rule:
+`working/runs/2ff998347a6a425886a33162232fdbdb`, command and owner launcher exit 0.
+All identity, receipt, digest, payload exclusion and remaining byte comparisons
+remained strict. The approved artifact is the exact CI VSIX above, not a rebuilt
+local package. Native smoke should install that artifact.
+
+No material package security blocker remains. This review does not assert
+security scanning, authenticated Claude/Gemini tenant acceptance, human UAT or
+screen-reader acceptance, and does not itself establish Marketplace publication.

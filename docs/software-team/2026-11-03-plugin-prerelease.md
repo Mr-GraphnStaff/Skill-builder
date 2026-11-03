@@ -1,6 +1,7 @@
 # Pre-release 0.15.0 — plugin submissions and Gemini ZIP export
 
-State: implementation and verification in progress; publication not yet verified.
+State: implementation/review complete; 0.15.0 uploaded, public package bytes
+verified, Marketplace catalog validation/visibility pending.
 
 ## Authority and alignment
 
@@ -88,3 +89,69 @@ Recovery uses retained drafts/releases/receipts and a higher-numbered repair or
 explicit previous-version selection. No resets, user-folder deletion or automatic
 data migration. Human screen-reader/UAT and account-installed state require their
 own evidence and cannot be inferred from a package or catalog result.
+
+## Exact CI candidate — build 988
+
+- Source: `b834fdabc4823c6a741bbf76d5a2cc72afd9454c` on the existing public
+  pre-release branch; version `0.15.0`, existing public identity.
+- CI compile/full suite: **415 passed, 0 failed, 0 skipped**. Build stage passed.
+  Production dependency audit: zero vulnerabilities. Packaging-tool audit:
+  six moderate findings, no high/critical; existing high-severity gate passed.
+- Exact CI VSIX SHA-256:
+  `faac47898d3e01d8920f1eb4a66a85e9c6acae6fa762c704330d94005ce3c02f`.
+  Receipt binds source, build 988, identity and pre-release channel. Downloaded
+  artifact independently matched that digest. Initial download endpoint returned
+  HTML and was rejected; the API-provided artifact download URL supplied the ZIP.
+- Local official Claude CLI 2.1.300 strict validation passed on a generated
+  two-member plugin with zero manifest errors/warnings. This alone does not prove
+  organization deployment or public-directory acceptance.
+- Exact artifact native Extension Host and independent package security review
+  remain pending here; no publication claim follows from the passed Build stage.
+- Earlier build 987 failed three workflow tests and did not publish. Portable
+  reveal compatibility and the selector-aware submit harness were corrected;
+  targeted rerun passed 16/16 before build 988. Interrupted/superseded local test
+  runs remain retained and are not counted as passes.
+
+## Exact artifact release reviews
+
+- Morgan's independent package verdict: ready within reviewed scope. 196 files,
+  62 compiled modules; 61 compiled files match local bytes exactly. The sole
+  HTML-template module differs only by 520 CRLF bytes, with complete normalized
+  text equality proven. No user databases, packages, working/recovery or local
+  export payload is included. The approved package remains the exact CI VSIX.
+- Lena's independent native verdict: ready within automated scope. Isolated
+  installed payload parity passed for all 194 payload files (only installer
+  `package.json.__metadata` excluded). Real VS Code Insiders 1.145.0 Extension
+  Host passed, exit 0: explicit workbench setup, confined operations, two-skill
+  Both plus Gemini (five artifacts), unchanged member bytes, and archive preview,
+  confirmation and restore with newest/draft preservation and hash equality.
+  Evidence: `working/runs/ce6af76ae3814c21b1d3068ad83ec848/native/native-final-receipt.json`.
+- Stable VS Code's existing updater mutex blocked its first native launch;
+  preserved that failed attempt and used the retained official isolated
+  Insiders runtime instead. No user updater/process was reset or interrupted.
+- Native physical junction/hardlink fixtures were unavailable on P: (`EISDIR`).
+  CI's 415-case Linux suite had no skips. Human GUI/screen-reader acceptance,
+  working-profile installed state, live SSO and Claude/Gemini tenant execution
+  remain unperformed. Reviews are assignment-specific, not human UAT.
+
+## Upload and catalog reconciliation
+
+Configured approval `dcf6403b-5ee0-4b24-8050-a08aae2fa839` was bound to build 988
+through its timeline and approval owner, then recorded through the configured
+account under the lead's explicit publication instruction. Its evidence-bearing
+comment identifies Codex as the executing agent and distinguishes automated
+review from human acceptance. No gate was bypassed.
+
+Build 988 uploaded once at 16:11 UTC. Its eleven catalog reads exceeded the
+five-minute verification window; the build's publication check failed rather
+than claiming visibility. Anonymous independent download at 16:16 UTC matched
+the approved SHA-256 exactly, including every installed payload file:
+`working/runs/9f9886486b1c4ba4b05e2f3f5f7f5168/reports/public-payload.json`.
+
+Read-only reconciliation build 989 is bound to original build 988, with Build
+and Publish skipped and upload disabled. No repeat upload is authorized by a
+visibility timeout. At 16:19 UTC public latest-channel queries still offered
+validated preview 0.13.2 and stable 0.12.2. Current pending status is published
+in wiki commit `e1eb31d`. The packaged README/changelog were prepared before
+publication; later source documentation points to the wiki for current status.
+These documentation-only follow-ups do not alter the approved CI988 artifact.

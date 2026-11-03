@@ -2,9 +2,10 @@
 
 Research date: November 3, 2026, America/Chicago.
 
-Decision status: research and recommendations. No feature implementation,
-account-policy changes, deployment, installation or publication performed.
-This report informs [the export proposal](dual-export-feature-spec.md).
+This research-stage report informed [the export proposal](dual-export-feature-spec.md).
+Subsequent implementation and release evidence is tracked in the
+[assignment ledger](software-team/2026-11-03-plugin-prerelease.md) and public wiki.
+The research itself made no account-policy or deployment changes.
 
 ## Finding
 

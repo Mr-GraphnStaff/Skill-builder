@@ -4,7 +4,7 @@
 
 Install the stable release of **SkillJetty by DAF-TECH** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace listing and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-The **0.15.0 pre-release** adds explicit Portable skill, Claude plugin, or Both exports, multi-skill bundles with independent versions, GitHub submission/review, and optional Gemini App ZIPs with compatibility reports. It also includes the optional managed workbench: drafts, local Git repositories, saved releases, scratch, recovery and diagnostics stay inside it. Existing work is preserved and is not adopted or moved automatically. Publication is being prepared and is not yet verified. Production remains unchanged.
+The **0.15.0 pre-release** adds explicit Portable skill, Claude plugin, or Both exports, multi-skill bundles with independent versions, GitHub submission/review, and optional Gemini App ZIPs with compatibility reports. It also includes the optional managed workbench: drafts, local Git repositories, saved releases, scratch, recovery and diagnostics stay inside it. Existing work is preserved and is not adopted or moved automatically. Consult the [Release Channels wiki](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels) for current publication and verification status. Production remains unchanged.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 

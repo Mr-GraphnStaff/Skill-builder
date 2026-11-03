@@ -313,7 +313,10 @@
 - Legacy external-folder installation and mutation commands are unavailable in
   this candidate. Production and Marketplace versions are unchanged by preparation.
 
-# 0.15.0 — pre-release (publication pending verification)
+# 0.15.0 — pre-release
+
+Current publication and verification status is recorded in the public Release
+Channels and Release Notes wiki pages.
 
 - Explicit Portable skill, Claude plugin and Both export choices at Submit.
 - Multi-skill Claude bundles with independent versions, unchanged member bytes,
