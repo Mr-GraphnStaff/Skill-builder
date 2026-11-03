@@ -2,6 +2,53 @@
 
 ## Active usability and plugin repair — November 3, 2026
 
+### Verified delivery: preview 0.15.3
+
+The repair is publicly delivered and installed in the Default profile. This is
+automated verification, not owner usability acceptance. The running user window
+was left untouched and has not been confirmed to have loaded the new extension.
+Production remains 0.12.2; the Beta profile and pending publisher transfer were
+not changed. The historical pending observations below describe intermediate
+states, not the final result.
+
+- Reviewed runtime source: `77a9453da3da096870ea5b10c3a9eaae0c6be3e3`, CI1002.
+  VSIX SHA-256: `b42064865bbab93825b31e6d7b3c8d749c200e9b388aaa1b3a9661b665b7eced`.
+  CI ran 471 tests: 470 passed, zero failed, one Windows-only skip on Linux.
+  Production audit: zero vulnerabilities; packaging tooling: six moderate,
+  configured gate passed. Earlier failed CI1000/1001 are retained below.
+- Independent exact-artifact security review passed:
+  `working/runs/e56642b870e14c908fad88b9018eb5ae/reports/security-artifact-review.json`.
+  The exact installed native artifact passed 35 scripted transitions and three
+  first-save plugin ZIPs, with 196-file parity:
+  `working/runs/4c557109da294b6ca741c865b17efce8/native/native-final-receipt.json`.
+  Eight browser cases passed against that installed artifact:
+  `working/runs/d1d71e2014b244e2ab51e9e33a25b439/reports/browser-integration.json`.
+  Local repository opening made zero remote attempts. Human GUI, screen-reader,
+  live authentication/upload and Claude/Gemini app acceptance were not performed.
+- CI1002 uploaded once at 20:24:54 UTC. Its publish stage remains failed because
+  the catalog deadline expired; exact public payload matched while validation
+  was pending. Read-only reconciliation1003 succeeded, with upload disabled:
+  `working/runs/5907918305cf4cb49976c629d3487d87/reports/reconcile-result.json`.
+  Independent anonymous verification at 20:32:48 UTC confirmed validated latest
+  preview 0.15.3, stable 0.12.2, and identical public package bytes:
+  `working/runs/042df9570abd4b558ac1e6a9b93c42aa/reports/public-verification.json`.
+  Bounded actual-runtime channel-switch cases both passed:
+  `working/runs/5b5324fb15714516859d2d0c72727ccc/reports/channel-switch.json`.
+- Official gallery installation updated Default from 0.15.2 to 0.15.3. All 196
+  installed payload files matched the reviewed public artifact. The CLI reset
+  the preferred channel field; only the recorded pre-release/pin preferences
+  were restored after guarded readback, with before/after records retained:
+  `working/runs/695cfe42f2d143b4a191b681ba057f13/reports/default-gallery-install.json`.
+  Both pre-release fields are true, pin preserved. No user-window reload occurred.
+- Wiki commit `2f9d552` updates eight pages, including a four-step plugin guide.
+  Fresh anonymous readback confirmed Getting Started, Home, Release Channels and
+  Release Notes published content. This documentation follow-up does not change
+  the artifact's source binding above.
+
+No user repository, alpha-10 root, draft or connection was adopted, migrated,
+reset, pulled or otherwise rewritten during this repair. Release source's
+pre-existing `.gitignore`, `.vscodeignore` and `AGENTS.md` changes remain untouched.
+
 The owner rejected the confusing instructions after 0.15.2: the plugin choice
 was hidden at Submit and a fresh alpha-10 local workbench led with a generic
 configuration wall. Prior automated delivery is not owner usability acceptance.
