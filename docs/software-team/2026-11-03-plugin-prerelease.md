@@ -1,7 +1,7 @@
 # Pre-release 0.15.0 — plugin submissions and Gemini ZIP export
 
-State: implementation/review complete; 0.15.0 uploaded, public package bytes
-verified, Marketplace catalog validation/visibility pending.
+State: complete with stated acceptance limits. Public pre-release 0.15.0
+validated/latest, exact public package verified, production unchanged at 0.12.2.
 
 ## Authority and alignment
 
@@ -155,3 +155,25 @@ validated preview 0.13.2 and stable 0.12.2. Current pending status is published
 in wiki commit `e1eb31d`. The packaged README/changelog were prepared before
 publication; later source documentation points to the wiki for current status.
 These documentation-only follow-ups do not alter the approved CI988 artifact.
+
+## Final public verification — 16:21 UTC
+
+Read-only reconciliation **989 succeeded** against original build 988, with no
+upload. Build 988 retains its failed catalog-timeout result. Independent anonymous
+latest-channel query at 16:21:21 UTC returned **0.15.0 validated/prerelease** and
+**0.12.2 validated/stable**, with the preview numerically newer. Evidence:
+`working/runs/6450c4cb7be041eabc85f00435ba1688/reports/catalog-latest.json`.
+Independent `verify-public` passed catalog identity/channel/validation plus
+exact package bytes and installed payload parity at
+`working/runs/ced2c847f34f4e5e80aa2c303e553b9c`.
+
+Both switch actions passed using the actual retained VS Code Insiders toggle
+class and fresh catalog in isolated installed-descriptor/allowed-policy fixtures:
+stable 0.12.2 -> preview, and preview 0.15.0 -> release. Evidence:
+`working/runs/dd871c745f10469d8c0c6b8f83c0f0ce/reports/channel-switch.json`.
+This is automated action eligibility, not human UI or working-profile evidence.
+
+Release verdict: delivered within the authorized public pre-release scope.
+No production promotion, publisher-identity migration, organization-policy
+change, external database dependency or legacy Skills-repository cleanup was
+performed. Vendor tenant/directory acceptance and human UAT remain separate.

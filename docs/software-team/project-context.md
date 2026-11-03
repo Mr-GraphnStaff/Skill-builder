@@ -169,3 +169,14 @@ unchanged. Software Team 1.0.16: Avery integration/release; Ishan core/publisher
 Mara UI; Morgan independent security; Lena independent QA/accessibility and
 coordinator review. Evidence and status: [assignment ledger](2026-11-03-plugin-prerelease.md).
 No new paid services or organization-policy changes are part of this scope.
+
+November 3 delivery: public preview **0.15.0** is validated/latest; stable remains
+**0.12.2**. Build 988 uploaded the reviewed source `b834fdabc4823c6a741bbf76d5a2cc72afd9454c`;
+415/415 CI tests, independent exact-package security review, 194 installed-file
+parity and real Extension Host Both/Gemini plus archive/restore checks passed.
+Its catalog timeout remains a failed result; read-only reconciliation 989
+succeeded without another upload. Anonymous exact public bytes and latest
+channel flags were verified. The actual runtime action class passed both switch
+eligibility fixtures. See the assignment ledger for digests, raw evidence and
+unperformed human/tenant checks. Documentation-only follow-ups preserve the
+original approved artifact and source binding.
