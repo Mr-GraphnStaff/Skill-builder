@@ -204,7 +204,7 @@ Mara UI; Morgan independent security; Lena independent QA/accessibility and
 coordinator review. Evidence and status: [assignment ledger](2026-11-03-plugin-prerelease.md).
 No new paid services or organization-policy changes are part of this scope.
 
-November 3 delivery: public preview **0.15.0** is validated/latest; stable remains
+Earlier November 3 delivery: public preview **0.15.0** was validated/latest; stable remained
 **0.12.2**. Build 988 uploaded the reviewed source `b834fdabc4823c6a741bbf76d5a2cc72afd9454c`;
 415/415 CI tests, independent exact-package security review, 194 installed-file
 parity and real Extension Host Both/Gemini plus archive/restore checks passed.
@@ -214,3 +214,14 @@ channel flags were verified. The actual runtime action class passed both switch
 eligibility fixtures. See the assignment ledger for digests, raw evidence and
 unperformed human/tenant checks. Documentation-only follow-ups preserve the
 original approved artifact and source binding.
+
+November 3 recovery delivery: public preview **0.15.2** is now validated/latest;
+stable remains **0.12.2**. CI997 source `9dada073445b2ce4661c31a2bc61f8a2fbb7b414`
+passed 441 tests with zero failures and one Linux skip; native Windows scripted
+workflow and exact 196-file parity passed. CI997 uploaded once and timed out
+waiting for catalog visibility; read-only reconciliation998 succeeded without
+upload. The actual Default profile now has the exact gallery preview with both
+pre-release metadata fields true. The user window was not reloaded. Existing
+repository settings and optional setup are restored, and all work/recovery
+records remain preserved. See [recovery ledger](2026-11-03-existing-repository-recovery.md)
+for digests, backups, failed fixture/CLI attempts, evidence and acceptance limits.

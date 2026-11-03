@@ -1,5 +1,114 @@
 # Existing repository recovery — November 3, 2026
 
+## Delivery verified
+
+**Default now has official gallery preview 0.15.2. Stable remains 0.12.2.**
+Existing work stays in `P:\Projects\Skills` and its saved private preview folder;
+accepted existing setups open ordinary Start with managed setup optional.
+
+At **19:05:19 UTC**, an independent fresh public catalog read confirmed 0.15.2
+as the validated latest preview and 0.12.2 as latest stable. The downloaded public
+VSIX was byte-for-byte identical to the reviewed CI997 artifact. Both channel
+switch action fixtures passed against the actual installed VS Code action class;
+this is eligibility evidence, not a human click on the user's desktop.
+
+The original CI997 Publish step remains failed for its catalog deadline.
+Read-only reconciliation **998 succeeded**, validating original source/build and
+public payload without another upload. No pipeline 11 production publication ran.
+
+The actual Default gallery installation passed **196-file parity** and reports
+`source: gallery`, `isPreReleaseVersion: true`, `preRelease: true`. The first
+version-specific CLI install unexpectedly changed only the preferred channel to
+release despite installing a pre-release payload. A subsequent same-version CLI
+request was a no-op. Inspection of the installed VS Code implementation confirmed
+that its normal toggle updates profile metadata when payload and preference
+already differ. Recovery restored only that boolean to the user's recorded prior
+pre-release preference, with an AST edit, full before-copy, concurrency hash,
+all-other-values assertion and readback. No extension source or package bytes
+were changed by this metadata correction.
+
+Final evidence under `working/runs/`:
+
+- Public package/catalog: `b9c753069a3d450ebe56e5af35af09fd/reports/public-verification.json`.
+- Channel eligibility: `ec1adf5a5a2e46b49908d71a36bb7341/reports/channel-switch.json`.
+- Read-only reconciliation: `55418283b44043c59c34ad6c6cf74917/reports/reconcile-result.json`.
+- Original timed-out publication log: `b7edbbd6fc9142d8aa0d4f67cdd6a230/reports/build-997-22.log`.
+- Native combined receipt: `4bb74110189c40b488536bc6c5a12d10/native/native-final-receipt.json`.
+- Preferred-channel backup/repair: `eaca2b8494084f1c85b05292ced41c4c/reports/preview-preference-repair.json`.
+- Actual Default gallery/parity: `95aab877dfed447d807f640e3fe136fe/reports/default-gallery-install.json`.
+
+**Remaining user action:** save open edits and run **Developer: Reload Window**
+in the existing Default window, then open SkillJetty. The running user window was
+not reloaded or declared accepted. The separate Beta profile was preserved;
+its earlier local candidate is not a public release. Human GUI, screen-reader,
+live GitHub authentication and an actual user-repository Pull remain unperformed.
+
+The following sections preserve candidate verification and recovery chronology;
+earlier pending statuses and failed attempts are historical evidence.
+
+## Final candidate binding
+
+CI build **997** built source `9dada073445b2ce4661c31a2bc61f8a2fbb7b414`
+as public-identity preview **0.15.2**. Its Build stage passed: **441 passed,
+zero failed, one Windows-only case skipped**. The skipped case-only collision
+fixture was exercised in the focused Windows real-Git checks. Production audit
+found zero vulnerabilities; packaging tooling retained six moderate findings
+and passed the configured high-severity gate.
+
+Reviewed VSIX SHA-256:
+`143d2f98a06051c60c9ca00f244f25b54002eb0d1ebd1da83aec486ef9f8861e`.
+The receipt binds source, branch, build, identity and pre-release flag. Independent
+security review matched all 32 compiled modules and 32 source maps to the reviewed
+runtime, checked all 196 payload files and package exclusions, and reported no
+confirmed blocker. This paragraph records candidate verification, not publication.
+
+The actual Default settings now select `P:\Projects\Skills`, its saved preview
+data under `.skilljetty-prerelease`, the root GitHub Skills repository, and main.
+Retained before-copies and concurrency/hash/readback receipts are under managed
+runs `629c6413d055472494ef322555b3ec39` and
+`2256c4eacdf44f42ad087422926701c9`. Workspace overrides and other preferences were
+preserved. No user-repository Pull, reset, checkout, commit, push, or migration
+was performed as part of this recovery.
+
+Raw final CI logs: `working/runs/26c304d336754ee5aa8f4b38ead4c328/reports/`.
+Reviewed artifact: `working/runs/6d1f3f20735c4d92b2ae84af527dfce7/reviewed-artifact/`.
+Independent security: `working/runs/6cb7efef48d24763842ba238879fc9e0/reports/security-readiness.json`.
+
+The first final-artifact native attempt reached the registered Start command,
+correct existing connection and optional setup UI, then failed because QA had
+constructed a catalog using `format` instead of the required `version` field.
+That failed process exit and fixture are preserved; the product rejection was
+correct. A fresh fixture uses the owning reader to preflight the supported
+schema. Native completion and public delivery are recorded below only after
+their actual checks finish.
+
+The corrected-catalog attempt subsequently completed create/check/save, then
+failed a harness assertion that incorrectly expected `active.sourcePath` in the
+UI projection. The owning catalog record carries that path; the UI intentionally
+does not. QA retained this attempt and corrected the assertion to resolve the
+actual record by its active ID, require containment, and compare imported binary
+bytes. These harness failures do not count as successful native runs.
+
+The fresh native run `4bb74110189c40b488536bc6c5a12d10/native` passed the real
+Extension Host workflow with actual process exit zero. It exercised the exact
+196-file verified CI997 package: registered existing-workspace startup, create,
+check, local save, import with binary-byte preservation, and managed-mode
+create/check/save. Actual Electron workers reported validate, snapshot, library,
+prepareRelease and openPackage execution. Incremental progress, final assertions,
+input/config/HEAD hashes and the process exit record are retained. Only automatic
+repository verification was stubbed in this disposable fixture; no human GUI,
+screen-reader, interactive sign-in, remote upload or actual user-repository Pull
+acceptance is implied. The isolated Microsoft Insiders runtime was hidden and
+used its own profile, extensions, caches and logs; no user editor was reloaded.
+
+CI997 uploaded 0.15.2 once at **18:57:23 UTC**. Its Publish step then failed its
+five-minute public-catalog deadline after eleven reads, despite each downloaded
+public payload matching the approved artifact. That is a retained failed result,
+not a green delivery assertion. Read-only pipeline **998** targets the original
+997 artifact, with publishing disabled; it does not rebuild or upload the version.
+Latest-channel validation and the actual Default gallery installation remain
+pending until independently recorded below.
+
 ## Required behavior
 
 - Open an explicitly configured, previously saved Skills repository directly in
