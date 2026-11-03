@@ -59,7 +59,7 @@ function inspectPrerelease(bytes) {
   const flags = [...xml.matchAll(/<Property\b([^>]*?)\/?\s*>/g)].map(item => attributes(item[1])).filter(item => item.Id === 'Microsoft.VisualStudio.Code.PreRelease');
   assert(flags.length === 1 && flags[0].Value?.toLowerCase() === 'true', 'Public pre-release requires one true pre-release flag');
   for (const item of zip.getEntries()) {
-    assert(!/^extension\/(?:\.git\/|\.vscode\/|\.vscode-test\/|\.skilljetty-(?:beta|prerelease)\/|\.skill-workbench\/|workbench\/|releases\/|dist\/|src\/|test\/|AGENTS\.md$|azure-pipelines(?:-beta)?\.yml$|scripts\/ci\/|scripts\/benchmark-|docs\/software-team\/|docs\/(?:beta-|prerelease-)?delivery\.md$)/i.test(item.entryName), 'Public pre-release contains development, pipeline or user state');
+    assert(!/^extension\/(?:\.git\/|\.vscode\/|\.vscode-test\/|\.skilljetty-(?:beta|prerelease)\/|\.skill-workbench\/|workbench\/|working\/|releases\/|plugin-releases\/|gemini-releases\/|dist\/|src\/|test\/|AGENTS\.md$|azure-pipelines(?:-beta)?\.yml$|scripts\/ci\/|scripts\/benchmark-|docs\/software-team\/|docs\/(?:beta-|prerelease-)?delivery\.md$)/i.test(item.entryName), 'Public pre-release contains development, pipeline or user state');
     assert(!/\.log$/i.test(item.entryName), 'Public pre-release contains a log file');
   }
   payloadInventory(bytes);

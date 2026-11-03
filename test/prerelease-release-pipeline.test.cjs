@@ -39,6 +39,13 @@ test('public pre-release receipt binds exact artifact to source, branch and curr
   fs.appendFileSync(path.join(directory, receipt.file), 'changed');
   assert.throws(() => verifyArtifact(directory), /SHA-256 mismatch/);
 });
+test('public pre-release rejects owner scratch and exported user bundles independently of packaging ignores', () => {
+  for (const directory of ['working', 'plugin-releases', 'gemini-releases']) {
+    assert.throws(() => inspectPrerelease(archive({ extra: { [`extension/${directory}/private-skill/SKILL.md`]: 'private user content' } })), /user state/);
+    assert.throws(() => inspectPrerelease(archive({ extra: { [`extension/${directory.toUpperCase()}/private.json`]: '{}' } })), /user state/);
+  }
+  assert.equal(inspectPrerelease(archive({ extra: { 'extension/out/plugin-release.js': 'packaged runtime code' } })).name, 'skill-builder');
+});
 test('public metadata must identify exact publisher, version and pre-release channel', () => {
   const metadata = { extensionName: 'skill-builder', publisher: { publisherName: 'DavidFarris' }, versions: [{ version: '0.11.4', properties: [{ key: 'Microsoft.VisualStudio.Code.PreRelease', value: 'true' }] }] };
   assert.equal(publicVersion(metadata, '0.11.4').version, '0.11.4');

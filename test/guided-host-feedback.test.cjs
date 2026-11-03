@@ -2,6 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const Module = require('node:module');
+const fs = require('node:fs');
+const { createWorkbench } = require('../out/workbench-setup.js');
+const scratch = require('./working-fixture.cjs').workingFixture('host-feedback');
+fs.mkdirSync(scratch, { recursive: true });
+const fixtureRoots = [];
+function managedRoot() { const root = fs.mkdtempSync(path.join(scratch, 'workbench-')); fixtureRoots.push(root); return createWorkbench(root); }
+test.after(() => { for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true }); });
 
 function deferred() {
   let resolve;
@@ -10,13 +17,14 @@ function deferred() {
 }
 
 function fixture(options = {}) {
+  const root = options.root ?? managedRoot();
   const panels = [], controllers = [], commands = new Map(), events = [], dispatchHooks = new Map(), settings = new Map(), updates = [];
   let configurationListener;
   const disposable = () => ({ dispose() {} });
   class Controller {
     constructor(root, hooks) {
       this.root = root; this.hooks = hooks;
-      this.state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
+      this.state = { step: 'start', hasWorkspace: !!root, workFolder: root, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
       controllers.push(this);
     }
     async verifyRepository() { events.push({ type: 'repository-check', controller: this }); }
@@ -28,12 +36,18 @@ function fixture(options = {}) {
   }
   const vscode = {
     ViewColumn: { One: 1 },
+    Uri: { file: fsPath => ({ scheme: 'file', fsPath }) },
     ConfigurationTarget: { Workspace: 2 },
+    authentication: { async getSession(...args) { events.push({ type: 'authentication', args }); return options.getSession?.(...args); } },
     commands: { registerCommand(id, handler) { commands.set(id, handler); return disposable(); }, async executeCommand(...args) { events.push({ type: 'native-command', args }); } },
-    workspace: { textDocuments: [], workspaceFolders: [], onDidSaveTextDocument: disposable,
+    workspace: { async openTextDocument(uri) { return { uri }; }, textDocuments: [], workspaceFolders: [], onDidSaveTextDocument: disposable,
       onDidChangeConfiguration(listener) { configurationListener = listener; return disposable(); },
       getConfiguration() { const snapshot = options.configurationSnapshots ? new Map(settings) : settings; return { inspect: key => snapshot.has(key) ? { workspaceValue: snapshot.get(key) } : { defaultValue: '' }, get: key => snapshot.get(key) ?? '', async update(key, value, target) { if (value === undefined) settings.delete(key); else settings.set(key, value); updates.push({ key, value, target }); configurationListener?.({ affectsConfiguration: candidate => candidate === `skillBuilder.${key}` }); await options.onUpdate?.(key, value); } }; } },
     window: {
+      async showOpenDialog(...args) { events.push({ type: 'folder-picker', args }); return options.showOpenDialog?.(...args); },
+      async showInformationMessage(...args) { events.push({ type: 'information', args }); return options.showInformationMessage?.(...args); },
+      async showErrorMessage(...args) { events.push({ type: 'error-dialog', args }); },
+      async showTextDocument(document) { events.push({ type: 'log-opened', document }); },
       createOutputChannel() { return { appendLine: line => events.push({ type: 'log', line }), show() { events.push({ type: 'log-opened' }); }, dispose() {} }; },
       registerWebviewViewProvider: disposable,
       createWebviewPanel() {
@@ -56,9 +70,10 @@ function fixture(options = {}) {
       return originalLoad.call(this, id, parent, main);
     };
     require(file).activateGuidedWorkbench({ subscriptions: [], extensionPath: path.resolve(__dirname, '..'),
-      extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: options.getRoot ?? (async () => path.resolve('fake-prerelease-data')) });
+      extension: { packageJSON: { displayName: 'SkillJetty — Public pre-release', version: '0.11.4' } } }, { getRoot: options.getRoot ?? (async () => root) });
   } finally { Module._load = originalLoad; delete require.cache[file]; }
-  return { panels, controllers, commands, events, dispatchHooks, vscode, settings, updates,
+  return { root, panels, controllers, commands, events, dispatchHooks, vscode, settings, updates,
+    logs() { const file = path.join(root, 'logs/performance.log'); return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n') : []; },
     changeConfiguration(key, value) { settings.set(key, value); configurationListener({ affectsConfiguration: target => target === `skillBuilder.${key}` }); },
     async open() { await commands.get('skillBuilder.openWorkbench')(); return panels.at(-1); } };
 }
@@ -140,8 +155,8 @@ test('host separates waiting for input from processing and records bounded memor
   await panel.receive({ action: 'openPackage' });
   assert.equal(panel.messages[0].waitingForInput, true);
   assert(panel.messages.some(message => message.message === 'Checking the selected package…' && message.waitingForInput === false));
-  assert(f.events.some(event => event.type === 'log' && /action=OpenWorkbench durationMs=\d+ hostHeapUsedBytes=\d+/.test(event.line)));
-  assert(f.events.some(event => event.type === 'log' && /hostHeapDeltaBytes=-?\d+ hostExternalBytes=\d+/.test(event.line)));
+  assert(f.logs().some(line => /action=OpenWorkbench durationMs=\d+ hostHeapUsedBytes=\d+/.test(line)));
+  assert(f.logs().some(line => /hostHeapDeltaBytes=-?\d+ hostExternalBytes=\d+/.test(line)));
 });
 
 test('a disposed controller cannot send progress, completion or page content to its replacement panel', async () => {
@@ -177,7 +192,7 @@ test('diagnostics can open immediately while a serialized task is pending', asyn
   assert.equal(panel.messages.some(message => message.type === 'operationComplete'), false);
   assert.equal(f.events.some(event => event.type === 'dispatch' && event.action === 'openPerformanceLog'), false);
   release.resolve(); await operation;
-  const metrics = f.events.filter(event => event.type === 'log' && event.line.startsWith('{')).map(event => JSON.parse(event.line));
+  const metrics = f.logs().filter(line => line.startsWith('{')).map(line => JSON.parse(line));
   const total = metrics.find(metric => metric.stage === 'operationTotal');
   assert(total && /^[a-f0-9-]{36}$/.test(total.operationId));
   assert(metrics.some(metric => metric.stage === 'pickerWait' && metric.operationId === total.operationId));
@@ -190,7 +205,7 @@ test('reopened panel starts a separate diagnostics context while an old task fin
   f.dispatchHooks.set('check', async controller => { entered.resolve(); await release.promise; controller.hooks.onMetric({ stage: 'editorPreparation', durationMs: 1 }); });
   const operation = first.receive({ action: 'check' }); await entered.promise;
   first.close(); const replacement = await f.open();
-  const metrics = () => f.events.filter(event => event.type === 'log' && event.line.startsWith('{')).map(event => JSON.parse(event.line));
+  const metrics = () => f.logs().filter(line => line.startsWith('{')).map(line => JSON.parse(line));
   const startup = metrics().filter(metric => metric.stage === 'webviewRender').at(-1);
   assert.equal(startup.action, 'startup');
   release.resolve(); await operation;
@@ -202,8 +217,8 @@ test('reopened panel starts a separate diagnostics context while an old task fin
 
 
 test('pull protects unsaved documents only inside the selected local repository', async () => {
-  const localPath = path.resolve('selected-skills-project');
-  const f = fixture({ connection: { repository: 'https://github.com/example/skills', localPath } }), panel = await f.open();
+  const root = managedRoot(), localPath = path.join(root, 'repositories/selected-skills-project');
+  const f = fixture({ root, connection: { repository: 'https://github.com/example/skills', localPath } }), panel = await f.open();
   let saved = 0, unrelated = 0;
   f.vscode.workspace.textDocuments.push(
     { isDirty: true, uri: { scheme: 'file', fsPath: path.join(localPath, 'notes/SKILL.md') }, async save() { saved++; return false; } },
@@ -260,28 +275,16 @@ test('a work-folder change during asynchronous opening never creates a stale con
   assert.equal(f.controllers.length, 0); assert.equal(f.panels.length, 0); assert.equal(f.updates.length, 0);
 });
 
-test('startup seeds only unset preview Workspace keys and rolls them back if the work folder changes', async () => {
-  const entered = deferred(), release = deferred();
-  const f = fixture({ configurationSnapshots: true, connection: { repository: 'https://github.com/example/skills', localPath: path.resolve('selected-repository') },
-    onUpdate: async (key, value) => { if (key === 'prerelease.repositoryUrl' && value !== undefined) { entered.resolve(); await release.promise; } } });
-  f.vscode.workspace.workspaceFolders.push({ uri: { fsPath: path.resolve('opened-work-folder') } });
-  const opening = f.open(); await entered.promise;
-  f.changeConfiguration('projectRoot', path.resolve('different-work-folder')); release.resolve();
-  await assert.rejects(opening, /work-folder setting changed while opening/);
+test('startup preserves saved connection without writing settings into the ambient project', async () => {
+  const root = managedRoot();
+  const saved = { repository: 'https://github.com/example/skills', localPath: path.join(root, 'repositories/skills') };
+  const f = fixture({ root, connection: saved, configurationSnapshots: true });
+  f.vscode.workspace.workspaceFolders.push({ uri: { fsPath: path.resolve('unrelated-open-project') } });
+  await f.open();
   assert.equal(f.settings.has('prerelease.repositoryUrl'), false);
   assert.equal(f.settings.has('prerelease.localRepositoryPath'), false);
-  assert.equal(f.controllers.length, 0);
-  assert(f.updates.every(update => update.target === f.vscode.ConfigurationTarget.Workspace));
-});
-
-test('startup reacquires native settings snapshots after prefilling each saved connection field', async () => {
-  const saved = { repository: 'https://github.com/example/skills', localPath: path.resolve('selected-repository') };
-  const f = fixture({ connection: saved, configurationSnapshots: true });
-  f.vscode.workspace.workspaceFolders.push({ uri: { fsPath: path.resolve('opened-work-folder') } });
-  await f.open();
-  assert.equal(f.settings.get('prerelease.repositoryUrl'), saved.repository);
-  assert.equal(f.settings.get('prerelease.localRepositoryPath'), saved.localPath);
-  assert.equal(f.updates.length, 2); assert(f.updates.every(update => update.target === f.vscode.ConfigurationTarget.Workspace));
+  assert.deepEqual(f.updates, []);
+  assert.equal(f.controllers[0].hooks.getRepositorySettings().repositoryUrl, undefined);
 });
 
 test('Palette repository actions capture the current in-panel edit before dispatch', async () => {
@@ -319,8 +322,8 @@ test('obsolete webview setup messages cannot create repositories or overwrite na
 });
 
 test('Pull protects unsaved documents in newly configured B instead of cached repository A', async () => {
-  const oldPath = path.resolve('selected-repository-a'), newPath = path.resolve('selected-repository-b');
-  const f = fixture({ connection: { repository: 'https://github.com/example/a', localPath: oldPath } }), panel = await f.open();
+  const root = managedRoot(), oldPath = path.join(root, 'repositories/a'), newPath = path.join(root, 'repositories/b');
+  const f = fixture({ root, connection: { repository: 'https://github.com/example/a', localPath: oldPath } }), panel = await f.open();
   f.settings.set('prerelease.repositoryUrl', 'https://github.com/example/b');
   f.settings.set('prerelease.localRepositoryPath', newPath);
   let savedOld = 0, savedNew = 0;
@@ -336,8 +339,8 @@ test('Pull protects unsaved documents in newly configured B instead of cached re
 });
 
 test('settings changed during an external save cannot hand Pull a newer unchecked destination', async () => {
-  const localPath = path.resolve('selected-b'), entered = deferred(), release = deferred();
-  const f = fixture(), panel = await f.open();
+  const root = managedRoot(), localPath = path.join(root, 'repositories/b'), entered = deferred(), release = deferred();
+  const f = fixture({ root }), panel = await f.open();
   f.settings.set('prerelease.repositoryUrl', 'https://github.com/example/b');
   f.settings.set('prerelease.localRepositoryPath', localPath);
   f.vscode.workspace.textDocuments.push({ isDirty: true, uri: { scheme: 'file', fsPath: path.join(localPath, 'SKILL.md') }, async save() { entered.resolve(); await release.promise; return true; } });
@@ -345,7 +348,7 @@ test('settings changed during an external save cannot hand Pull a newer unchecke
   const action = panel.receive({ action: 'pullRepository', editorSkillId: 'sample', editorPath: 'SKILL.md', editorContent: 'Newer in-panel edit' });
   await entered.promise;
   f.changeConfiguration('prerelease.repositoryUrl', 'https://github.com/example/c');
-  f.changeConfiguration('prerelease.localRepositoryPath', path.resolve('selected-c'));
+  f.changeConfiguration('prerelease.localRepositoryPath', path.join(root, 'repositories/c'));
   release.resolve(); await action; await new Promise(resolve => setImmediate(resolve));
   assert(!f.events.some(event => event.type === 'dispatch' && event.action === 'pullRepository'));
   assert.match(f.controllers[0].state.error, /Settings changed while preparing/);
@@ -363,4 +366,149 @@ test('reopening the command after a root change preserves the active editor docu
   assert.equal(f.panels.length, 1); assert.equal(panel.htmlWrites, before);
   assert(panel.messages.some(message => message.type === 'configurationChanged' && message.display.invalid));
   assert.equal(f.controllers[0].state.active.id, 'sample');
+});
+
+
+test('cancelled workbench setup releases the original panel without creating folders', async () => {
+  const f = fixture(), panel = await f.open();
+  const before = fs.readdirSync(path.join(f.root, 'scratch'));
+  await panel.receive({ action: 'createWorkbench' });
+  assert.equal(f.panels.length, 1);
+  assert.equal(panel.messages.at(-1).type, 'operationComplete');
+  assert.deepEqual(fs.readdirSync(path.join(f.root, 'scratch')), before);
+  await panel.receive({ action: 'check' });
+  assert(f.events.some(event => event.type === 'dispatch' && event.action === 'check'));
+});
+
+test('an active draft refuses a workbench switch and releases the panel controls', async () => {
+  const f = fixture(), panel = await f.open();
+  f.controllers[0].state.active = { id: 'preserved-draft', name: 'preserved-draft' };
+  const before = fs.readdirSync(path.join(f.root, 'scratch'));
+  await panel.receive({ action: 'openWorkbenchFolder' });
+  assert.equal(f.events.filter(event => event.type === 'folder-picker').length, 0);
+  assert(f.events.some(event => event.type === 'information' && /close the workbench panel/.test(event.args[0])));
+  assert.equal(panel.messages.at(-1).type, 'operationComplete');
+  assert.equal(f.controllers[0].state.active.id, 'preserved-draft');
+  assert.deepEqual(fs.readdirSync(path.join(f.root, 'scratch')), before);
+  await panel.receive({ action: 'save' });
+  assert(f.events.some(event => event.type === 'dispatch' && event.action === 'save'));
+});
+
+test('changing settings while the setup picker is open prevents folder creation', async () => {
+  const entered = deferred(), release = deferred();
+  const f = fixture({ showOpenDialog: async () => { entered.resolve(); return release.promise; } }), panel = await f.open();
+  const destination = path.join(f.root, 'scratch', '.skilljetty-prerelease');
+  const action = panel.receive({ action: 'createWorkbench' }); await entered.promise;
+  f.changeConfiguration('prerelease.repositoryUrl', 'https://github.com/new/skills');
+  release.resolve([{ fsPath: path.join(f.root, 'scratch') }]); await action;
+  assert.equal(fs.existsSync(destination), false);
+  assert(f.events.some(event => event.type === 'error-dialog' && /changed while setup was open/.test(event.args[0])));
+  assert(panel.messages.some(message => message.type === 'operationComplete'));
+  assert.equal(f.panels.length, 1);
+});
+
+test('changing settings during the setup confirmation prevents folder creation', async () => {
+  const entered = deferred(), release = deferred();
+  let root;
+  const f = fixture({ showOpenDialog: async () => [{ fsPath: path.join(root, 'scratch') }],
+    showInformationMessage: async (_message, details) => { if (details?.modal) { entered.resolve(); return release.promise; } } });
+  root = f.root; const panel = await f.open();
+  const destination = path.join(root, 'scratch', '.skilljetty-prerelease');
+  const action = panel.receive({ action: 'createWorkbench' }); await entered.promise;
+  f.changeConfiguration('projectRoot', path.join(root, 'different-selection'));
+  release.resolve('Create workbench'); await action;
+  assert.equal(fs.existsSync(destination), false);
+  assert(f.events.some(event => event.type === 'error-dialog' && /changed while setup was open/.test(event.args[0])));
+  assert(panel.messages.some(message => message.type === 'operationComplete'));
+  assert.equal(f.panels.length, 1);
+});
+
+test('concurrent native setup commands serialize their folder pickers', async () => {
+  const entered = deferred(), release = deferred(); let pickers = 0;
+  const f = fixture({ showOpenDialog: async () => { if (++pickers === 1) { entered.resolve(); return release.promise; } } }), panel = await f.open();
+  const first = f.commands.get('skillBuilder.createWorkbench')(); await entered.promise;
+  const second = f.commands.get('skillBuilder.openWorkbenchFolder')();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(pickers, 1, 'the second setup must not open a competing picker');
+  release.resolve(undefined); await first; await second;
+  assert.equal(pickers, 2);
+  assert.equal(f.panels.length, 1);
+  assert.equal(panel.messages.filter(message => message.type === 'operationComplete').length, 2);
+  assert.deepEqual(fs.readdirSync(path.join(f.root, 'scratch')), []);
+});
+
+test('settings changed during GitHub sign-in prevent dispatch to a newer destination', async () => {
+  const entered = deferred(), release = deferred();
+  const f = fixture({ getSession: async () => { entered.resolve(); return release.promise; } }), panel = await f.open();
+  f.controllers[0].state.configuredRepository = 'https://github.com/example/original';
+  f.events.length = 0;
+  const action = panel.receive({ action: 'verifyRepository' }); await entered.promise;
+  f.changeConfiguration('prerelease.repositoryUrl', 'https://github.com/example/new-destination');
+  release.resolve({ accessToken: 'test-session-token' }); await action;
+  assert.equal(f.events.some(event => event.type === 'dispatch' && event.action === 'verifyRepository'), false);
+  assert.match(f.controllers[0].state.error, /changed during GitHub sign-in/);
+  assert(panel.messages.some(message => message.type === 'operationComplete' && message.error));
+});
+
+
+test('an invalid external repository setting never autosaves its documents or blocks local Check', async () => {
+  const f = fixture(), panel = await f.open();
+  const outsideRepository = path.join(scratch, 'unrelated-repository');
+  f.settings.set('prerelease.repositoryUrl', 'https://github.com/example/skills');
+  f.settings.set('prerelease.localRepositoryPath', outsideRepository);
+  let outsideSaves = 0, draftSaves = 0;
+  f.vscode.workspace.textDocuments.push(
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(outsideRepository, 'SKILL.md') }, async save() { outsideSaves++; return true; } },
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(f.root, 'skills/local-draft/SKILL.md') }, async save() { draftSaves++; return true; } }
+  );
+  f.events.length = 0;
+  await panel.receive({ action: 'check' });
+  assert.equal(outsideSaves, 0, 'an invalid configured repository cannot authorize saving an outside document');
+  assert.equal(draftSaves, 1, 'the legitimate local draft remains saveable');
+  assert(f.events.some(event => event.type === 'dispatch' && event.action === 'check'));
+  assert.equal(f.controllers[0].state.error, undefined);
+  assert(panel.messages.some(message => message.type === 'operationComplete' && !message.error));
+});
+
+test('an explicit root setting supersedes a workbench selected earlier through setup', async () => {
+  const workbenchA = managedRoot(), workbenchB = managedRoot();
+  let configuredRoot;
+  const f = fixture({ getRoot: async () => configuredRoot, showOpenDialog: async () => [{ fsPath: workbenchA }] });
+  const initialPanel = await f.open();
+  assert.equal(f.controllers.at(-1).root, undefined);
+  await initialPanel.receive({ action: 'openWorkbenchFolder' });
+  const selectedPanel = f.panels.at(-1);
+  assert.equal(f.controllers.at(-1).root, workbenchA);
+  assert.notEqual(selectedPanel, initialPanel);
+  configuredRoot = workbenchB;
+  f.changeConfiguration('projectRoot', workbenchB);
+  await new Promise(resolve => setImmediate(resolve));
+  selectedPanel.close();
+  const reopened = await f.open();
+  assert.notEqual(reopened, selectedPanel);
+  assert.equal(f.controllers.at(-1).root, workbenchB, 'the old in-memory setup selection must not override a later explicit setting');
+  assert.equal(f.controllers.at(-1).state.workFolder, workbenchB);
+  assert(fs.existsSync(path.join(workbenchA, '.skilljetty-workbench.json')), 'the former workbench stays intact');
+  assert(fs.existsSync(path.join(workbenchB, '.skilljetty-workbench.json')));
+  assert.deepEqual(f.updates, [], 'switching does not write ambient project settings');
+});
+
+
+test('a missing workbench marker sends a terminal error without dispatch, autosave or replacing unsaved edits', async () => {
+  const f = fixture(), panel = await f.open();
+  const baselineRenders = panel.htmlWrites;
+  let internalSaves = 0, outsideSaves = 0;
+  f.vscode.workspace.textDocuments.push(
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(f.root, 'skills/sample/SKILL.md') }, async save() { internalSaves++; return true; } },
+    { isDirty: true, uri: { scheme: 'file', fsPath: path.join(scratch, 'unrelated-project/SKILL.md') }, async save() { outsideSaves++; return true; } }
+  );
+  fs.unlinkSync(path.join(f.root, '.skilljetty-workbench.json'));
+  f.events.length = 0; panel.messages.length = 0;
+  await panel.receive({ action: 'check', editorSkillId: 'sample', editorPath: 'SKILL.md', editorContent: 'Latest unsaved work must stay in the editor.' });
+  assert.equal(f.events.some(event => event.type === 'dispatch'), false);
+  assert.equal(internalSaves, 0); assert.equal(outsideSaves, 0);
+  const completion = panel.messages.find(message => message.type === 'operationComplete');
+  assert(completion, 'a rejected write boundary must release the client action lock');
+  assert.match(completion.error, /missing|damaged/i);
+  assert.equal(panel.htmlWrites, baselineRenders, 'a boundary failure must not replace the document containing the unpersisted editor buffer');
 });

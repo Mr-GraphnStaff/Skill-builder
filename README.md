@@ -4,7 +4,7 @@
 
 Install the stable release of **SkillJetty by DAF-TECH** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace listing and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-The **0.13.2 public preview** puts setup in VS Code **Extension Settings**, opened by the workbench gear. The workbench shows a compact read-only configuration summary. It retains the reviewed publication fix from stable **0.12.1**, keeps preview work isolated in `.skilljetty-prerelease` beneath your work folder, and remains newer than stable for channel switching. No stable or local-beta data is automatically moved. Import a package explicitly when you want a separate preview copy. Preview test results do not establish native accessibility or human UAT acceptance.
+The **0.15.0 pre-release** adds explicit Portable skill, Claude plugin, or Both exports, multi-skill bundles with independent versions, GitHub submission/review, and optional Gemini App ZIPs with compatibility reports. It also includes the optional managed workbench: drafts, local Git repositories, saved releases, scratch, recovery and diagnostics stay inside it. Existing work is preserved and is not adopted or moved automatically. Publication is being prepared and is not yet verified. Production remains unchanged.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -18,27 +18,19 @@ The preview acknowledges clicks with an activity indicator and explains what is 
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.13.1** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. On the preview channel, confirm the **Public pre-release 0.15.0** banner before editing. Switching channels changes the installed version in that profile; it does not migrate your work data. Use a separate VS Code profile for an isolated evaluation alongside a protected stable setup.
 
-## Set up using the gear
+## Create or open your workbench
 
-Open the workbench gear, or the extension's gear → **Extension Settings**, and choose **Workspace** for this project's paths. Set **Project Root** to your editing work folder, or leave it blank when that folder is already open. Set **Prerelease: Repository URL** to the sharing destination and **Prerelease: Local Repository Path** to its local Git root containing `.git`. That Git folder is separate from the work folder holding drafts. Do not put credentials in a repository address.
+Choose **Create workbench** and select its parent folder. Review the exact `.skilljetty-prerelease` destination and folder descriptions, then confirm. Setup accepts a new or empty folder and creates a readable `README.md`. It does not clone, pull, upload or move existing files. **Open existing workbench** accepts a previously initialized workbench; an ordinary opened project is never adopted automatically.
 
-Existing saved preview connections are preserved and prefilled into unset Workspace repository fields when possible; explicit User/Workspace choices are not replaced. An explicitly empty repository URL disconnects new sharing. An explicitly empty local path disables local reuse while still permitting upload through an isolated temporary download. Resetting an unconfigured field can retain the existing per-work-folder association.
+[The complete folder guide](docs/workbench-folders.md) explains what belongs in every folder and how local and remote repositories connect. You can create and save a skill package without GitHub. Importing an outside folder or package makes a copy inside the workbench; the original remains unchanged.
 
-Saving settings does not pull, clone, create repositories, sign in or upload. Use **Ctrl+Shift+P** (macOS **Cmd+Shift+P**) for explicit **SkillJetty: Verify Skills Repository**, **Pull Skills Repository**, **Open Skill from Repository**, **Connect GitHub Account**, or **Create GitHub Repository** commands. Creation asks for name/visibility and confirmation; set the resulting address in Settings to use it. The gear remains available while work is running. Work-folder changes preserve the current draft until you save and reopen the workbench; repository changes require a fresh sharing summary before upload.
+Open the gear for **Extension Settings** when ready to share. Set **Prerelease: Repository URL** to a GitHub HTTPS address, with no embedded credentials. The default local copy is `repositories/skills` inside the workbench. An optional custom local path must remain inside `repositories/`. An explicit blank disables local reuse; an unset value uses the default or the saved association. Outside repository folders, linked paths, SSH and local-file remotes are unavailable in this candidate.
 
-The three older integration settings remain available but do not relocate guided drafts or releases. See the [settings and folder guide](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Settings-and-Repository-Setup) for the complete field reference, examples and diagrams.
+Saving settings does not clone, pull or upload. Run **SkillJetty: Pull Skills Repository** to create or update the local copy deliberately; **Verify Skills Repository** checks the local/remote identity and detected default branch. Use **Connect GitHub Account** for VS Code sign-in. Configuration displays the workbench, local repository, remote and target branch separately. Review the destination and changed files again before uploading. Git commits prepared by this candidate identify the SkillJetty bot explicitly.
 
-Choose how to start, then follow the highlighted **Next step** action:
-
-1. **Start:** choose **Create a new skill**, **Open a .skill file**, or **Open a skill folder**. You can also resume saved work. A repository connection is needed only when you are ready to publish.
-2. **Edit:** write the skill's instructions and edit its supporting files in the workbench. Add text files or copy existing assets. Changes save locally.
-3. **Sanity check:** check required metadata, identity and package structure. Fix structural problems before continuing. Security scanning is not performed by SkillJetty; use dedicated scanners for detailed content and execution-risk review.
-4. **Submit:** review the detected file changes and managed release number. Add optional context, then save a package on this computer. To share through GitHub, connect a repository and choose **Upload & create PR**. You can optionally choose a reviewer; requesting review notifies that person. A manual release-number override is available under Advanced.
-5. **Done:** open the pull request or the source, `.skill` and changelog links. Use **Check status** to refresh review progress. Choose **Work on another skill** when finished.
-
-No terminal commands or Git branch names are needed for normal use. The extension detects the repository's actual default branch. Git credentials and repository access still need to work on your machine.
+SkillJetty never writes settings automatically into the currently opened project. Save and close the current workbench panel before switching workbenches. Existing folders stay in place. The older external-folder installation commands are unavailable in this pre-release. VS Code still manages its own settings, credentials and session data; this is an application write boundary, not an OS sandbox.
 
 ## What is saved in the repository?
 

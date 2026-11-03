@@ -302,3 +302,26 @@
 - Preserve selected-file metadata and error-message text contrast; keep warning/error meaning in words alongside color.
 - Review the rendered workflow across light, dark, high-contrast dark/light and forced-colors variants, including narrow layouts.
 
+# 0.14.0 — local pre-release candidate (awaiting owner approval)
+
+- Optional Create/Open Workbench setup with an exact destination preview, folder
+  guide and generated README. Existing work is preserved and imports are copied.
+- Confine SkillJetty-owned local work to its explicitly initialized workbench,
+  including local repositories, temporary preparation, recovery and diagnostics.
+- Display local repository, GitHub HTTPS remote and detected target branch
+  separately. Block outside/linked destinations and Git metadata redirects.
+- Legacy external-folder installation and mutation commands are unavailable in
+  this candidate. Production and Marketplace versions are unchanged by preparation.
+
+# 0.15.0 — pre-release (publication pending verification)
+
+- Explicit Portable skill, Claude plugin and Both export choices at Submit.
+- Multi-skill Claude bundles with independent versions, unchanged member bytes,
+  member hashes, release notes and marketplace catalog handoff.
+- Plugin GitHub review branches/PRs, saved receipts, explicit merge and safe
+  cleanup; individual outcomes remain visible for partial Both submissions.
+- Optional Gemini App ZIP export and compatibility reports; unsupported files
+  block export without modifying the authored skill. Live account acceptance is
+  separate from package checks.
+- Includes the optional managed workbench candidate; existing work is preserved.
+

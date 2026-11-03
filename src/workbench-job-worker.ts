@@ -1,15 +1,28 @@
 import { parentPort, workerData } from 'node:worker_threads';
+import { requireWorkbench } from './workbench-setup.js';
+import { assertWorkbenchPath } from './workbench-boundary.js';
 import { openSkillPackage, importSkillPackage, registerSkillFolder, validateWorkbenchSkill, prepareSkillRelease, verifySkillRelease } from './skill-workbench.js';
 import { listLibraryReleases, summarizeFileChanges, restoreLibraryRelease } from './workbench-library.js';
 import { connectedReviewReleases } from './guided-workspace.js';
 import type { WorkbenchJob, WorkbenchSnapshot } from './workbench-jobs.js';
 import { emitWorkbenchMetric, measureWorkbenchPhase, type WorkbenchMetric } from './workbench-metrics.js';
+import { preparePluginRelease, prepareGeminiRelease, verifyExportRelease, assessPluginDirectoryReadiness } from './plugin-release.js';
 
 const onMetric = (metric: WorkbenchMetric) => emitWorkbenchMetric(value => parentPort?.postMessage({ type: 'metric', metric: value }), metric);
 
 function perform(job: WorkbenchJob): unknown {
   if (!job || typeof job !== 'object') throw new Error('Choose a supported local operation.');
+  if (workerData.boundaryRoot) {
+    const root = requireWorkbench(workerData.boundaryRoot);
+    if ('root' in job) assertWorkbenchPath(root, job.root);
+    if ('skill' in job) assertWorkbenchPath(root, job.skill.sourcePath);
+    if ('directory' in job) assertWorkbenchPath(root, job.directory);
+  }
   switch (job.kind) {
+    case 'preparePlugin': return preparePluginRelease(job.root, job.options);
+    case 'prepareGemini': return prepareGeminiRelease(job.root, job.directory);
+    case 'verifyExport': return verifyExportRelease(job.directory);
+    case 'pluginReadiness': return assessPluginDirectoryReadiness(job.directory);
     case 'library': return measureWorkbenchPhase('libraryScan', onMetric, () => listLibraryReleases(job.root, job.skillName, { verifyPayload: false }));
     case 'reviews': return connectedReviewReleases(job.root);
     case 'validate': return measureWorkbenchPhase('skillValidation', onMetric, () => validateWorkbenchSkill(job.skill));

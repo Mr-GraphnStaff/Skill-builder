@@ -6,7 +6,8 @@ import { RepositoryConfigurationChangedError } from './repository-settings.js';
 
 export type GitHubRequest = { method: 'GET' | 'POST' | 'PUT'; endpoint: string; body?: unknown; beforeWrite?: () => void };
 export type GitHubRunner = (request: GitHubRequest) => Promise<unknown>;
-export type ReviewContext = { repository: string; baseBranch: string; branch: string; commit: string; skillName: string; version: string };
+export type ReviewContext = { repository: string; baseBranch: string; branch: string; commit: string; skillName: string; version: string;
+  kind?: 'plugin'; members?: Array<{ name: string; version: string }>; bundles?: Array<{ name: string; version: string }> };
 type Repository = { owner: string; name: string; fullName: string };
 const loginPattern = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 const statuses = new Set(['uploaded', 'awaiting_review', 'changes_requested', 'approved', 'merged', 'closed', 'unknown', 'unsupported']);
@@ -226,13 +227,22 @@ export class GitHubReviewService {
       if (ref?.ref !== `refs/heads/${context.branch}` || ref.object?.sha !== context.commit) return { ...previous, supported: true, status: 'unknown', warning: 'The upload branch no longer matches the recorded version commit. No PR was created; inspect the branch and upload receipt.' };
       // No skill text or user changelog is embedded: avoid automatic mentions
       // and issue-closing instructions from imported content.
-      const prefix = `${encodeURIComponent(context.skillName)}/${encodeURIComponent(context.version)}`;
+      const plugin = context.kind === 'plugin';
+      const prefix = `${plugin ? 'Plugins/' : ''}${encodeURIComponent(context.skillName)}/${encodeURIComponent(context.version)}`;
       const base = `https://github.com/${repo.fullName}/blob/${context.commit}/${prefix}`;
-      const body = `SkillJetty version ${context.version} for ${context.skillName}.\n\nVerified upload commit: ${context.commit}\n\n- [Editable source](https://github.com/${repo.fullName}/tree/${context.commit}/${prefix}/source/${encodeURIComponent(context.skillName)})\n- [Skill package](${base}/${encodeURIComponent(`${context.skillName}-${context.version}.skill`)})\n- [Version notes](${base}/CHANGELOG.md)\n\nReview and merge remain separate actions. Use the explicit Merge action when this exact submission is ready.`;
+      const members = plugin ? (context.members ?? []).map(member => {
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(member.name) || !/^[A-Za-z0-9.+-]+$/.test(member.version)) throw new Error('Invalid plugin member identity.');
+        return `- ${member.name} ${member.version}`;
+      }).join('\n') : '';
+      const bundles = (context.bundles ?? []).map(bundle => {
+        if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(bundle.name) || !/^[A-Za-z0-9.+-]+$/.test(bundle.version)) throw new Error('Invalid associated plugin identity.');
+        return `- ${bundle.name} ${bundle.version}`;
+      }).join('\n');
+      const body = `SkillJetty ${plugin ? 'plugin ' : ''}version ${context.version} for ${context.skillName}.\n\nVerified upload commit: ${context.commit}\n\n- [Editable source](https://github.com/${repo.fullName}/tree/${context.commit}/${prefix}/source${plugin ? '' : '/' + encodeURIComponent(context.skillName)})\n- [${plugin ? 'Plugin' : 'Skill'} package](${base}/${encodeURIComponent(`${context.skillName}-${context.version}.${plugin ? 'zip' : 'skill'}`)})\n- [Version notes](${base}/CHANGELOG.md)${plugin ? `\n- [Marketplace entry handoff](${base}/marketplace-entry.json)\n\nBundled skill versions:\n${members}` : ''}\n\nReview and merge remain separate actions. Use the explicit Merge action when this exact submission is ready.`;
       let created: any;
       try {
         this.onProgress?.('Creating the pull request on GitHub…');
-        created = await this.run({ method: 'POST', endpoint: `repos/${repo.fullName}/pulls`, body: { title: `SkillJetty: ${context.skillName} ${context.version}`, head: context.branch, base: context.baseBranch, body } });
+        created = await this.run({ method: 'POST', endpoint: `repos/${repo.fullName}/pulls`, body: { title: `SkillJetty: ${context.skillName} ${context.version}`, head: context.branch, base: context.baseBranch, body: body + (bundles ? `\n\nAlso exported in plugin bundles:\n${bundles}` : '') } });
         this.identity(context, created, previous);
       }
       catch (error) {

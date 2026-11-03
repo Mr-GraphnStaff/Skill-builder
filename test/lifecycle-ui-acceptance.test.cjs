@@ -87,7 +87,7 @@ test('restore collisions and foreign workspace releases fail without replacing a
   assert.throws(() => library.restoreLibraryRelease(f.root, release.directory), /already exists/);
   assert.equal(digest(path.join(f.skill.sourcePath, 'SKILL.md')), currentHash);
   const foreign = path.join(f.temp, 'foreign'); fs.mkdirSync(foreign);
-  assert.throws(() => library.restoreLibraryRelease(foreign, release.directory), /leaves|outside/);
+  assert.throws(() => library.restoreLibraryRelease(foreign, release.directory), /leaves|outside|must remain inside/);
   assert.equal(fs.readFileSync(f.outside, 'utf8'), 'Unrelated user data\n');
 });
 

@@ -6,6 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview, createGitHubRepository, runPublisherProcess } = require('../out/repository-publisher.js');
 const { registerSkillFolder, prepareSkillRelease } = require('../out/skill-workbench.js');
+const { preparePluginRelease } = require('../out/plugin-release.js');
 
 function git(root, ...args) {
   return execFileSync('git', ['-c', 'protocol.ext.allow=never', ...args], { cwd: root, encoding: 'utf8', windowsHide: true });
@@ -23,6 +24,9 @@ function fixture() {
   git(caller, 'config', 'user.name', 'Caller'); git(caller, 'config', 'user.email', 'caller@example.invalid');
   fs.writeFileSync(path.join(caller, 'PRIVATE.txt'), 'Unrelated history\n');
   git(caller, 'add', '.'); git(caller, 'commit', '-m', 'Unrelated source history');
+  // Workbench setup supplies scratch before publication; a sentinel makes its
+  // pre-existing untracked status visible to the preservation assertion.
+  fs.mkdirSync(path.join(caller, 'scratch')); fs.writeFileSync(path.join(caller, 'scratch', 'user-scratch.txt'), 'Keep scratch work.');
   fs.writeFileSync(path.join(caller, 'STAGED.txt'), 'Must remain staged\n'); git(caller, 'add', 'STAGED.txt');
   const source = path.join(root, 'sample'); fs.mkdirSync(source);
   fs.writeFileSync(path.join(source, 'SKILL.md'), '---\r\nname: sample\r\ndescription: Create useful sample reports. Use when asked for a sample report.\r\n---\r\n\r\n# Sample\r\n');
@@ -32,6 +36,26 @@ function fixture() {
   const release = prepareSkillRelease(caller, skill.id, '1.0.0', 'Initial version.').directory;
   return { root, remote, release, caller, target };
 }
+
+test('publishes a plugin as a complete versioned plugin tree without changing portable paths', async () => {
+  const f = fixture(); let preview;
+  try {
+    const bundle = preparePluginRelease(f.caller, { name: 'team-bundle', description: 'Team workflows', version: '2.0.0', author: 'Example Team', members: [{ directory: f.release }], changelog: 'Bundle sample 1.0.0.' });
+    preview = await prepareRepositoryPublish(bundle.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller });
+    assert.equal(preview.branch, 'plugins/team-bundle/2.0.0');
+    assert.equal(preview.relativePath, 'Plugins/team-bundle/2.0.0');
+    assert.equal(preview.kind, 'plugin'); assert.deepEqual(preview.members, [{ name: 'sample', version: '1.0.0' }]);
+    const originalPath = preview.relativePath; preview.relativePath = '../../elsewhere';
+    await assert.rejects(pushPreparedRelease(preview), /destination changed/); preview.relativePath = originalPath;
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const uploaded = await pushPreparedRelease(preview);
+    const tree = git(f.remote, 'ls-tree', '-r', '--name-only', uploaded.commit);
+    assert.match(tree, /Plugins\/team-bundle\/2\.0\.0\/source\/\.claude-plugin\/plugin\.json/);
+    assert.match(tree, /Plugins\/team-bundle\/2\.0\.0\/source\/skills\/sample\/SKILL\.md/);
+    assert.match(tree, /team-bundle-2\.0\.0\.zip/);
+    assert.doesNotMatch(tree, /PRIVATE|STAGED/);
+  } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
+});
 
 test('publishes the complete version using destination history; leaves caller index and history intact', async () => {
   const f = fixture(); let preview;

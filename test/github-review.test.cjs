@@ -49,6 +49,18 @@ function mock(c = context) {
   return state;
 }
 
+test('plugin PR describes the bundle and members with correctly typed artifact links', async () => {
+  const c = { ...context, kind: 'plugin', skillName: 'team-bundle', version: '2.0.0', branch: 'plugins/team-bundle/2.0.0', members: [{ name: 'fixture-skill', version: '1.0.0' }, { name: 'second-skill', version: '3.1.0' }] };
+  const m = mock(c); const result = await new GitHubReviewService('.', m.runner).ensure(c);
+  assert.equal(result.identityVerified, true);
+  const request = m.calls.find(call => call.method === 'POST' && call.endpoint.endsWith('/pulls'));
+  assert.match(request.body.body, /SkillJetty plugin version 2\.0\.0/);
+  assert.match(request.body.body, /Plugins\/team-bundle\/2\.0\.0\/source\)/);
+  assert.match(request.body.body, /team-bundle-2\.0\.0\.zip/);
+  assert.match(request.body.body, /fixture-skill 1\.0\.0/); assert.match(request.body.body, /second-skill 3\.1\.0/);
+  assert.doesNotMatch(request.body.body, /team-bundle-2\.0\.0\.skill/);
+});
+
 test('GitHub identity parsing rejects lookalikes, credentials and arbitrary hosts; unsupported providers make no requests', async () => {
   assert.equal(githubRepository('git@github.com:fixture-owner/fixture-repository.git').fullName, 'fixture-owner/fixture-repository');
   for (const value of ['https://github.com.evil.invalid/a/b', 'https://user:secret@github.com/a/b', 'https://github.com/a/b?x=1', 'https://github.com/a/b/extra', 'https://gitlab.com/a/b', 'https://github.com:444/a/b']) assert.equal(githubRepository(value), undefined);

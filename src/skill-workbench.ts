@@ -1,3 +1,4 @@
+import { assertWorkbenchPath, isManagedWorkbench } from './workbench-boundary.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
@@ -55,13 +56,7 @@ function inside(parent: string, child: string): boolean {
   return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
 }
 function guarded(root: string, target: string): void {
-  if (!inside(root, target)) throw new Error('Path leaves the workbench workspace.');
-  let current = path.resolve(root);
-  const relative = path.relative(current, path.resolve(target));
-  for (const piece of ['', ...relative.split(path.sep).filter(Boolean)]) {
-    if (piece) current = path.join(current, piece);
-    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error(`Links are not allowed: ${current}`);
-  }
+  assertWorkbenchPath(root, target);
 }
 function control(root: string): string { return path.join(path.resolve(root), '.skill-workbench'); }
 function readCatalog(root: string): WorkbenchSkill[] {
@@ -482,7 +477,7 @@ export function completeWorkbenchSkill(workspaceRoot: string, id: string, releas
   }
   const canonicalSource = path.join(path.resolve(workspaceRoot), 'skills', record.name);
   const sourceRetained = path.relative(canonicalSource, path.resolve(record.sourcePath)) !== '';
-  const archivedPath = path.join(control(workspaceRoot), 'completed', record.id, version);
+  const archivedPath = path.join(isManagedWorkbench(workspaceRoot) ? path.join(workspaceRoot, 'recovery') : control(workspaceRoot), 'completed', record.id, version);
   guarded(workspaceRoot, archivedPath);
   // Repeated use of a chosen version creates another recoverable session.
   const parent = path.dirname(archivedPath); fs.mkdirSync(parent, { recursive: true });

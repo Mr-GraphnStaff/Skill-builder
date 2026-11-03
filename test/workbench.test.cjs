@@ -137,7 +137,7 @@ test('source symlinks and catalog paths outside workspace cannot enter releases'
   await t.test('source link guard', st => {
     try { fs.symlinkSync(external, path.join(source, 'linked'), process.platform === 'win32' ? 'junction' : 'dir'); }
     catch (error) {
-      if (error.code === 'EPERM' || (process.platform === 'win32' && error.code === 'EISDIR')) { st.skip('Host filesystem does not permit creating the link fixture.'); return; }
+      if (['EPERM', 'EACCES', 'ENOTSUP', 'EISDIR'].includes(error.code)) { st.skip(`Host cannot create the directory-link fixture (${error.code}).`); return; }
       throw error;
     }
     assert.equal(wb.validateWorkbenchSkill(record).valid, false);

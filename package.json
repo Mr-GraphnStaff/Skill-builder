@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "SkillJetty — Agent Skills Studio",
   "description": "Create, edit, version and publish portable Agent Skills with SkillJetty by DAF-TECH. Build it. Version it. Ship it.",
-  "version": "0.13.2",
+  "version": "0.15.0",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -78,6 +78,14 @@
       {
         "command": "skillBuilder.createRepository",
         "title": "SkillJetty: Create GitHub Repository"
+      },
+      {
+        "command": "skillBuilder.createWorkbench",
+        "title": "SkillJetty: Create Workbench"
+      },
+      {
+        "command": "skillBuilder.openWorkbenchFolder",
+        "title": "SkillJetty: Open Existing Workbench"
       }
     ],
     "configuration": {
@@ -94,7 +102,7 @@
           "default": "",
           "order": 10,
           "scope": "window",
-          "description": "Work folder for drafts and saved local versions, not the local sharing repository. Leave blank to use the opened folder. Preview uses a .skilljetty-prerelease child; existing data is not moved. After changing folders, save your draft and reopen SkillJetty."
+          "description": "Optional existing SkillJetty workbench location. Must contain its setup record; arbitrary opened folders are never adopted. Use Create Workbench or Open Existing Workbench for setup. Preview data stays in .skilljetty-prerelease. Changing this does not move files; save and reopen."
         },
         "skillBuilder.prerelease.repositoryUrl": {
           "type": "string",
@@ -108,7 +116,7 @@
           "default": "",
           "order": 30,
           "scope": "window",
-          "description": "Absolute path to the local Git sharing repository, for example C:/AI-Work/Skills-Repository. Choose its top folder containing .git, not .git itself or your draft work folder. An explicitly empty value disables local reuse; upload can use a temporary download. Verify, Pull and Open Skill from Repository are separate SkillJetty commands. Saving this value does not clone or pull."
+          "description": "Optional absolute path to a local Git repository inside this workbench’s repositories/ folder. Unset uses repositories/skills; an explicit blank disables local reuse. Pull clones or updates it only when you run that command. Outside folders and linked paths are blocked. Existing repositories are never moved automatically."
         },
         "skillBuilder.distDirectory": {
           "type": "string",
@@ -120,7 +128,7 @@
           "type": "string",
           "default": "",
           "order": 120,
-          "description": "Advanced legacy integration: destination used by Sync to Claude Code. Leave empty for ~/.claude/skills. This does not select a Git repository or install packages from the current guided workflow."
+          "description": "Retained legacy setting for compatibility. External-folder installation is unavailable in this pre-release: all SkillJetty work writes must stay inside the selected workbench."
         }
       }
     },
@@ -151,10 +159,10 @@
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
-    "test": "npm run compile && node --test test/*.test.cjs",
+    "test": "npm run compile && node --test --test-concurrency=4 test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npm run package:pre-release",
-    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.13.2.vsix",
+    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.15.0.vsix",
     "ci:package": "node scripts/ci/release.cjs prepare",
     "ci:beta-package": "node scripts/ci/beta-release.cjs prepare",
     "import-skill": "node scripts/import-skill.mjs",

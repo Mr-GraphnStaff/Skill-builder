@@ -121,5 +121,5 @@ test('change summary selects latest release by SemVer and refuses unverified bas
 
 test('change summaries cannot read a source outside the selected workspace', t => {
   const { root, skill } = fixture(t);
-  assert.throws(() => summarizeSkillChanges(root, { ...skill, sourcePath: path.resolve(root, '..') }), /leaves this workspace/);
+  assert.throws(() => summarizeSkillChanges(root, { ...skill, sourcePath: path.resolve(root, '..') }), /leaves this workspace|must remain inside/);
 });

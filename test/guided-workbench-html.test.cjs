@@ -13,6 +13,89 @@ function state(overrides = {}) {
   };
 }
 
+test('Submit keeps portable default and exposes explicit plugin and Gemini export choices', () => {
+  const html = renderGuidedWorkbench(state({ step: 'publish', active: { id: 'a', name: 'skill-a' },
+    publish: { version: '1.0.0', changelog: '', fileCount: 2 } }), nonce);
+  assert.match(html, /<legend>Choose your export<\/legend>/);
+  assert.match(html, /<label for="exportMode">Package format<\/label>/);
+  assert.match(html, /value="portable" selected>Portable skill only/);
+  assert.match(html, /value="plugin" >Claude plugin only/);
+  assert.match(html, /value="both" >Both portable skill and Claude plugin/);
+  assert.match(html, /id="plugin-options" hidden/);
+  assert.match(html, /id="pluginName"[^>]*data-plugin-required[^>]*disabled/);
+  assert.doesNotMatch(html, /id="pluginName"[^>]*\srequired(?:\s|>)/);
+  assert.match(html, /id="geminiZip"[^>]*aria-describedby="gemini-export-help"/);
+  assert.match(html, /Import and runtime behavior must be tested in your account/);
+  assert.match(html, /Claude organization installation, marketplace sync and group assignment are separate manual steps/);
+});
+
+test('plugin metadata and multiple members are labelled, selected explicitly and escaped', () => {
+  const hostile = '</script><img src=x onerror="bad()">';
+  const html = renderGuidedWorkbench(state({ step: 'publish', active: { id: 'a', name: 'skill-a' },
+    publish: { version: '2.0.0', changelog: '', fileCount: 3 },
+    exportOptions: { mode: 'both', pluginName: hostile, pluginDescription: hostile, pluginVersion: '1.2.0',
+      pluginAuthor: hostile, pluginLicense: hostile, geminiZip: true,
+      members: [{ id: 'a', name: 'skill-a', version: '2.0.0', selected: true },
+        { id: 'b"', name: hostile, version: '3.1.0', selected: true },
+        { id: 'c', name: 'skill-c', selected: false }] }
+  }), nonce);
+  assert.doesNotMatch(html, /id="plugin-options" hidden/);
+  assert.match(html, /id="pluginName"[^>]*data-plugin-required required/);
+  assert.match(html, /name="pluginMembers" value="a"[^>]*checked[^>]*data-current-member disabled/);
+  assert.match(html, /name="pluginMembers" value="b&quot;"[^>]*checked/);
+  assert.match(html, /id="geminiZip"[^>]*checked/);
+  assert.match(html, /Installable .skill package and Claude plugin ZIP/);
+  assert.match(html, /The bundle has its own version/);
+  assert.doesNotMatch(html, /<img src=x|<script>bad/);
+  assert.match(html, /&lt;\/script&gt;&lt;img/);
+});
+
+test('client serializes selected members and active format and disables hidden plugin requirements', () => {
+  const html = renderGuidedWorkbench(state(), nonce);
+  const script = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)[1];
+  const functions = script.slice(script.indexOf('function fieldValue('), script.indexOf('  updateExportVisibility();'));
+  const controls = [{ required: true, disabled: false, hasAttribute: () => true }];
+  const elements = {
+    exportMode: { value: 'portable' }, pluginName: { value: 'team-tools' }, pluginVersion: { value: '4.0.0' },
+    pluginDescription: { value: 'Team workflows' }, pluginAuthor: { value: 'DAF-TECH' }, pluginLicense: { value: '' },
+    geminiZip: { checked: true }, 'export-package-summary': { textContent: '' },
+    'plugin-options': { hidden: false, querySelectorAll: () => controls }
+  };
+  const document = { getElementById: id => elements[id], querySelectorAll: () => [{ value: 'current' }, { value: 'other' }] };
+  const result = new vm.Script(functions + ';updateExportVisibility();({payload:exportPayload(),hidden:document.getElementById("plugin-options").hidden});').runInNewContext({ document });
+  assert.equal(result.payload.exportMode, 'portable');
+  assert.deepEqual(Array.from(result.payload.pluginMembers), ['current', 'other']);
+  assert.equal(result.payload.geminiZip, true);
+  assert.equal(result.hidden, true);
+  assert.equal(controls[0].required, false);
+  assert.equal(controls[0].disabled, true);
+  elements.exportMode.value = 'both';
+  controls[0].hasAttribute = name => name === 'data-plugin-required';
+  new vm.Script(functions + ';updateExportVisibility();').runInNewContext({ document });
+  assert.equal(controls[0].required, true);
+  assert.equal(controls[0].disabled, false);
+  assert.equal(elements['plugin-options'].hidden, false);
+  assert.match(elements['export-package-summary'].textContent, /Claude plugin ZIP/);
+});
+
+test('Done keeps separate artifact outcomes and compatibility limits without unsafe links', () => {
+  const html = renderGuidedWorkbench(state({ step: 'done', receipt: { name: 'team-tools', version: '1.0.0',
+    local: true, note: 'Prepared exports.', artifacts: [
+      { kind: 'portable', label: 'Portable skill', path: 'P:/Workbench/skill.skill', status: 'prepared' },
+      { kind: 'plugin', label: 'Claude plugin', path: 'P:/Workbench/plugin.zip', status: 'failed', error: '<unsafe>', url: 'javascript:unsafe()', reviewUrl: 'https://github.com/example/skills/pull/42' }
+    ], compatibility: [{ target: 'Gemini App', issues: ['Unsupported <file>.ts'], tested: false }] }
+  }), nonce);
+  assert.match(html, /<h2 id="export-results-heading">Export results<\/h2>/);
+  assert.match(html, /Portable skill<\/strong> — prepared/);
+  assert.match(html, /Claude plugin<\/strong> — failed/);
+  assert.match(html, /data-path="P:\/Workbench\/plugin.zip"/);
+  assert.match(html, /Unsupported &lt;file&gt;.ts/);
+  assert.match(html, /Review Claude plugin PR/);
+  assert.match(html, /data-url="https:\/\/github.com\/example\/skills\/pull\/42"/);
+  assert.match(html, /Application import and runtime behavior have not been tested by SkillJetty/);
+  assert.doesNotMatch(html, /href="javascript:|data-url="javascript:|<unsafe>/);
+});
+
 test('performance log is in Activity from the first screen through busy later steps', () => {
   for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
     for (const hasWorkspace of [false, true]) {
@@ -53,9 +136,40 @@ test('empty settings do not resurrect saved repository values and unconfigured u
   assert.match(html, /id="configured-repository">Not configured<\/dd>/);
   assert.match(html, /id="local-repository-path">Not configured<\/dd>/);
   assert.match(html, /id="active-work-folder">Not selected<\/dd>/);
-  assert.match(html, /set an absolute Project Root in SkillJetty settings, then reopen the workbench/);
+  assert.match(html, /data-action="createWorkbench"[^>]*>Create workbench/);
+  assert.match(html, /data-action="openWorkbenchFolder"[^>]*>Open existing workbench/);
   assert.match(html, /id="open-settings"/);
   assert.doesNotMatch(html, /data-action="chooseWorkspace"/);
+});
+
+test('workbench setup explains local folders and has explicit, cancellable setup actions', () => {
+  const html = renderGuidedWorkbench(state({ hasWorkspace: false, connection: undefined }), nonce);
+  assert.match(html, /Setup creates local folders only/);
+  assert.match(html, /does not move existing work, clone a repository or upload anything/);
+  assert.match(html, /review the exact destination before creating/);
+  assert.match(html, /old work folder is not moved or adopted automatically/);
+  assert.doesNotMatch(html, /data-action="showCreate"|data-action="openPackage"|data-action="loadSkills"/);
+  for (const folder of ['skills/', 'repositories/', 'releases/', 'scratch/', 'recovery/', 'logs/', '.skill-workbench/']) {
+    assert(html.includes(`<code>${folder}</code>`), folder);
+  }
+});
+
+test('folder guide distinguishes drafts, local repositories, remote destination and target branch', () => {
+  const html = renderGuidedWorkbench(state({ workFolder: 'P:/Workbench/.skilljetty-prerelease',
+    configuredLocalRepository: 'P:/Workbench/.skilljetty-prerelease/repositories/skills' }), nonce);
+  assert.match(html, /<summary>What goes in each workbench folder\?<\/summary>/);
+  assert.match(html, /Local repository — inside repositories\//);
+  assert.match(html, /Remote repository — sharing destination/);
+  assert.match(html, /<dt>Target branch<\/dt><dd id="configured-target-branch">main<\/dd>/);
+  assert.match(html, /Opening a different project in VS Code does not choose a new destination/);
+  assert.match(html, /changing settings does not clone, pull or upload/);
+  assert.match(html, /<dl class="action-help"><dt><code>skills\//);
+  assert.match(html, /README.md/);
+  assert.match(html, /SkillJetty blocks destinations outside this workbench/);
+  assert.match(html, /including AI-tool install folders outside it/);
+  assert.match(html, /This preview connects to GitHub using an HTTPS address/);
+  assert.match(html, /SSH addresses, local paths and file URLs are unavailable as remote destinations/);
+  assert.match(html, /Earlier edits and completed draft archives/);
 });
 
 test('invalid settings do not disclose rejected credentials or claim the new configuration is verified', () => {
@@ -244,7 +358,7 @@ test('submission reviewer choice is optional, escaped and explicitly discloses n
 
 test('GitHub account is read-only and reviewer state remains scoped to the host account', () => {
   const connect = renderGuidedWorkbench(state(), nonce);
-  assert.match(connect, /GitHub sign-in are available in the Command Palette/);
+  assert.match(connect, /GitHub sign-in is also available in the Command Palette/);
   assert.doesNotMatch(connect, /data-action="connectGitHub"/);
   assert.doesNotMatch(connect, /type="password"|name="token"|name="pat"/);
   const switched = renderGuidedWorkbench(state({ githubAccount: 'Account <unsafe>' }), nonce);

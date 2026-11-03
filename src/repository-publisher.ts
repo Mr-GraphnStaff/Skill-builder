@@ -1,3 +1,6 @@
+import { workbenchGitAskpass, disposeWorkbenchGitAskpass, currentWorkbenchGitToken } from './workbench-git-auth.js';
+export { withWorkbenchGitCredentials } from './workbench-git-auth.js';
+import { assertWorkbenchPath, assertWorkbenchGitMetadata, assertWorkbenchRepository, assertRemoteDestination, containingWorkbench, isManagedWorkbench, workbenchScratch, workbenchGitEnvironment, recordOwnedWorkbenchRepository, isOwnedWorkbenchRepository } from './workbench-boundary.js';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs/promises';
@@ -6,10 +9,10 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { currentWorkbenchMetrics, emitWorkbenchMetric } from './workbench-metrics.js';
-import { verifySkillRelease } from './skill-workbench.js';
+import { verifyExportRelease, exportRelativePath, type PluginManifest } from './plugin-release.js';
 
 const execute = promisify(execFile);
-const previews = new Map<string, { inventory: Map<string, string>; indexTree: string }>();
+const previews = new Map<string, { inventory: Map<string, string>; indexTree: string; workspaceRoot: string; repository: string; branch: string; relativePath: string; skillName: string; version: string }>();
 type Progress = (message: string) => void;
 function report(progress: Progress | undefined, message: string): void { try { progress?.(message); } catch { /* A display callback cannot change a publication outcome. */ } }
 
@@ -72,15 +75,17 @@ export type CreatedRepository = { repository: string; baseBranch: string; nameWi
 
 /** Discover the repository's actual default branch rather than asking a skill
  * author to invent a Git branch name. An unborn/ambiguous HEAD is not guessed. */
-export async function resolveRepositoryDefaultBranch(repository: string): Promise<string> {
+export async function resolveRepositoryDefaultBranch(repository: string, workspaceRoot?: string): Promise<string> {
   validateRepository(repository);
-  const advertised = await git(os.tmpdir(), ['ls-remote', '--symref', repository, 'HEAD']);
+  if (workspaceRoot && isManagedWorkbench(workspaceRoot)) assertRemoteDestination(repository);
+  const cwd = workspaceRoot ? workbenchScratch(workspaceRoot) : os.tmpdir();
+  const advertised = await git(cwd, ['ls-remote', '--symref', repository, 'HEAD']);
   const branch = /^ref:\s+refs\/heads\/(.+)\s+HEAD$/m.exec(advertised)?.[1];
   const head = /^([a-f0-9]{40,64})\s+HEAD$/m.exec(advertised)?.[1];
   if (!branch || !head) throw new Error('The repository has no readable default branch. Choose an initialized repository with an initial commit.');
-  await git(os.tmpdir(), ['check-ref-format', '--branch', branch]);
+  await git(workspaceRoot ? workbenchScratch(workspaceRoot) : os.tmpdir(), ['check-ref-format', '--branch', branch]);
   const ref = `refs/heads/${branch}`;
-  const verified = await git(os.tmpdir(), ['ls-remote', '--exit-code', '--heads', repository, ref]);
+  const verified = await git(cwd, ['ls-remote', '--exit-code', '--heads', repository, ref]);
   if (!verified.split(/\r?\n/).some(row => row.trim() === `${head}\t${ref}`)) {
     throw new Error('The repository default branch changed while connecting. Connect again to refresh it.');
   }
@@ -89,17 +94,18 @@ export async function resolveRepositoryDefaultBranch(repository: string): Promis
 
 /** Read-only confirmation used to finish local cleanup after an interrupted,
  * already-recorded upload. Never retries a remote write. */
-export async function verifyRepositoryBranchCommit(repository: string, branch: string, commit: string): Promise<boolean> {
+export async function verifyRepositoryBranchCommit(repository: string, branch: string, commit: string, workspaceRoot?: string): Promise<boolean> {
   validateRepository(repository);
   if (!/^[a-f0-9]{40,64}$/i.test(commit)) throw new Error('The recorded upload commit is invalid.');
-  await git(os.tmpdir(), ['check-ref-format', '--branch', branch]);
+  await git(workspaceRoot ? workbenchScratch(workspaceRoot) : os.tmpdir(), ['check-ref-format', '--branch', branch]);
   const ref = `refs/heads/${branch}`;
-  const advertised = await git(os.tmpdir(), ['ls-remote', '--heads', repository, ref]);
+  const advertised = await git(workspaceRoot ? workbenchScratch(workspaceRoot) : os.tmpdir(), ['ls-remote', '--heads', repository, ref]);
   return advertised.split(/\r?\n/).some(row => row.trim() === `${commit}\t${ref}`);
 }
 export type PublishPreview = {
   checkoutPath: string; repository: string; branch: string; relativePath: string;
   files: string[]; changedFiles?: string[]; skillName: string; version: string;
+  kind?: 'plugin'; members?: Array<{ name: string; version: string }>;
 };
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -109,9 +115,16 @@ async function git(cwd: string, args: string[]): Promise<string> {
   let index = 0;
   while (index < args.length && args[index].startsWith('-')) index += ['-c', '-C', '--git-dir', '--work-tree'].includes(args[index]) ? 2 : 1;
   const operation = args[index] ?? 'other';
+  let authentication: ReturnType<typeof workbenchGitAskpass>;
+  let managedRoot: string | undefined;
   try {
-    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', ...args], {
-      cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+    managedRoot = containingWorkbench(cwd);
+    if (managedRoot) {
+      assertWorkbenchGitMetadata(managedRoot, cwd);
+      if (['ls-remote', 'fetch', 'push', 'clone'].includes(operation)) authentication = workbenchGitAskpass(managedRoot);
+    }
+    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...(isOwnedWorkbenchRepository(managedRoot, cwd) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...args], {
+      cwd, env: managedRoot ? { ...workbenchGitEnvironment(managedRoot), ...authentication?.environment } : { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
     outcome = 'ok'; exitCode = 0; return result.stdout;
   } catch (error) {
@@ -120,8 +133,10 @@ async function git(cwd: string, args: string[]): Promise<string> {
     timedOut = /timed out/i.test(detail.message);
     // Git errors can include remote URLs containing credentials.
     const message = `${detail.message}${detail.stderr ? `\n${detail.stderr}` : ''}`.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/g, '$1[redacted]@');
-    throw new Error(`Git operation failed: ${message.trim()}`);
+    const token = currentWorkbenchGitToken();
+    throw new Error(`Git operation failed: ${(token ? message.split(token).join('[redacted]') : message).trim()}`);
   } finally {
+    if (managedRoot && authentication) { try { disposeWorkbenchGitAskpass(managedRoot, authentication.directory); } catch { /* Secret-free helper retained only if safe cleanup is unavailable. */ } }
     emitWorkbenchMetric(currentWorkbenchMetrics(), { stage: ['ls-remote', 'fetch', 'pull', 'push', 'clone'].includes(operation) ? 'gitRemote' : 'gitLocal', operation, durationMs: performance.now() - started, outcome, timedOut, exitCode });
   }
 }
@@ -241,22 +256,27 @@ async function verifyGitBlobs(preview: PublishPreview, committed = false): Promi
 /** Prepare a reviewable commit in the destination repository's own history. */
 export async function prepareRepositoryPublish(
   releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false,
-  options: { localPath?: string } = {}
+  options: { localPath?: string; workspaceRoot?: string } = {}
 ): Promise<PublishPreview> {
   report(onProgress, 'Validating the prepared release.');
   validateRepository(repository);
   const root = path.resolve(releaseDirectory);
-  const manifest = verifySkillRelease(root).manifest;
+  const release = verifyExportRelease(root);
+  const manifest = release.manifest;
+  const plugin = (manifest as Partial<PluginManifest>).kind === 'plugin';
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(manifest.skillName)
       || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.test(manifest.version)) {
     throw new Error('Release manifest must contain a valid skill name and version.');
   }
   const sourceInventory = await inventory(root);
   if (!sourceInventory.has('CHANGELOG.md') || !sourceInventory.has('release.json')
-      || ![...sourceInventory.keys()].some(file => file.endsWith('.skill'))) {
-    throw new Error('Release must include its package, CHANGELOG.md, and release.json.');
+      || !sourceInventory.has(path.basename(release.packagePath))) {
+    throw new Error('Release must include its verified package, CHANGELOG.md, and release.json.');
   }
-  const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'skill-workbench-publish-'));
+  const workspaceRoot = path.resolve(options.workspaceRoot ?? path.join(root, '..', '..', '..'));
+  assertWorkbenchPath(workspaceRoot, root);
+  if (isManagedWorkbench(workspaceRoot)) { assertRemoteDestination(repository); if (options.localPath) assertWorkbenchRepository(workspaceRoot, options.localPath); }
+  const temp = workbenchScratch(workspaceRoot, 'skill-workbench-publish-');
   const checkoutPath = path.join(temp, 'repository');
   try {
     const emptyTemplate = path.join(temp, 'empty-template');
@@ -271,6 +291,7 @@ export async function prepareRepositoryPublish(
       const local = await validateProjectRepositoryForPublish(repository, options.localPath);
       report(onProgress, 'Reusing your local repository to prepare an isolated submission…');
       await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--', local, checkoutPath]);
+      if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
       await git(checkoutPath, ['remote', 'set-url', 'origin', repository]);
       report(onProgress, 'Fetching the latest destination branch; existing downloaded data is reused…');
       await git(checkoutPath, ['fetch', '--no-tags', '--refmap=', 'origin', `+refs/heads/${baseBranch}:refs/remotes/origin/${baseBranch}`]);
@@ -281,6 +302,7 @@ export async function prepareRepositoryPublish(
       report(onProgress, 'Downloading the destination repository for this submission…');
       await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', ...(replaceExisting ? [] : ['--depth', '1']), '--single-branch', '--branch', baseBranch, '--', repository, checkoutPath]);
     }
+    if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
     report(onProgress, 'Preparing the destination checkout.');
     // Prevent user/repository filters and line-ending conversions from running or
     // altering a release. info/attributes takes precedence over tracked attributes.
@@ -288,8 +310,8 @@ export async function prepareRepositoryPublish(
     await fs.writeFile(path.join(checkoutPath, '.git', 'info', 'attributes'), '* merge -text -filter -ident -working-tree-encoding\n');
     await git(checkoutPath, ['config', '--local', 'core.hooksPath', emptyHooks]);
     await git(checkoutPath, ['reset', '--hard', 'HEAD']);
-    const branch = `skills/${manifest.skillName}/${manifest.version}`;
-    const relativePath = `${manifest.skillName}/${manifest.version}`;
+    const branch = `${plugin ? 'plugins' : 'skills'}/${manifest.skillName}/${manifest.version}`;
+    const relativePath = exportRelativePath(release);
     let pulledPaths: string[] = [];
     if (replaceExisting) {
       report(onProgress, 'Fetching the latest registered repository branches.');
@@ -313,7 +335,9 @@ export async function prepareRepositoryPublish(
     } else await git(checkoutPath, ['switch', '-C', branch]);
     const destination = path.join(checkoutPath, relativePath);
     // The target path must not traverse a symlink already present in the target repository.
-    for (const part of [manifest.skillName]) {
+    const destinationParts = relativePath.split('/');
+    for (let depth = 1; depth < destinationParts.length; depth++) {
+      const part = destinationParts.slice(0, depth).join('/');
       try {
         const stat = await fs.lstat(path.join(checkoutPath, part));
         if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe repository destination: ${part}`);
@@ -339,9 +363,10 @@ export async function prepareRepositoryPublish(
     const outside = files.filter(file => !file.startsWith(`${relativePath}/`));
     if (replaceExisting ? JSON.stringify(outside) !== JSON.stringify(pulledPaths) : JSON.stringify(files) !== JSON.stringify(expected)) throw new Error('Staged files do not match the complete release.');
     const preview: PublishPreview = { checkoutPath, repository, branch, relativePath, files: expected, changedFiles: files,
-      skillName: manifest.skillName, version: manifest.version };
+      skillName: manifest.skillName, version: manifest.version,
+      ...(plugin ? { kind: 'plugin' as const, members: (manifest as PluginManifest).members.map(member => ({ name: member.name, version: member.version })) } : {}) };
     await verifyGitBlobs(preview);
-    previews.set(checkoutPath, { inventory: copied, indexTree: (await git(checkoutPath, ['write-tree'])).trim() });
+    previews.set(checkoutPath, { inventory: copied, indexTree: (await git(checkoutPath, ['write-tree'])).trim(), workspaceRoot, repository, branch, relativePath, skillName: manifest.skillName, version: manifest.version });
     report(onProgress, 'Publication preview is ready for review.');
     return preview;
   } catch (error) {
@@ -361,6 +386,9 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   report(onProgress, 'Verifying the reviewed release before publication.');
   const expected = previews.get(preview.checkoutPath);
   if (!expected) throw new Error('Publication preview expired; prepare it again.');
+  assertWorkbenchPath(expected.workspaceRoot, preview.checkoutPath);
+  if (preview.repository !== expected.repository || preview.branch !== expected.branch || preview.relativePath !== expected.relativePath || preview.skillName !== expected.skillName || preview.version !== expected.version) throw new Error('Publication destination changed after review; prepare a fresh preview.');
+  if (isManagedWorkbench(expected.workspaceRoot)) { assertRemoteDestination(expected.repository); assertWorkbenchGitMetadata(expected.workspaceRoot, preview.checkoutPath); }
   const current = await inventory(path.join(preview.checkoutPath, preview.relativePath));
   if (!equalInventory(expected.inventory, current)) throw new Error('Prepared files changed; review a new publication preview.');
   if ((await git(preview.checkoutPath, ['write-tree'])).trim() !== expected.indexTree) throw new Error('Unexpected staged files or changed Git index; publication stopped.');
@@ -382,7 +410,10 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
   if ((await git(preview.checkoutPath, ['rev-parse', 'HEAD^{tree}'])).trim() !== expected.indexTree) throw new Error('Committed tree differs from the reviewed release.');
   report(onProgress, 'Pushing the release branch to the selected repository.');
   beforeWrite?.();
-  await git(preview.checkoutPath, ['push', '--porcelain', 'origin', `HEAD:refs/heads/${preview.branch}`]);
+  const origin = (await git(preview.checkoutPath, ['remote', 'get-url', '--push', 'origin'])).trim();
+  if (origin !== expected.repository) throw new Error('The prepared checkout remote changed. Nothing was pushed.');
+  beforeWrite?.();
+  await git(preview.checkoutPath, ['push', '--porcelain', expected.repository, `HEAD:refs/heads/${preview.branch}`]);
   report(onProgress, 'Confirming the published commit on the remote repository.');
   const remote = await git(preview.checkoutPath, ['ls-remote', '--heads', 'origin', `refs/heads/${preview.branch}`]);
   if (remote.split(/\s/)[0] !== commit) throw new Error('Push returned without confirming the expected remote commit.');
@@ -393,7 +424,9 @@ export async function pushPreparedRelease(preview: PublishPreview, onProgress?: 
 export async function disposePublishPreview(preview: PublishPreview, onProgress?: Progress): Promise<void> {
   if (!previews.has(preview.checkoutPath)) return;
   const parent = path.dirname(path.resolve(preview.checkoutPath));
-  if (path.dirname(parent) !== path.resolve(os.tmpdir()) || !path.basename(parent).startsWith('skill-workbench-publish-')) {
+  const expected = previews.get(preview.checkoutPath)!;
+  assertWorkbenchPath(expected.workspaceRoot, parent);
+  if (path.dirname(parent) !== path.join(path.resolve(expected.workspaceRoot), 'scratch') || !path.basename(parent).startsWith('skill-workbench-publish-')) {
     throw new Error('Unexpected publication temporary directory.');
   }
   try {

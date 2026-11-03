@@ -65,7 +65,7 @@ test('fresh portable skill creation preserves YAML strings and does not invent a
   assert.throws(() => guided.createGuidedSkill(f.root, { name: 'meeting-notes', description: 'Use when needed.', instructions: 'Replacement' }), /already exists/);
 });
 
-test('guided text edits and binary copies preserve nested paths and reject traversal, binary overwrite, symlinks and collisions', t => {
+test('guided text edits and binary copies preserve nested paths and reject traversal, binary overwrite, symlinks and collisions', async t => {
   const f = fixture(t);
   guided.writeGuidedFile(f.skill, 'references/deep/日本語.md', '# Rules\nRetain Unicode ✓\n');
   assert.match(guided.readGuidedFile(f.skill, 'references/deep/日本語.md'), /Unicode ✓/);
@@ -77,10 +77,16 @@ test('guided text edits and binary copies preserve nested paths and reject trave
   assert.throws(() => guided.writeGuidedFile(f.skill, 'assets/deep/input.bin', 'destructive replacement'), /binary/);
   assert.throws(() => guided.copyGuidedFile(f.skill, 'assets/deep/input.bin', binary), /already exists/);
   for (const unsafe of ['../outside.md', 'refs/../../escape.md', '.git/config', 'C:/escape.md', 'refs/CON.md']) assert.throws(() => guided.writeGuidedFile(f.skill, unsafe, 'No'), /relative|safe/);
-  const outside = path.join(f.temporary, 'outside'); fs.mkdirSync(outside);
-  fs.symlinkSync(outside, path.join(f.skill.sourcePath, 'redirect'), process.platform === 'win32' ? 'junction' : 'dir');
-  assert.throws(() => guided.writeGuidedFile(f.skill, 'redirect/outside.md', 'No'), /links|junctions/);
-  assert.equal(fs.existsSync(path.join(outside, 'outside.md')), false);
+  await t.test('redirected editable path is blocked', st => {
+    const outside = path.join(f.temporary, 'outside'); fs.mkdirSync(outside);
+    try { fs.symlinkSync(outside, path.join(f.skill.sourcePath, 'redirect'), process.platform === 'win32' ? 'junction' : 'dir'); }
+    catch (error) {
+      if (['EPERM', 'EACCES', 'ENOTSUP', 'EISDIR'].includes(error.code)) { st.skip(`Host cannot create the directory-link fixture (${error.code}).`); return; }
+      throw error;
+    }
+    assert.throws(() => guided.writeGuidedFile(f.skill, 'redirect/outside.md', 'No'), /links|junctions/);
+    assert.equal(fs.existsSync(path.join(outside, 'outside.md')), false);
+  });
 });
 
 test('guided publish uploads complete version to local bare repository, clears only its draft and preserves prior history through v2', async t => {
@@ -159,7 +165,11 @@ test('connection paths reject redirected workspace junctions without writing out
   const f = fixture(t);
   const outside = path.join(f.temporary, 'outside'); fs.mkdirSync(outside);
   const linked = path.join(f.temporary, 'workspace-link');
-  fs.symlinkSync(outside, linked, process.platform === 'win32' ? 'junction' : 'dir');
+  try { fs.symlinkSync(outside, linked, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'EISDIR'].includes(error.code)) { t.skip(`Host cannot create the directory-link fixture (${error.code}).`); return; }
+    throw error;
+  }
   assert.throws(() => guided.getWorkspaceConnection(linked), /links|junctions/);
   await assert.rejects(guided.connectWorkspaceRepository(linked, f.remote), /links|junctions/);
   assert.deepEqual(fs.readdirSync(outside), []);

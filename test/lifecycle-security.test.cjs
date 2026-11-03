@@ -41,7 +41,11 @@ test('receipt directory junctions cannot redirect writes outside the workspace',
   const outside = path.join(f.temp, 'outside'); fs.mkdirSync(outside);
   const parent = path.join(f.root, '.skill-workbench', 'publications');
   fs.mkdirSync(path.dirname(parent), { recursive: true });
-  fs.symlinkSync(outside, parent, process.platform === 'win32' ? 'junction' : 'dir');
+  try { fs.symlinkSync(outside, parent, process.platform === 'win32' ? 'junction' : 'dir'); }
+  catch (error) {
+    if (['EPERM', 'EACCES', 'ENOTSUP', 'EISDIR'].includes(error.code)) { t.skip(`Host cannot create the directory-link fixture (${error.code}).`); return; }
+    throw error;
+  }
   assert.throws(() => library.recordLibraryPublication(f.root, f.release.directory, f.publication), /symbolic links/);
   assert.deepEqual(fs.readdirSync(outside), []);
   assert.equal(wb.listWorkbenchSkills(f.root).length, 1);

@@ -24,7 +24,7 @@ test('trusted worker jobs retain guarded import, validation, packaging and compa
   const release = await runWorkbenchJob({ kind: 'prepareRelease', root: workspace, id: skill.id, version: '1.0.0', changelog: 'Initial worker test.' });
   assert.ok(fs.existsSync(release.packagePath));
   assert.equal((await runWorkbenchJob({ kind: 'verifyRelease', directory: release.directory })).version, '1.0.0');
-  await assert.rejects(runWorkbenchJob({ kind: 'restoreRelease', root: path.join(f.root, 'another-workspace'), directory: release.directory }), /leaves|outside|workspace/i);
+  await assert.rejects(runWorkbenchJob({ kind: 'restoreRelease', root: path.join(f.root, 'another-workspace'), directory: release.directory }), /leaves|outside|workspace|must remain inside/i);
   const library = await runWorkbenchJob({ kind: 'library', root: workspace }); assert.equal(library.length, 1);
   assert.deepEqual(await runWorkbenchJob({ kind: 'reviews', root: workspace }), []);
   const snapshot = await runWorkbenchJob({ kind: 'snapshot', root: workspace, skill });

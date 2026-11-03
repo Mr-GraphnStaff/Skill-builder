@@ -1,219 +1,117 @@
+// Preview intentionally disables legacy mutation entry points. The actual
+// guided host and publishing modules have their own interaction/contract tests.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const Module = require('node:module');
 const AdmZip = require('adm-zip');
 const core = require('../out/skill-workbench.js');
+const { createWorkbench } = require('../out/workbench-setup.js');
 
-function fixture(t) {
-  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-entrypoint-'));
-  const root = path.join(sandbox, '.skilljetty-prerelease'); fs.mkdirSync(root);
+const scratch = require('./working-fixture.cjs').workingFixture('publish-entrypoint');
+fs.mkdirSync(scratch, { recursive: true });
+const legacyMutations = [
+  'publishSkillToGit', 'openSkillEditor', 'openInteractiveBuilder', 'createSkill',
+  'manageFolder', 'workbenchPublishSource', 'workbenchPublishRelease',
+  'workbenchPrepareRelease', 'workbenchAssociateRepository', 'workbenchAddFile',
+  'workbenchRestoreRelease', 'workbenchPlayground', 'syncToClaudeCode',
+  'importSkillFromGit', 'packageSkill', 'addSupportingFiles', 'runEvals'
+].map(name => `skillBuilder.${name}`);
+
+function inventory(root) {
+  const result = {};
+  function visit(directory) {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name), relative = path.relative(root, file);
+      if (entry.isDirectory()) { result[`${relative}/`] = 'directory'; visit(file); }
+      else result[relative] = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+    }
+  }
+  visit(root); return result;
+}
+
+function fixture(t, managed = true) {
+  const sandbox = fs.mkdtempSync(path.join(scratch, 'fixture-'));
   t.after(() => fs.rmSync(sandbox, { recursive: true, force: true }));
-  const source = path.join(root, 'skills', 'sample');
-  fs.mkdirSync(source, { recursive: true });
-  const manifest = '---\nname: sample\ndescription: Prepare sample reports. Use when asked for a sample report.\n---\n\n# Sample\n\nInspect inputs and prepare the requested report.\n';
-  fs.writeFileSync(path.join(source, 'SKILL.md'), manifest);
-  const skill = { name: 'sample', directoryName: 'sample', skillPath: source, manifestPath: path.join(source, 'SKILL.md') };
-  const commands = new Map(); const errors = []; const warnings = []; const choices = []; const inputs = [];
-  const panels = []; const executions = [];
-  const documents = []; const openDialogs = [];
-  const counters = { repositories: 0, create: 0, prepare: 0, push: 0, terminal: 0 };
-  class Uri { constructor(file) { this.fsPath = file; this.scheme = 'file'; } static file(file) { return new Uri(file); } }
+  const root = path.join(sandbox, '.skilljetty-prerelease');
+  if (managed) createWorkbench(root);
+  const outside = path.join(sandbox, 'unrelated-project'); fs.mkdirSync(outside);
+  const manifest = '---\nname: sample\ndescription: Prepare sample reports. Use when asked for a sample report.\n---\n\n# Sample\nKeep supplied facts.\n';
+  const manifestPath = path.join(outside, 'SKILL.md'); fs.writeFileSync(manifestPath, manifest);
+  const archive = path.join(outside, 'incoming.skill');
+  const zip = new AdmZip(); zip.addFile('sample/SKILL.md', Buffer.from(manifest + '\nIncoming package.\n')); zip.writeZip(archive);
+  let saves = 0;
+  const documents = [{ uri: { scheme: 'file', fsPath: manifestPath }, isDirty: true, async save() { saves++; fs.writeFileSync(manifestPath, 'UNEXPECTED OUTSIDE SAVE'); return true; } }];
+  const commands = new Map(), counters = { guided: 0, legacyView: 0, publisher: 0, terminal: 0 };
+  let readRoot;
   const vscode = {
-    Uri, TreeItem: class { constructor(label) { this.label = label; } },
-    TreeItemCollapsibleState: { Collapsed: 1, None: 0 }, ThemeIcon: class {}, ViewColumn: { One: 1 },
-    EventEmitter: class { event() {} fire() {} dispose() {} }, ProgressLocation: { Notification: 1 },
+    TreeItem: class {}, EventEmitter: class { event() {} },
     commands: {
-      registerCommand(id, fn) { commands.set(id, fn); return { dispose() {} }; },
-      async executeCommand(id, ...args) { executions.push({ id, args }); return commands.get(id)?.(...args); }
+      registerCommand(id, handler) { commands.set(id, handler); return { dispose() {} }; },
+      async executeCommand(id, ...args) { if (!commands.has(id)) throw new Error(`Command is not registered: ${id}`); return commands.get(id)(...args); }
     },
     workspace: {
-      workspaceFolders: [{ uri: Uri.file(root) }], textDocuments: documents,
-      getConfiguration() { return { get(key, fallback) { return fallback; } }; },
-      onDidSaveTextDocument() { return { dispose() {} }; }, async openTextDocument(value) { return value; }
+      workspaceFolders: [{ uri: { fsPath: managed ? root : outside } }], textDocuments: documents,
+      getConfiguration() { return { get(_key, fallback) { return fallback; } }; }
     },
-    window: {
-      registerTreeDataProvider() { return { dispose() {} }; }, createTreeView() { return { dispose() {} }; },
-      createWebviewPanel() {
-        const panel = { title: '', webview: { cspSource: 'mock', html: '', onDidReceiveMessage(fn) { panel.receive = fn; } } };
-        panels.push(panel); return panel;
-      },
-      createTerminal() { counters.terminal++; throw new Error('Legacy terminal publisher must not be used.'); },
-      async showErrorMessage(message) { errors.push(message); }, async showInformationMessage() {},
-      async showWarningMessage(message) { warnings.push(message); return undefined; }, async showTextDocument() {},
-      async showQuickPick(items, options) { const choice = choices.shift(); return typeof choice === 'function' ? choice(items, options) : choice; },
-      async showInputBox() { return inputs.shift(); }, async withProgress(options, run) { return run(); },
-      async showOpenDialog() { return openDialogs.shift(); }
-    }, env: { clipboard: { async writeText() {} } }
+    window: { createTerminal() { counters.terminal++; throw new Error('Legacy terminal must not run.'); } }
   };
-  const publisher = {
-    async listRepositoryChoices() { counters.repositories++; return [{ label: 'Existing skill repository', repository: 'https://github.com/example/Skills.git' }]; },
-    async createGitHubRepository() { counters.create++; throw new Error('No repository should be created in these tests.'); },
-    async prepareRepositoryPublish() { counters.prepare++; return { repository: 'https://github.com/example/Skills.git', branch: 'skill/sample/1.0.0', relativePath: 'sample/1.0.0', files: [] }; },
-    async pushPreparedRelease() { counters.push++; throw new Error('No push should occur in these tests.'); },
-    async disposePublishPreview() {}
-  };
-  const extensionPath = require.resolve('../out/extension.js');
-  const viewPath = require.resolve('../out/workbench-view.js');
-  const originalLoad = Module._load;
-  delete require.cache[extensionPath]; delete require.cache[viewPath];
+  const extension = require.resolve('../out/extension.js'), originalLoad = Module._load;
+  delete require.cache[extension];
   try {
     Module._load = function(id, parent, main) {
       if (id === 'vscode') return vscode;
-      // These regressions exercise retained legacy entry points. The new
-      // guided panel has its own controller/rendered acceptance suite.
-      if (id === './guided-workbench.js' && parent?.filename === extensionPath) return { activateGuidedWorkbench() {} };
-      if (id === './repository-publisher.js' && parent?.filename === viewPath) return publisher;
+      if (parent?.filename === extension && id === './guided-workbench.js') return { activateGuidedWorkbench(_context, hooks) { counters.guided++; readRoot = hooks.getRoot; } };
+      if (parent?.filename === extension && id === './workbench-view.js') return { activateWorkbench() { counters.legacyView++; throw new Error('Legacy workbench must not activate.'); } };
+      if (id === './repository-publisher.js') return new Proxy({}, { get() { return () => { counters.publisher++; throw new Error('Legacy publisher must not run.'); }; } });
       return originalLoad.call(this, id, parent, main);
     };
-    require(extensionPath).activate({ subscriptions: [], extensionUri: Uri.file(root) });
-  } finally { Module._load = originalLoad; }
-  return { root, source, manifest, skill, commands, errors, warnings, choices, inputs, panels, executions, counters, documents, openDialogs, Uri };
+    require(extension).activate({ subscriptions: [] });
+  } finally { Module._load = originalLoad; delete require.cache[extension]; }
+  return { root, sandbox, outside, manifestPath, manifest, archive, documents, commands, counters, vscode, readRoot, saves: () => saves };
 }
 
-test('legacy Publish to Git command delegates to guided publishing without a config or terminal', async t => {
+test('preview activation installs only its guided workflow and disables every legacy write entry point', async t => {
   const f = fixture(t);
-  await f.commands.get('skillBuilder.publishSkillToGit')({ skill: f.skill });
-  assert.deepEqual(f.errors, []);
-  assert(f.executions.some(item => item.id === 'skillBuilder.workbenchPublishSource' && item.args[0] === f.source));
-  assert.equal(f.counters.repositories, 1, 'native repository chooser must be reached');
-  assert.equal(f.counters.terminal, 0);
-  assert.equal(f.counters.create, 0); assert.equal(f.counters.push, 0);
-  assert.equal(fs.existsSync(path.join(f.root, 'skill-builder.config.json')), false);
-  assert.equal(fs.readFileSync(f.skill.manifestPath, 'utf8'), f.manifest);
+  assert.equal(f.counters.guided, 1);
+  assert.equal(f.counters.legacyView, 0);
+  assert.equal(await f.readRoot(), f.root);
+  for (const command of legacyMutations) assert.equal(f.commands.has(command), false, command);
+  assert.equal(f.commands.size, 0, 'the guided module owns command registration; activation must not append legacy handlers');
+  assert.equal(f.saves(), 0);
 });
 
-test('legacy editor publish button routes to the same native flow and offers the new label', async t => {
-  const f = fixture(t);
-  await f.commands.get('skillBuilder.openSkillEditor')({ skill: f.skill });
-  assert.equal(f.panels.length, 1);
-  assert.match(f.panels[0].webview.html, /Publish Skill Version…/);
-  await f.panels[0].receive({ command: 'publishSkillToGit' });
-  assert.deepEqual(f.errors, []);
-  assert(f.executions.some(item => item.id === 'skillBuilder.workbenchPublishSource'));
-  assert.equal(f.counters.repositories, 1);
-  assert.equal(f.counters.terminal, 0);
-  assert.equal(fs.existsSync(path.join(f.root, 'skill-builder.config.json')), false);
+test('an ordinary project is never adopted or modified during preview activation', async t => {
+  const f = fixture(t, false), before = inventory(f.sandbox);
+  assert.equal(await f.readRoot(), undefined);
+  assert.equal(fs.existsSync(path.join(f.outside, '.skilljetty-prerelease')), false);
+  assert.deepEqual(inventory(f.sandbox), before);
+  assert.equal(f.saves(), 0);
+  assert.equal(f.counters.guided, 1);
+  assert.equal(f.counters.legacyView, 0);
 });
 
-test('external legacy editor publish saves the original dirty document before making its managed copy', async t => {
-  const f = fixture(t);
-  const external = path.join(f.root, 'external-input'); fs.mkdirSync(external);
-  const manifestPath = path.join(external, 'SKILL.md');
-  const initial = f.manifest.replace('name: sample', 'name: external-sample');
-  const latest = `${initial}\nLatest unsaved author edit.\n`;
-  fs.writeFileSync(manifestPath, initial);
-  const externalSkill = { name: 'external-sample', directoryName: 'external-input', skillPath: external, manifestPath };
-  let saves = 0;
-  f.documents.push({ uri: f.Uri.file(manifestPath), isDirty: true, async save() { saves++; fs.writeFileSync(manifestPath, latest); this.isDirty = false; return true; } });
-  await f.commands.get('skillBuilder.openSkillEditor')({ skill: externalSkill });
-  await f.panels[0].receive({ command: 'publishSkillToGit' });
-  assert.deepEqual(f.errors, []);
-  assert.equal(saves, 1);
-  assert.equal(fs.readFileSync(path.join(f.root, 'skills', 'external-sample', 'SKILL.md'), 'utf8'), latest);
-  assert.equal(fs.readFileSync(manifestPath, 'utf8'), latest);
-  assert.equal(f.counters.repositories, 1);
-  assert.equal(f.counters.push, 0);
-});
-
-test('failed original document save aborts external legacy editor publish before copying or repository selection', async t => {
-  const f = fixture(t);
-  const external = path.join(f.root, 'external-input'); fs.mkdirSync(external);
-  const manifestPath = path.join(external, 'SKILL.md');
-  const original = f.manifest.replace('name: sample', 'name: external-sample');
-  fs.writeFileSync(manifestPath, original);
-  const externalSkill = { name: 'external-sample', directoryName: 'external-input', skillPath: external, manifestPath };
-  f.documents.push({ uri: f.Uri.file(manifestPath), isDirty: true, async save() { return false; } });
-  await f.commands.get('skillBuilder.openSkillEditor')({ skill: externalSkill });
-  await f.panels[0].receive({ command: 'publishSkillToGit' });
-  assert.match(f.errors.join('\n'), /Save the skill files/);
-  assert.equal(fs.existsSync(path.join(f.root, 'skills', 'external-sample')), false);
-  assert.deepEqual(core.listWorkbenchSkills(f.root), []);
-  assert.equal(f.counters.repositories, 0); assert.equal(f.counters.create, 0); assert.equal(f.counters.push, 0);
-  assert.equal(fs.readFileSync(manifestPath, 'utf8'), original);
-});
-
-test('Manage Folder also aborts before registration when an original document cannot be saved', async t => {
-  const f = fixture(t);
-  const external = path.join(f.root, 'external-input'); fs.mkdirSync(external);
-  const manifestPath = path.join(external, 'SKILL.md');
-  fs.writeFileSync(manifestPath, f.manifest.replace('name: sample', 'name: external-sample'));
-  f.documents.push({ uri: f.Uri.file(manifestPath), isDirty: true, async save() { return false; } });
-  f.openDialogs.push([f.Uri.file(external)]);
-  await f.commands.get('skillBuilder.manageFolder')();
-  assert.match(f.errors.join('\n'), /Save the skill files/);
-  assert.equal(fs.existsSync(path.join(f.root, 'skills', 'external-sample')), false);
-  assert.deepEqual(core.listWorkbenchSkills(f.root), []);
-  assert.equal(f.counters.repositories, 0);
-});
-
-test('selected SKILL.md reuses its managed folder and cancellation stops before preparing a release', async t => {
-  const f = fixture(t);
-  core.registerSkillFolder(f.root, f.source);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(f.skill.manifestPath);
-  assert.deepEqual(f.errors, []);
-  assert.equal(core.listWorkbenchSkills(f.root).length, 1);
-  assert.equal(f.counters.repositories, 1);
-  assert.equal(fs.existsSync(path.join(f.root, 'releases')), false);
-  assert.equal(f.counters.create, 0); assert.equal(f.counters.prepare, 0); assert.equal(f.counters.push, 0);
-});
-
-test('missing release prompts for preparation after association and stops safely when version entry is cancelled', async t => {
-  const f = fixture(t);
-  f.choices.push(items => items.find(item => item.repository));
-  f.inputs.push('main', undefined);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(f.source);
-  assert.deepEqual(f.errors, []);
-  assert(f.executions.some(item => item.id === 'skillBuilder.workbenchPrepareRelease'));
-  assert.equal(core.listWorkbenchSkills(f.root)[0].repository, 'https://github.com/example/Skills.git');
-  assert.equal(fs.existsSync(path.join(f.root, 'releases')), false);
-  assert.equal(f.counters.prepare, 0); assert.equal(f.counters.push, 0); assert.equal(f.counters.create, 0);
-});
-
-test('guided legacy publish reaches review after association and preparation but never pushes without explicit confirmation', async t => {
-  const f = fixture(t);
-  f.choices.push(items => items.find(item => item.repository), items => items[0]);
-  f.inputs.push('main', '1.0.0', 'Initial test release.');
-  await f.commands.get('skillBuilder.publishSkillToGit')({ skill: f.skill });
-  assert.deepEqual(f.errors, []);
-  assert.equal(core.listSkillReleases(f.root, 'sample').length, 1);
-  assert.equal(f.counters.prepare, 1);
-  assert.equal(f.counters.push, 0);
-  assert.equal(f.counters.create, 0);
-  assert.match(f.warnings.join('\n'), /Push sample 1\.0\.0 to https:\/\/github.com\/example\/Skills.git/);
-  assert.doesNotMatch(f.warnings.join('\n'), /skill-builder\.config\.json/);
-  assert.equal(core.listWorkbenchSkills(f.root).length, 1, 'cancelled publish retains the active skill');
-});
-
-test('.skill publish import replaces a colliding draft with the selected package and keeps recovery', async t => {
-  const f = fixture(t);
-  const archive = path.join(f.root, 'incoming.skill');
-  const zip = new AdmZip();
-  zip.addFile('sample/SKILL.md', Buffer.from(f.manifest + '\nSelected incoming version.\n')); zip.writeZip(archive);
-  const original = fs.readFileSync(archive);
-  core.registerSkillFolder(f.root, f.source);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(archive);
-  assert.deepEqual(f.errors, []);
-  assert.deepEqual(fs.readFileSync(archive), original);
-  assert.match(fs.readFileSync(f.skill.manifestPath, 'utf8'), /Selected incoming version/);
-  assert.ok(fs.existsSync(path.join(f.root, '.skill-workbench/replaced')));
-  assert.equal(f.counters.repositories, 1); assert.equal(f.counters.push, 0);
-});
-
-test('a standalone .skill publish selection imports reversibly before the repository chooser and cancels without external effects', async t => {
-  const f = fixture(t);
-  const archive = path.join(f.root, 'incoming.skill');
-  const zip = new AdmZip();
-  zip.addFile('imported/SKILL.md', Buffer.from(f.manifest.replace('name: sample', 'name: imported'))); zip.writeZip(archive);
-  const original = fs.readFileSync(archive);
-  await f.commands.get('skillBuilder.workbenchPublishSource')(archive);
-  assert.deepEqual(f.errors, []);
-  const managed = core.listWorkbenchSkills(f.root);
-  assert.equal(managed.length, 1); assert.equal(managed[0].name, 'imported');
-  assert.deepEqual(fs.readFileSync(archive), original);
-  assert.equal(f.counters.repositories, 1);
-  assert.equal(f.counters.create, 0); assert.equal(f.counters.prepare, 0); assert.equal(f.counters.push, 0);
-  assert.equal(fs.existsSync(path.join(f.root, 'skill-builder.config.json')), false);
-});
+for (const selection of ['folder', 'manifest', 'package', 'managed draft']) {
+  test(`disabled legacy publish commands cannot mutate an existing ${selection} or save outside dirty documents`, async t => {
+    const f = fixture(t);
+    let input = selection === 'folder' ? f.outside : selection === 'manifest' ? f.manifestPath : f.archive;
+    if (selection === 'managed draft') {
+      const source = path.join(f.root, 'skills', 'sample'); fs.mkdirSync(source);
+      fs.writeFileSync(path.join(source, 'SKILL.md'), f.manifest);
+      input = core.registerSkillFolder(f.root, source).sourcePath;
+    }
+    const before = inventory(f.sandbox);
+    const skill = { name: 'sample', directoryName: 'sample', skillPath: input, manifestPath: selection === 'manifest' ? input : path.join(input, 'SKILL.md') };
+    for (const command of legacyMutations) {
+      await assert.rejects(f.vscode.commands.executeCommand(command, input, { skill }), /not registered/);
+    }
+    assert.equal(f.saves(), 0);
+    assert.equal(f.documents[0].isDirty, true, 'activation must not flush an unrelated editor buffer');
+    assert.deepEqual(inventory(f.sandbox), before, 'no draft import, release preparation, configuration write or replacement is permitted through disabled legacy commands');
+    assert.equal(fs.readFileSync(f.manifestPath, 'utf8'), f.manifest);
+    assert.equal(fs.existsSync(path.join(f.root, 'skill-builder.config.json')), false);
+    assert.deepEqual(f.counters, { guided: 1, legacyView: 0, publisher: 0, terminal: 0 });
+  });
+}

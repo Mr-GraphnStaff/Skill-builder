@@ -4,6 +4,16 @@ export type GuidedActivityEntry = { id: number; message: string; status: GuidedA
 export type GuidedProgress = (message: string, status?: GuidedActivityStatus) => void;
 export type SkillTarget = 'portable' | 'claude' | 'codex' | 'gemini' | 'copilot';
 export type ReviewerChoice = { login: string; name?: string };
+export type ExportMode = 'portable' | 'plugin' | 'both';
+export type ExportCompatibility = { target: string; issues: string[]; tested?: boolean };
+export type ExportOptions = {
+  mode: ExportMode; pluginName: string; pluginVersion: string; pluginDescription: string;
+  pluginAuthor?: string; pluginLicense?: string; geminiZip: boolean;
+  pluginIcon?: string; pluginPrivacyPolicyUrl?: string; pluginDocumentationUrl?: string; pluginSupportUrl?: string;
+  members: { id: string; name: string; version?: string; selected: boolean }[];
+};
+export type ExportArtifact = { label: string; path?: string; url?: string; reviewUrl?: string; directory?: string;
+  kind?: 'portable' | 'plugin' | 'gemini'; version?: string; status?: string; error?: string };
 export type PullRequestRecord = {
   supported: boolean;
   status: 'uploaded' | 'awaiting_review' | 'changes_requested' | 'approved' | 'merged' | 'closed' | 'unknown' | 'unsupported';
@@ -36,7 +46,7 @@ export type GuidedState = {
   repositoryCheckout?: { path: string; branch?: string; commit?: string };
   repositories: { label: string; repository: string }[];
   drafts: { id: string; name: string }[];
-  library: { skillName: string; version: string; directory: string; status: string; pr?: PullRequestRecord }[];
+  library: { kind?: 'skill' | 'plugin'; skillName: string; version: string; directory: string; status: string; pr?: PullRequestRecord }[];
   reviewers?: ReviewerChoice[];
   reviewersLoaded?: boolean;
   reviewersError?: string;
@@ -49,16 +59,18 @@ export type GuidedState = {
   files: { path: string; size: number; text: boolean }[];
   editor?: { path: string; content: string; readOnly?: boolean };
   target: SkillTarget;
+  exportOptions?: ExportOptions;
   check?: { valid: boolean; errors: { message: string; file?: string }[]; warnings: { message: string; file?: string }[]; compatibility: string; behaviorNote: string };
   publish?: { version: string; changelog: string; repository?: string; fileCount: number; reviewSupported?: boolean;
+    compatibility?: ExportCompatibility[];
     versionSource?: string; versionWarning?: string; suggestedChangelog?: string;
     changeSummary?: { baselineVersion?: string; added: string[]; changed: string[]; removed: string[]; unchanged: number; note?: string } };
-  receipt?: { name: string; version: string; directory?: string; local?: boolean; packagePath?: string; pr?: PullRequestRecord; sourceUrl?: string; packageUrl?: string; changelogUrl?: string; reviewUrl?: string; commit?: string; branch?: string; cleanupError?: string; note: string };
+  receipt?: { name: string; version: string; directory?: string; local?: boolean; packagePath?: string; pr?: PullRequestRecord; sourceUrl?: string; packageUrl?: string; changelogUrl?: string; reviewUrl?: string; commit?: string; branch?: string; cleanupError?: string; note: string; artifacts?: ExportArtifact[]; compatibility?: ExportCompatibility[] };
   form?: Record<string, string>;
 };
 
 export type GuidedAction = 'ready' | 'openSettings' | 'loadSkills' | 'unloadSkills' | 'chooseWorkspace' | 'discoverRepositories' | 'connectRepository' | 'createRepository'
   | 'verifyRepository' | 'setRepositoryFolder' | 'pullRepository' | 'openRepositorySkill' | 'showCreate' | 'createSkill' | 'openPackage' | 'openPackagePath' | 'openFolder' | 'resume' | 'restoreVersion' | 'openFile' | 'addFile' | 'createFile'
   | 'save' | 'reloadFile' | 'check' | 'edit' | 'preparePublish' | 'publish' | 'back' | 'startAnother' | 'refresh' | 'setTarget' | 'openLink'
-  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage';
+  | 'loadReviewers' | 'checkPullRequests' | 'checkPullRequest' | 'mergePullRequest' | 'createPullRequest' | 'requestReviewer' | 'openPullRequest' | 'connectGitHub' | 'restoreEdit' | 'refreshHistory' | 'savePackage' | 'revealPackage' | 'updateExportOptions';
 export type GuidedMessage = { action: GuidedAction; payload?: Record<string, unknown>; editorSkillId?: string; editorPath?: string; editorContent?: string };

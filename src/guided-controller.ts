@@ -1,14 +1,19 @@
 import { performance } from 'node:perf_hooks';
+import { assertWorkbenchRepository, assertRemoteDestination } from './workbench-boundary.js';
+import { requireWorkbench } from './workbench-setup.js';
 import { emitWorkbenchMetric, type WorkbenchMetricSink } from './workbench-metrics.js';
 import type { OpenedSkillPackage } from './skill-workbench.js';
 import { verifyProjectRepository, pullProjectRepository } from './managed-repository.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
+import { assertWorkbenchPath } from './workbench-boundary.js';
+import { initialExportOptions, readExportOptions, captureExportPreview, exportCompatibility, prepareExportPlan, type ExportPreview } from './guided-exports.js';
+import { exportRelativePath } from './plugin-release.js';
 import { suggestReleaseVersion } from './workbench-library.js';
 import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
-import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
+import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, publishPreparedGuidedRelease, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
 import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState, type GuidedActivityStatus } from './guided-contract.js';
 import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
@@ -17,6 +22,7 @@ import { activityForAction, actionNeedsInput, nextActivityMessage } from './guid
 import { selectRepositorySettings, repositoryIdentity, RepositoryConfigurationChangedError, type RepositorySettings } from './repository-settings.js';
 
 export type GuidedHooks = {
+  enforceWorkbench?: boolean;
   getRepositorySettings?(): RepositorySettings;
   captureConfigurationGeneration?(): number;
   assertConfigurationGeneration?(generation: number): void;
@@ -39,6 +45,7 @@ export class GuidedWorkbenchController {
   private previewInventory?: string;
   private previewDestination?: string;
   private previewConfigurationGeneration?: number;
+  private exportPreview?: ExportPreview;
   private activitySequence = 0;
   private operationActivity?: number;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
@@ -49,11 +56,30 @@ export class GuidedWorkbenchController {
   }
   private repositorySelection() {
     const settings = this.hooks.getRepositorySettings?.() ?? {};
-    return selectRepositorySettings(settings, this.savedConnection(settings));
+    const selected = selectRepositorySettings(settings, this.savedConnection(settings));
+    if (this.hooks.enforceWorkbench && this.root) {
+      requireWorkbench(this.root);
+      if (selected.repository) {
+        assertRemoteDestination(selected.repository);
+        // An explicit blank remains a disconnect of local reuse; an unset
+        // preference uses the documented workbench-local clone destination.
+        if (!selected.localPath && settings.localRepositoryPath === undefined) selected.localPath = path.join(this.root, 'repositories', 'skills');
+      }
+      if (selected.localPath) assertWorkbenchRepository(this.root, selected.localPath);
+    }
+    return selected;
   }
   private destinationFingerprint(): string {
     const selected = this.repositorySelection();
     return JSON.stringify([selected.repository ? repositoryIdentity(selected.repository) : null, selected.localPath ?? null]);
+  }
+  private assertReviewDestination(directory: string): void {
+    if (!this.hooks.enforceWorkbench) return;
+    const selected = this.repositorySelection();
+    const { context } = libraryReviewContext(this.workspace(), directory);
+    if (!selected.repository || repositoryIdentity(selected.repository) !== repositoryIdentity(context.repository)) {
+      throw new Error('This submission belongs to a different remote repository. Select its remote explicitly in Settings before using its review actions.');
+    }
   }
   /** Read-only projection. Saving native settings never connects or rewrites state. */
   refreshRepositorySettings(): void {
@@ -64,7 +90,7 @@ export class GuidedWorkbenchController {
     try {
       const settings = this.hooks.getRepositorySettings?.() ?? {};
       saved = this.savedConnection(settings);
-      const selected = selectRepositorySettings(settings, saved);
+      const selected = this.repositorySelection();
       this.state.configuredRepository = selected.repository;
       this.state.configuredLocalRepository = selected.localPath;
       this.state.configurationError = undefined;
@@ -99,7 +125,7 @@ export class GuidedWorkbenchController {
       extractWrite: 'Extracted files written.', extractedReadback: 'Extracted files read back and inventoried.',
       originalPreservation: 'Original package bytes preserved.', catalogWrite: 'Draft registration saved.'
     };
-    const result = await runWorkbenchJob(job, { onMetric: metric => {
+    const result = await runWorkbenchJob(job, { boundaryRoot: this.hooks.enforceWorkbench ? this.workspace() : undefined, onMetric: metric => {
       this.hooks.onMetric?.(metric);
       if (this.state.busy && metric.outcome === 'ok' && phases[metric.stage]) this.activity(phases[metric.stage], 'succeeded');
     } });
@@ -134,7 +160,7 @@ export class GuidedWorkbenchController {
     try { update(await verifyProjectRepository(connection.repository, connection.localPath)); }
     catch (error) { update({ status: 'error', message: error instanceof Error ? error.message : String(error), repository: connection.repository, localPath: connection.localPath }); }
   }
-  private workspace(): string { if (!this.root) throw new Error('Choose a local folder for your skill work before continuing.'); return this.root; }
+  private workspace(): string { if (!this.root) throw new Error('Create or open a SkillJetty workbench before continuing.'); if (this.hooks.enforceWorkbench) requireWorkbench(this.root); return this.root; }
   private active(): WorkbenchSkill {
     const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === this.state.active?.id);
     if (!skill) throw new Error('Choose a draft to continue editing. Your saved files have not been removed.');
@@ -150,7 +176,7 @@ export class GuidedWorkbenchController {
     try {
       const releases = await this.runJob({ kind: 'library', root: this.root });
       if (!this.hooks.getRepositorySettings && !this.state.connection) this.state.connection = await migrateAssociation(this.root, releases);
-      this.state.library = releases.map(({ skillName, version, directory, status, pr }) => ({ skillName, version, directory, status, ...(pr ? { pr } : {}) }));
+      this.state.library = releases.map(({ kind, skillName, version, directory, status, pr }) => ({ kind, skillName, version, directory, status, ...(pr ? { pr } : {}) }));
       if (this.state.reviewQueue !== undefined) await this.refreshReviews();
       this.state.libraryError = undefined;
     } catch { this.state.libraryError = 'A saved version could not be verified. Your drafts are still available.'; this.state.library = []; }
@@ -312,6 +338,8 @@ export class GuidedWorkbenchController {
     catch (error) { settingsReadError = error; }
     const operationRoot = this.root;
     const beforeWrite = () => {
+      if (this.hooks.enforceWorkbench) this.workspace();
+      if (['mergePullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action) && typeof message.payload?.directory === 'string') this.assertReviewDestination(message.payload.directory);
       if (settingsReadError) throw settingsReadError;
       if (operationRoot !== this.root || originalSettings !== JSON.stringify(this.hooks.getRepositorySettings?.() ?? null)) throw new RepositoryConfigurationChangedError();
       try { if (generation !== undefined) this.hooks.assertConfigurationGeneration?.(generation); }
@@ -324,6 +352,7 @@ export class GuidedWorkbenchController {
     const string = (key: string, fallback = '') => typeof payload[key] === 'string' ? payload[key] as string : fallback;
     this.state.error = undefined; this.state.notice = undefined;
     try {
+      if (this.hooks.enforceWorkbench && this.root) this.workspace();
       if (message.action !== 'save' && message.action !== 'ready') {
         this.state.busy = true;
         this.progress(activityForAction(message.action), actionNeedsInput(message.action));
@@ -499,10 +528,20 @@ export class GuidedWorkbenchController {
           this.state.step = 'publish';
           const preview = await this.publicationDetails();
           this.state.publish = preview.details;
+          this.state.exportOptions = initialExportOptions(this.workspace(), this.active().id, preview.details.version);
+          this.exportPreview = undefined;
           this.previewInventory = JSON.stringify(preview.inventory);
           try { this.previewDestination = this.destinationFingerprint(); }
           catch { this.previewDestination = undefined; }
           this.previewConfigurationGeneration = this.hooks.captureConfigurationGeneration?.();
+          break;
+        }
+        case 'updateExportOptions': {
+          if (this.state.step !== 'publish' || !this.state.publish || !this.state.exportOptions) throw new Error('Review the submission screen first.');
+          const options = readExportOptions(this.workspace(), this.active().id, this.state.exportOptions, payload, false);
+          this.exportPreview = await captureExportPreview(this.workspace(), this.active().id, options, string('version').trim() || this.state.publish.version);
+          this.state.exportOptions = this.exportPreview.options;
+          this.state.publish.compatibility = exportCompatibility(this.exportPreview);
           break;
         }
         case 'savePackage': case 'publish': {
@@ -520,6 +559,71 @@ export class GuidedWorkbenchController {
           }
           if (string('reviewer') && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request when submitting.');
           this.state.publish = { ...details, changelog };
+          const exportOptions = this.state.exportOptions && readExportOptions(this.workspace(), this.active().id, this.state.exportOptions, payload);
+          if (exportOptions && (exportOptions.mode !== 'portable' || exportOptions.geminiZip)) {
+            const current = await captureExportPreview(this.workspace(), this.active().id, exportOptions, version);
+            if (!this.exportPreview || JSON.stringify(current.members) !== JSON.stringify(this.exportPreview.members)) {
+              this.exportPreview = current; this.state.exportOptions = current.options;
+              this.state.publish.compatibility = exportCompatibility(current);
+              throw new Error('Review the selected skill versions and export compatibility, then submit again. Nothing was uploaded.');
+            }
+            // Metadata is validated host-side; captured source bytes are bound
+            // to the reviewed member inventory rather than webview assertions.
+            this.exportPreview = current; this.state.exportOptions = current.options;
+            if (message.action === 'publish') {
+              beforeWrite();
+              const destination = this.destinationFingerprint();
+              if (this.previewDestination !== destination || this.previewConfigurationGeneration !== generation) {
+                this.previewDestination = destination; this.previewConfigurationGeneration = generation;
+                throw new Error('Repository settings changed. Review the current destination before submitting; nothing was uploaded.');
+              }
+            }
+            this.progress('Capturing and verifying all requested export packages…');
+            const plan = await prepareExportPlan(this.workspace(), this.active().id, current, version, changelog, this.state.connection?.repository);
+            const first = plan.submissions[0];
+            this.state.receipt = { name: first.skillName, version: first.version, directory: first.directory, packagePath: first.packagePath,
+              local: true, artifacts: plan.artifacts, compatibility: plan.compatibility, note: 'All requested packages are prepared locally. No upload has been attempted. Editable drafts are retained.' };
+            if (message.action === 'savePackage') { this.state.step = 'done'; break; }
+            const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite) : this.state.connection;
+            if (!connection) throw new Error('Connect a repository before submitting. Your prepared packages are retained.');
+            const supported = !!githubRepository(connection.repository);
+            if (supported) await new GitHubReviewService(this.workspace(), this.hooks.github).preflight(connection.repository);
+            let failed = false;
+            for (const release of plan.submissions) {
+              const artifact = plan.artifacts.find(item => item.directory === release.directory)!;
+              try {
+                const result = await publishPreparedGuidedRelease(this.workspace(), release.directory, connection,
+                  (message, status) => this.progress(message, false, status), remoteGuard);
+                artifact.status = 'uploaded';
+                const receipt = receiptFor(result);
+                const plugin = artifact.kind === 'plugin';
+                const repo = githubRepository(connection.repository);
+                if (repo) {
+                  const prefix = plugin ? `Plugins/${encodeURIComponent(release.skillName)}/${encodeURIComponent(release.version)}` : `${encodeURIComponent(release.skillName)}/${encodeURIComponent(release.version)}`;
+                  artifact.url = `https://github.com/${repo.fullName}/blob/${encodeURIComponent(result.publication.commit)}/${prefix}/${encodeURIComponent(path.basename(release.packagePath))}`;
+                }
+                if (release.directory === first.directory) Object.assign(this.state.receipt, receipt, { artifacts: plan.artifacts, compatibility: plan.compatibility });
+                if (supported) {
+                  const reviewed = await reviewLibraryRelease(this.workspace(), release.directory, 'create', string('reviewer'), this.hooks.github,
+                    (message, status) => this.progress(message, false, status), remoteGuard, { preserveDrafts: true });
+                  if (reviewed.pr.number && reviewed.pr.identityVerified) artifact.reviewUrl = pullRequestUrl(connection.repository, reviewed.pr.number);
+                  if (release.directory === first.directory) this.state.receipt.pr = reviewed.pr;
+                  if (reviewed.pr.error || reviewed.pr.creationUncertain || reviewed.pr.reviewRequestError || !reviewed.pr.identityVerified) {
+                    artifact.error = reviewed.pr.error || reviewed.pr.reviewRequestError || 'PR creation or identity is not yet verified. Use Check PRs.'; failed = true;
+                  }
+                }
+              } catch (error) {
+                artifact.status = artifact.status === 'uploaded' ? 'uploaded' : 'failed';
+                artifact.error = error instanceof Error ? error.message : String(error); failed = true;
+                break; // Preserve completed receipts; never automatically repeat uploads.
+              }
+            }
+            this.state.receipt.local = false;
+            this.state.receipt.note = failed ? 'Submission needs attention. Prepared packages and completed upload receipts are retained. Check PRs before retrying; this is not a completed Both submission.'
+              : 'All requested repository submissions are recorded. Review and merge each PR separately. Gemini ZIPs remain local for manual import; no organization deployment occurred.';
+            if (failed) this.state.error = 'One or more export submissions need attention. See artifact results and Check PRs; no upload was automatically repeated.';
+            this.state.step = 'done'; break;
+          }
           if (message.action === 'savePackage') {
             this.state.step = 'publish';
             const skill = this.active();
@@ -565,6 +669,14 @@ export class GuidedWorkbenchController {
         }
         case 'revealPackage': {
           const receipt = this.state.receipt;
+          const requested = string('path');
+          const artifact = receipt?.artifacts?.find(item => item.path === requested);
+          if (requested) {
+            if (!artifact?.path) throw new Error('Choose a package in this export receipt.');
+            const selected = assertWorkbenchPath(this.workspace(), artifact.path);
+            if (!fs.lstatSync(selected).isFile()) throw new Error('This saved package is unavailable.');
+            await this.hooks.revealFile?.(selected); break;
+          }
           const saved = (await this.runJob({ kind: 'library', root: this.workspace(), skillName: receipt?.name })).find(item => item.directory === receipt?.directory && item.version === receipt?.version);
           if (!receipt?.local || !saved) throw new Error('Save a local package first.');
           const release = await this.runJob({ kind: 'verifyRelease', directory: saved.directory });
@@ -596,13 +708,14 @@ export class GuidedWorkbenchController {
           this.progress('Checking PRs for recorded uploads in the connected repository…');
           const items = await this.runJob({ kind: 'reviews', root: this.workspace() });
           for (const item of items.slice(0, 50)) {
-            try { await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github, (message, status) => this.progress(message, false, status)); }
+            try { this.assertReviewDestination(item.directory); await reviewLibraryRelease(this.workspace(), item.directory, 'check', undefined, this.hooks.github, (message, status) => this.progress(message, false, status)); }
             catch { this.state.reviewQueueError = 'Some saved upload metadata could not be checked. Inspect the affected version and reconnect its recorded repository; known statuses are retained.'; }
           }
           if (items.length > 50) this.state.reviewQueueError = 'The first 50 versions were checked. Check additional versions individually to keep requests bounded.';
           await this.refreshReviews(); break;
         }
         case 'mergePullRequest': case 'checkPullRequest': case 'createPullRequest': case 'requestReviewer': {
+          this.assertReviewDestination(string('directory'));
           if (message.action === 'mergePullRequest' && payload.confirmed !== true) throw new Error('Choose Merge PR and delete branch to confirm this exact submission.');
           if (message.action === 'requestReviewer' && payload.confirmed !== true) throw new Error('Select a reviewer and explicitly confirm the review request first.');
           if (message.action === 'createPullRequest' && string('reviewer') && payload.confirmed !== true) throw new Error('Explicitly confirm the selected reviewer before creating a PR with a review request.');
@@ -629,7 +742,7 @@ export class GuidedWorkbenchController {
           this.resetWorkflowActivity(); break;
         case 'openLink': {
           const url = string('url');
-          const allowed = this.state.receipt && ['sourceUrl', 'packageUrl', 'changelogUrl', 'reviewUrl'].some(key => (this.state.receipt as Record<string, unknown>)[key] === url);
+          const allowed = this.state.receipt && (['sourceUrl', 'packageUrl', 'changelogUrl', 'reviewUrl'].some(key => (this.state.receipt as Record<string, unknown>)[key] === url) || this.state.receipt.artifacts?.some(item => item.url === url || item.reviewUrl === url));
           if (!allowed || !/^https:\/\//.test(url)) throw new Error('Only verified publication links can be opened here.');
           await this.hooks.openLink?.(url); break;
         }
@@ -673,8 +786,8 @@ function receiptFor(result: Awaited<ReturnType<typeof publishGuidedSkill>>): Non
     const repo = new URL(ssh ? `https://${ssh[1]}/${ssh[2]}` : publication.repository);
     if (repo.protocol !== 'https:' || repo.username || repo.password) return receipt;
     const base = `${repo.origin}${repo.pathname.replace(/\.git\/?$/, '').replace(/\/$/, '')}`;
-    const ref = encodeURIComponent(publication.branch), prefix = `${encodeURIComponent(release.skillName)}/${encodeURIComponent(release.version)}`;
-    receipt.sourceUrl = `${base}/tree/${ref}/${prefix}/source/${encodeURIComponent(release.skillName)}`;
+    const ref = encodeURIComponent(publication.commit), prefix = exportRelativePath(release).split('/').map(encodeURIComponent).join('/');
+    receipt.sourceUrl = `${base}/tree/${ref}/${prefix}/source${(release.manifest as { kind?: string }).kind === 'plugin' ? '' : `/${encodeURIComponent(release.skillName)}`}`;
     receipt.packageUrl = `${base}/blob/${ref}/${prefix}/${encodeURIComponent(path.basename(release.packagePath))}`;
     receipt.changelogUrl = `${base}/blob/${ref}/${prefix}/CHANGELOG.md`;
     receipt.reviewUrl = `${base}/tree/${ref}`;

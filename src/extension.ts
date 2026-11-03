@@ -9,6 +9,7 @@ import { prereleaseWorkspaceRoot, prereleaseDataDirectory } from './prerelease-w
 import { analyzeSkill, parseEvalSuite, runEvalPreflight, type SkillFile } from './skill-analysis.js';
 import { activateWorkbench } from './workbench-view.js';
 import { activateGuidedWorkbench } from './guided-workbench.js';
+import { isManagedWorkbench } from './workbench-boundary.js';
 
 const yaml = require('js-yaml') as {
   load(source: string): unknown;
@@ -126,11 +127,6 @@ const RESERVED_SKILL_NAMES = new Set(['anthropic', 'claude']);
 
 export function activate(context: vscode.ExtensionContext) {
   const provider = new SkillTreeProvider();
-  activateWorkbench(context, {
-    getRoot: getProjectRoot,
-    createSkill: async () => (await createSkill())?.skillPath,
-    guided: true
-  });
   activateGuidedWorkbench(context, { getRoot: async () => {
     const root = getWorkspaceRoot();
     const configured = vscode.workspace.getConfiguration('skillBuilder').get<string>('projectRoot', '').trim();
@@ -138,8 +134,12 @@ export function activate(context: vscode.ExtensionContext) {
     // The public prerelease always receives an isolated child data tree. Opening the same
     // VS Code workspace as production does not share its drafts or repository.
     const selected = prereleaseWorkspaceRoot(root ?? configured, configured);
-    return selected.split(/[\\/]/).some(segment => segment.toLowerCase() === '.codex') ? undefined : selected;
+    return selected.split(/[\\/]/).some(segment => segment.toLowerCase() === '.codex') || !isManagedWorkbench(selected) ? undefined : selected;
   } });
+
+  // The preview has one write-capable workflow. Older command handlers bypass
+  // its selected workbench, so they must never be registered in this channel.
+  return;
 
   context.subscriptions.push(
     vscode.commands.registerCommand('skillBuilder.refresh', () => provider.refresh()),

@@ -2,13 +2,21 @@
 
 Open **SkillJetty** using its left sidebar icon or the single **SkillJetty: Open Workbench** command. Stay in the workbench and follow the highlighted Next step button.
 
-The status at the top stays visible while you scroll. It distinguishes processing from a VS Code file picker or account selection waiting for you. Open **Help with this step** for the current actions. **Repository & GitHub settings** groups optional sharing setup and shows the latest connection state even while collapsed. Local drafting does not require a repository connection.
+The status at the top stays visible while you scroll. It distinguishes processing from a VS Code file picker or account selection waiting for you. Open **Help with this step** for the current actions. **Configuration** shows your workbench folder, local repository, remote sharing destination and target branch. Its gear opens SkillJetty’s VS Code Extension Settings. Local drafting does not require a repository connection.
+
+## Set up your workbench
+
+Choose **Create workbench** for a new dedicated home, or **Open existing workbench** for one already set up by SkillJetty. Creation lets you choose a parent folder and review the exact `.skilljetty-prerelease` destination before writing. Setup creates local folders and a readable `README.md`; it does not move old work, clone repositories or upload skills. Canceling setup keeps your current selection.
+
+The workbench is SkillJetty’s local write boundary. Your open VS Code project does not silently become that boundary. Drafts, saved versions, local Git repositories, temporary work and recovery records stay inside it. Files elsewhere can be imported as read-only sources; SkillJetty edits the copy inside the workbench. AI-tool folders outside it cannot be used as write destinations.
+
+Open **What goes in each workbench folder?** in Configuration whenever you need the folder map. See [Workbench folders](workbench-folders.md) for the complete guide.
 
 ## Start
 
-Open a local folder for your drafts and version history. You can create, open, edit and check skills locally before connecting a repository. Connect the publication destination when you are ready to publish: use **Find my repositories**, enter a repository URL, or create a new repository using the inline form. Creation requires an explicit name and visibility choice; private is the default. No skill is uploaded during connection.
+After setting up your workbench, you can create, open, edit and check skills locally before connecting a repository. When ready to share, use the Configuration gear to set a GitHub HTTPS repository URL, for example `https://github.com/your-org/skills.git`, and use VS Code GitHub sign-in. SSH addresses, local paths and file URLs are unavailable as remote destinations in this preview. The local Git copy belongs under the workbench’s `repositories/` folder; its default location is `repositories/skills/`. Verify the exact local folder and remote address before using the Command Palette’s **SkillJetty: Verify Skills Repository** or **SkillJetty: Pull Skills Repository**. Saving settings does not clone, pull or upload anything.
 
-The workbench detects the repository's existing default branch automatically. You do not enter a branch name. A single unambiguous repository from old local records can be migrated; conflicting old destinations require choosing one connection.
+The workbench detects the repository's existing default branch when you verify or share. You do not enter a branch name. Configuration distinguishes that target branch from the temporary submission branch created for a version upload. Old work folders and external local repositories are not adopted or moved automatically. Import a skill/package to copy its contents into a new workbench, and explicitly connect the remote you intend to use.
 
 Choose **Create a new skill**, **Open a .skill file**, **Open a skill folder**, or a saved draft's **Resume** button. A `.skill` file is a packaged skill; a skill folder must contain SKILL.md. A library version can be restored for next-version editing without changing the released snapshot.
 
@@ -18,7 +26,7 @@ A new skill needs a lowercase hyphenated name, a description of what it does and
 
 The file list shows every supported nested file. Select text files to edit them in the workbench. Binary assets remain intact. Add or copy a supporting file using the labeled path field; existing files are not silently replaced. Reference supporting material from the instructions where appropriate.
 
-Edits save locally after a short pause and before moving to the next step. The save indicator reports success or an error. If a file changed in another editor, the newer disk copy is retained and your conflicting buffer is saved under `.skill-workbench/recovery/`. Use **Reload saved file** after preserving/reviewing that recovery copy. No conflicting edit is silently substituted for another skill's file.
+Edits save locally after a short pause and before moving to the next step. The save indicator reports success or an error. If a file changed in another editor, the newer disk copy is retained and your conflicting buffer is preserved in the workbench’s recovery area. Use **Reload saved file** after preserving/reviewing that recovery copy. No conflicting edit is silently substituted for another skill's file.
 
 Select an intended application if helpful. Portable is the default. This is context for your work; the sanity check does not verify compatibility, install the skill or run it.
 
@@ -36,7 +44,7 @@ External review should cover the complete artifact, including supporting assets 
 
 Review the managed version, file changes and generated release notes, including for `1.0.0`. You can add optional context. **Save package on this computer** prepares a local package without a repository. Connect a repository when you want to upload for review. Advanced options let you choose a release number explicitly. You can reuse an identical prepared release or explicitly replace the same version; previous local contents are preserved in recovery copies and earlier uploaded contents remain in Git history. Review the changes carefully before reusing a version that others may already have consumed.
 
-For GitHub.com, choose **Connect GitHub account** (or **Switch GitHub account** after selecting one) if you need to select the account used for PRs. VS Code handles sign-in and permission consent. This account must have access to the destination; existing Git push access alone does not prove API access. Repository discovery and creation still use GitHub CLI sign-in, which can be a different account. You can enter an existing repository URL instead of using discovery.
+For GitHub.com, use the Command Palette’s **SkillJetty: Connect GitHub Account** if you need to select the account used for PRs. VS Code handles sign-in and permission consent. This account must have access to the destination; existing Git push access alone does not prove API access. Repository creation uses the explicit **SkillJetty: Create GitHub Repository** command and GitHub CLI sign-in, which can be a different account. You can enter an existing repository URL in Settings instead.
 
 Optionally load available reviewers and choose a person, or skip review assignment. The list uses eligible collaborators, excludes yourself and bots, and does not automatically assign past contributors. Submitting with a selected reviewer requests their review and sends a GitHub notification. If collaborator listing is unavailable, you can still create the PR and arrange review on GitHub.
 
@@ -58,7 +66,7 @@ Older uploads can show **Uploaded — no PR**. Choose **Create PR** for that ver
 
 **Awaiting review**, **Changes requested**, **Approved**, **Merged** and **Closed without merge** describe different outcomes. A connection failure is shown with the last verified result and timestamp; it does not mean the PR disappeared. Review details can always be inspected on GitHub.
 
-The integrated review flow currently supports GitHub.com. Other Git destinations receive a branch upload and must use their own review tools. Additional providers are deferred.
+The managed workbench’s sharing and integrated review flow currently supports GitHub.com over HTTPS. Other providers, SSH destinations and local-file remotes are unavailable in this preview.
 
 ## Recovery
 
@@ -78,10 +86,53 @@ The integrated review flow currently supports GitHub.com. Other Git destinations
 | Another editor changed the file | Both versions are preserved; inspect the recovery record, then reload the saved file. |
 | Historical version is corrupt | Drafts remain available. Recover that version from a known good copy before restoring it. |
 
-Keep `skills/`, `releases/`, `workbench/` and `.skill-workbench/` with the local workspace. The shared repository contains version bundles; each teammate uses their own workspace and Git identity. PR metadata is stored separately from immutable release contents. The workbench does not run AI models or replace repository merge rules.
+Keep the complete workbench together, including `skills/`, `repositories/`, `releases/`, `recovery/` and `.skill-workbench/`. The shared repository contains version bundles; each teammate uses their own workbench and Git identity. PR metadata is stored separately from immutable release contents. The workbench does not run AI models or replace repository merge rules.
 
 ### Merge a submitted skill
 
 Choose **Merge PR and delete branch** on the recorded submission when it is ready. The action verifies the PR repository, target, branch, commit and checks before requesting a merge. Only a confirmed merge permits cleanup; a Git SHA lease prevents cleanup from deleting a newer upload on the same branch. A cleanup failure is reported separately and can be retried without uploading or merging again.
 
 If an older submission is shown for a reused version branch, use **Create PR for this upload** or **Find current PR for this upload**. Historical receipts are preserved while the current submission is verified.
+# Exporting Claude plugins and Gemini ZIPs (pre-release 0.15.0)
+
+At Submit, Portable skill remains the default. Choose Claude plugin to package
+one or more skills under `skills/<name>/` with `.claude-plugin/plugin.json`, or
+Both to prepare portable packages and a plugin bundle. The bundle has its own
+name, description, author/license choices and version. Open/import repository
+skills or restore saved skill versions as drafts before selecting them as bundle
+members. Source files are copied unchanged; scripts are never run during export.
+
+Save locally works without GitHub. Repository submission creates separate review
+branches/PRs for the selected portable releases and plugin. Done shows individual
+outcomes and PR links. A partial submission retains prepared packages, drafts and
+verified upload receipts; use Check PRs before retrying. Review and merge each PR
+explicitly. Plugin releases live in `plugin-releases/`; their GitHub destination
+is `Plugins/<bundle>/<version>/`. Portable destinations are unchanged.
+
+Optionally request Gemini App ZIPs. SkillJetty checks documented file types and
+size limits and blocks unsupported content without deleting it. ZIPs and reports
+live in `gemini-releases/`. These exports require manual Google import and have
+not been tested in your account. Gemini App, Workspace Studio, Cloud Enterprise
+and CLI have separate capabilities. Network-dependent scripts are not supported
+by the documented Gemini App execution environment.
+
+A plugin package is not a connected organization marketplace. The generated
+marketplace handoff must be added manually to your catalog; organization syncing,
+installation preferences and group assignment remain your administrator's work.
+
+Public Claude directory submissions have additional checks. The local report
+identifies exact oversized paths, missing README/license details, opaque binary
+content and other known directory findings. Private exports preserve databases
+and other supporting content even when that report identifies a public-directory
+blocker. No database is deleted, converted, downloaded or moved to a service.
+Optional listing fields include a bundled icon path and HTTPS privacy,
+documentation and support URLs. Portal validation and security/policy review
+remain required; local readiness is not directory acceptance.
+
+For a versioned export, point the portal at `Plugins/<name>/<version>/source`,
+which contains `.claude-plugin/plugin.json`, rather than a skill's release-history
+folder or its `.skill` archive. An immutable version path stays on that version;
+the portal's repository/folder identity cannot be changed after submission. A
+continuously updated directory listing therefore needs a separately maintained
+stable plugin folder or a new submission for a different folder. SkillJetty does
+not silently create or overwrite a stable deployment folder.

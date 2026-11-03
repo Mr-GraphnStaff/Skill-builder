@@ -1,3 +1,4 @@
+import { assertWorkbenchPath, assertWorkbenchRepository, assertRemoteDestination, containingWorkbench, isManagedWorkbench, assertWorkbenchGitMetadata, recordOwnedWorkbenchRepository } from './workbench-boundary.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -14,7 +15,9 @@ const isControl = (name: string) => controls.has(name.replace(/\\/g, '/').split(
 function projectPath(localPath?: string): string {
   if (!localPath?.trim() || !path.isAbsolute(localPath)) throw new Error('Setup required: choose an explicit absolute local Skills repository folder.');
   const resolved = path.resolve(localPath);
-  if (resolved.split(/[\\/]/).some(part => ['.codex', '.skill-workbench', '.skilljetty-prerelease', '.skilljetty-beta'].includes(part.toLowerCase()))) throw new Error('Setup required: choose a visible project folder outside Codex and private workbench storage.');
+  const managedRoot = containingWorkbench(resolved);
+  if (managedRoot) assertWorkbenchRepository(managedRoot, resolved);
+  if (resolved.split(/[\\/]/).some(part => (managedRoot ? ['.codex', '.skill-workbench', '.skilljetty-beta'] : ['.codex', '.skill-workbench', '.skilljetty-prerelease', '.skilljetty-beta']).includes(part.toLowerCase()))) throw new Error('Setup required: choose a visible project folder outside Codex and private workbench storage.');
   return resolved;
 }
 async function guard(target: string): Promise<void> {
@@ -125,9 +128,11 @@ async function rejectControlPaths(checkout: string, ref: string, run = git): Pro
 /** Only the explicit user-selected project folder receives a checkout. */
 export async function pullProjectRepository(workspaceRoot: string, repository: string, localPath: string, progress?: (message: string) => void, beforeWrite?: () => void): Promise<{ path: string; branch: string; commit: string }> {
   const checkout = projectPath(localPath); remoteIdentity(repository); await guard(checkout);
+  const enforce = () => { if (isManagedWorkbench(workspaceRoot)) { assertRemoteDestination(repository); assertWorkbenchRepository(workspaceRoot, checkout); assertWorkbenchGitMetadata(workspaceRoot, checkout); } };
+  enforce();
   const runtime = path.join(path.resolve(workspaceRoot), '.skill-workbench', 'git-control'); await guard(runtime);
   const hooks = path.join(runtime, `disabled-hooks-${randomUUID()}`);
-  const run = (cwd: string, args: string[]) => git(cwd, args, hooks, ['fetch', 'merge'].includes(args[0]) ? beforeWrite : undefined);
+  const run = (cwd: string, args: string[]) => { enforce(); if (isManagedWorkbench(workspaceRoot)) assertWorkbenchPath(workspaceRoot, cwd); return git(cwd, args, hooks, ['fetch', 'merge'].includes(args[0]) ? () => { enforce(); beforeWrite?.(); } : undefined); };
   let entries: string[] = [];
   try { entries = await fs.readdir(checkout); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   if (entries.length && !entries.includes('.git')) throw new Error('Setup required: this nonempty folder is not a Git repository. Its files were preserved.');
@@ -142,15 +147,19 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
       try {
         progress?.('Downloading the registered Skills repository into the selected project folder…');
         await run(runtime, ['clone', '--no-checkout', '--no-hardlinks', `--template=${template}`, '--single-branch', '--branch', remote.branch, '--', repository, staging]);
+        if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, staging);
         await rejectControlPaths(staging, 'HEAD', run);
         await fs.mkdir(path.join(staging, '.git', 'info'), { recursive: true });
         await fs.writeFile(path.join(staging, '.git', 'info', 'attributes'), '* merge -text -filter -ident -working-tree-encoding\n');
         await run(staging, ['reset', '--hard', 'HEAD']);
+        enforce(); beforeWrite?.();
         await fs.mkdir(checkout, { recursive: true });
         if ((await fs.readdir(checkout)).length) throw new Error('The chosen folder changed while cloning; no files were overwritten.');
         const stagedEntries = await fs.readdir(staging);
         beforeWrite?.();
+        enforce();
         for (const entry of stagedEntries) await renameCloneEntry(path.join(staging, entry), path.join(checkout, entry));
+        if (isManagedWorkbench(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkout, true);
       } finally { await fs.rm(staging, { recursive: true, force: true }); }
     }
     await identity(checkout, repository);
@@ -167,7 +176,7 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
   } finally { await fs.rm(hooks, { recursive: true, force: true }); }
 }
 /** Legacy callers must now supply an explicit selected project folder. */
-export function managedRepositoryPath(_root: string, _repository: string, localPath?: string): string { return projectPath(localPath); }
+export function managedRepositoryPath(root: string, _repository: string, localPath?: string): string { const selected = projectPath(localPath); if (root && isManagedWorkbench(root)) assertWorkbenchRepository(root, selected); return selected; }
 export function pullManagedRepository(root: string, repository: string, progress?: (message: string) => void, localPath?: string): Promise<{ path: string; branch: string; commit: string }> {
   return pullProjectRepository(root, repository, projectPath(localPath), progress);
 }

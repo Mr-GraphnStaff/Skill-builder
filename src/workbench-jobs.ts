@@ -5,8 +5,14 @@ import { emitWorkbenchMetric, type WorkbenchMetric, type WorkbenchMetricSink } f
 import type { WorkbenchSkill, ValidationReport, WorkbenchRelease, OpenedSkillPackage } from './skill-workbench.js';
 import type { LibraryRelease, SkillChangeSummary } from './workbench-library.js';
 import type { connectedReviewReleases } from './guided-workspace.js';
+import { requireWorkbench } from './workbench-setup.js';
+import type { PluginReleaseOptions, PluginRelease, GeminiRelease, PluginDirectoryReadiness } from './plugin-release.js';
 
 export type WorkbenchJob =
+  | { kind: 'preparePlugin'; root: string; options: PluginReleaseOptions }
+  | { kind: 'prepareGemini'; root: string; directory: string }
+  | { kind: 'verifyExport'; directory: string }
+  | { kind: 'pluginReadiness'; directory: string }
   | { kind: 'library'; root: string; skillName?: string }
   | { kind: 'reviews'; root: string }
   | { kind: 'validate'; skill: WorkbenchSkill }
@@ -20,6 +26,10 @@ export type WorkbenchJob =
 
 export type WorkbenchSnapshot = { validation: ValidationReport; releases: LibraryRelease[]; summary: SkillChangeSummary };
 export type WorkbenchJobResult<J extends WorkbenchJob> =
+  J extends { kind: 'preparePlugin' } ? PluginRelease :
+  J extends { kind: 'prepareGemini' } ? GeminiRelease :
+  J extends { kind: 'verifyExport' } ? WorkbenchRelease :
+  J extends { kind: 'pluginReadiness' } ? PluginDirectoryReadiness :
   J extends { kind: 'openPackage' } ? OpenedSkillPackage :
   J extends { kind: 'library' } ? LibraryRelease[] :
   J extends { kind: 'reviews' } ? ReturnType<typeof connectedReviewReleases> :
@@ -27,19 +37,20 @@ export type WorkbenchJobResult<J extends WorkbenchJob> =
   J extends { kind: 'prepareRelease' | 'verifyRelease' } ? WorkbenchRelease :
   J extends { kind: 'snapshot' } ? WorkbenchSnapshot : WorkbenchSkill;
 
-const WRITING_JOBS = new Set(['openPackage', 'importPackage', 'registerFolder', 'prepareRelease', 'restoreRelease']);
+const WRITING_JOBS = new Set(['openPackage', 'importPackage', 'registerFolder', 'prepareRelease', 'restoreRelease', 'preparePlugin', 'prepareGemini']);
 const DEFAULT_TIMEOUT = 120_000;
 
 /** Execute only our installed, fixed job module. A skill never selects code to run.
  * The controller serializes state transitions, including calls to this function. */
-export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeoutMs?: number; onMetric?: WorkbenchMetricSink } = {}): Promise<WorkbenchJobResult<J>> {
+export function runWorkbenchJob<J extends WorkbenchJob>(job: J, options: { timeoutMs?: number; onMetric?: WorkbenchMetricSink; boundaryRoot?: string } = {}): Promise<WorkbenchJobResult<J>> {
+  if (options.boundaryRoot) requireWorkbench(options.boundaryRoot);
   const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT;
   if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > DEFAULT_TIMEOUT) return Promise.reject(new Error('Invalid local operation timeout.'));
   const metric = (value: WorkbenchMetric) => emitWorkbenchMetric(options.onMetric, { ...value, jobKind: job.kind });
   return new Promise((resolve, reject) => {
     const started = performance.now(); let readyAt: number | undefined;
     const worker = new Worker(path.join(__dirname, 'workbench-job-worker.js'), {
-      workerData: job,
+      workerData: { ...job, boundaryRoot: options.boundaryRoot },
       resourceLimits: { maxOldGenerationSizeMb: 384, stackSizeMb: 4 },
       // Do not propagate parent execArgv startup-module hooks.
       execArgv: []

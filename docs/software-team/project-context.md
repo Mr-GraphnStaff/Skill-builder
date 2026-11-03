@@ -1,5 +1,19 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Managed workbench candidate — November 2, 2026
+
+The owner authorized this scoped feature exception for the next pre-release and
+then requested local installation/testing before approval. Candidate 0.14.0 is
+local preparation only; Marketplace publication is on hold. Production stays
+unchanged. The publisher-transfer wait and existing listing remain intact.
+
+Avery coordinates on Codex Windows; Ishan owns backend confinement, Mara owns
+setup wording/HTML/docs, and Lena independently reviews QA/security/accessibility
+and tests the exact installed package. These are agent role identities. Detailed
+requirements, evidence and outstanding limitations are recorded in
+`2026-11-02-workbench-candidate.md`. Do not infer native or human acceptance from
+source tests. Existing work is preserved; unmarked folders are not adopted.
+
 ## Gear/settings consolidation — November 1, 2026
 
 David explicitly authorized this bounded feature-freeze exception and Marketplace
@@ -146,3 +160,12 @@ Version 0.11.8 remains the previous public preview. If a material regression app
 ## Continuation
 
 Delivery complete within documented pre-release scope. Build 956 source is `f7d89b081fc68cfb8e9b36db3363fd58308d513a`; 294/294 CI tests, audits, artifact security check and exact-artifact native smoke passed. Its configured approval was recorded under the lead's existing explicit publication authorization, with an evidence-bearing comment identifying Codex as the executing agent. Upload succeeded, but catalog visibility exceeded that run's window, so build 956 remains failed. Read-only reconciliation 957 succeeded without uploading: original provenance, public 0.11.9 pre-release catalog visibility and exact package/payload bytes verified. A separate anonymous catalog read confirmed validated/public and latest 0.11.9. Automatic updating or loaded-version acceptance in the lead's working profile remains unverified. See `2026-10-30-prerelease-0.11.9.md` for evidence and production acceptance needs.
+# Current assignment — November 3: complete pre-release 0.15.0
+
+The lead authorized implementation and public pre-release publication of Claude
+plugin bundles/submissions/Both and Gemini App ZIP compatibility export, including
+the existing managed-workbench candidate. Production and publisher transfer stay
+unchanged. Software Team 1.0.16: Avery integration/release; Ishan core/publisher;
+Mara UI; Morgan independent security; Lena independent QA/accessibility and
+coordinator review. Evidence and status: [assignment ledger](2026-11-03-plugin-prerelease.md).
+No new paid services or organization-policy changes are part of this scope.

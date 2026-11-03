@@ -1,3 +1,4 @@
+import { assertWorkbenchPath } from './workbench-boundary.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -5,9 +6,11 @@ import { verifySkillRelease, readSkillReleaseMetadata, restoreSkillRelease, upda
 import { readSkillIdentity, semanticVersion, compareReleaseVersions, nextReleaseVersion } from './skill-identity.js';
 import { githubRepository, reviewRecord } from './github-review.js';
 import type { PullRequestRecord } from './guided-contract.js';
+import { verifyExportRelease, readExportReleaseMetadata, listPluginReleaseMetadata } from './plugin-release.js';
 
 type Publication = { repository: string; branch: string; commit: string; baseBranch?: string; publishedAt?: string };
 export type LibraryRelease = {
+  kind?: 'skill' | 'plugin';
   skillName: string; version: string; directory: string; packagePath: string;
   status: 'uploaded' | 'archived' | 'prepared';
   repository?: string; baseBranch?: string; branch?: string; commit?: string; publishedAt?: string;
@@ -17,21 +20,17 @@ export type LibraryRelease = {
 const semver = semanticVersion;
 
 function safe(root: string, target: string): void {
-  root = path.resolve(root); target = path.resolve(target);
-  const relative = path.relative(root, target);
-  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('Library path leaves this workspace.');
-  let current = root;
-  for (const part of ['', ...relative.split(path.sep).filter(Boolean)]) {
-    if (part) current = path.join(current, part);
-    try { if (fs.lstatSync(current).isSymbolicLink()) throw new Error('Library paths cannot contain symbolic links.'); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  }
+  assertWorkbenchPath(root, target);
 }
 function localRelease(root: string, directory: string, verifyPayload = true) {
   safe(root, directory);
-  const release = verifyPayload ? verifySkillRelease(directory) : readSkillReleaseMetadata(directory);
-  if (path.relative(path.join(path.resolve(root), 'releases', release.skillName, release.version), path.resolve(directory)) !== '') throw new Error('Release is outside this workspace library.');
+  const release = verifyPayload ? verifyExportRelease(directory) : readExportReleaseMetadata(directory);
+  const base = (release.manifest as { kind?: string }).kind === 'plugin' ? 'plugin-releases' : 'releases';
+  if (path.relative(path.join(path.resolve(root), base, release.skillName, release.version), path.resolve(directory)) !== '') throw new Error('Release is outside this workspace library.');
   return release;
+}
+function releaseKey(release: ReturnType<typeof localRelease>): string {
+  return (release.manifest as { kind?: string }).kind === 'plugin' ? `plugins/${release.skillName}` : release.skillName;
 }
 function receiptPath(root: string, name: string, version: string) {
   const target = path.join(path.resolve(root), '.skill-workbench', 'publications', name, `${version}.json`);
@@ -51,11 +50,12 @@ function readReview(root: string, name: string, version: string, upload: Publica
 /** Mutable review metadata is deliberately outside immutable release bytes. */
 export function recordLibraryReview(root: string, directory: string, result: PullRequestRecord, options: { repairHistoricalNumber?: number } = {}): PullRequestRecord {
   const release = localRelease(root, directory);
-  const receipt = receiptPath(root, release.skillName, release.version);
+  const key = releaseKey(release);
+  const receipt = receiptPath(root, key, release.version);
   if (!fs.existsSync(receipt)) throw new Error('A verified upload receipt is required before recording a PR.');
   const upload = publication(JSON.parse(fs.readFileSync(receipt, 'utf8')));
   let previous: PullRequestRecord | undefined;
-  try { previous = readReview(root, release.skillName, release.version, upload); } catch { /* A fresh server check can repair invalid metadata. */ }
+  try { previous = readReview(root, key, release.version, upload); } catch { /* A fresh server check can repair invalid metadata. */ }
   let pr = reviewRecord(result, upload.repository);
   if (previous?.number && pr.number && previous.number !== pr.number) {
     const repair = options.repairHistoricalNumber === previous.number
@@ -64,14 +64,14 @@ export function recordLibraryReview(root: string, directory: string, result: Pul
       && pr.identityVerified === true && pr.headCommit === upload.commit
       && pr.head === upload.branch && pr.base === upload.baseBranch;
     if (!repair) throw new Error('A different PR is already recorded for this version; inspect its repository state.');
-    const oldTarget = reviewPath(root, release.skillName, release.version);
+    const oldTarget = reviewPath(root, key, release.version);
     const history = `${oldTarget}.superseded-${previous.number}-${randomUUID()}.json`; safe(root, history);
     fs.copyFileSync(oldTarget, history, fs.constants.COPYFILE_EXCL);
     previous = undefined; // Old approvals, reviewer notifications and errors belong to the old PR.
   }
   if (previous && pr.error) pr = { ...previous, ...pr, status: pr.number && pr.identityVerified && !previous.number ? pr.status : previous.status,
     checkedAt: previous.checkedAt, number: pr.number ?? previous.number, creationUncertain: pr.creationUncertain ?? previous.creationUncertain };
-  const target = reviewPath(root, release.skillName, release.version);
+  const target = reviewPath(root, key, release.version);
   fs.mkdirSync(path.dirname(target), { recursive: true }); safe(root, target);
   const temporary = `${target}.${randomUUID()}.tmp`; safe(root, temporary);
   fs.writeFileSync(temporary, JSON.stringify({ format: 1, ...upload, pr }, null, 2) + '\n', { flag: 'wx' });
@@ -98,7 +98,7 @@ function publication(value: unknown): Publication {
 export function recordLibraryPublication(root: string, directory: string, result: Publication): void {
   const release = localRelease(root, directory);
   const data = publication(result);
-  const target = receiptPath(root, release.skillName, release.version);
+  const target = receiptPath(root, releaseKey(release), release.version);
   if (fs.existsSync(target)) {
     const previous = publication(JSON.parse(fs.readFileSync(target, 'utf8')));
     if (previous.commit !== data.commit || previous.repository !== data.repository || previous.branch !== data.branch) throw new Error('A different publication is already recorded for this version.');
@@ -113,9 +113,8 @@ export function recordLibraryPublication(root: string, directory: string, result
 
 export function listLibraryReleases(root: string, skillFilter?: string, options: { verifyPayload?: boolean } = {}): LibraryRelease[] {
   const base = path.join(path.resolve(root), 'releases'); safe(root, base);
-  if (!fs.existsSync(base)) return [];
   const items: LibraryRelease[] = [];
-  for (const name of fs.readdirSync(base, { withFileTypes: true })) {
+  for (const name of fs.existsSync(base) ? fs.readdirSync(base, { withFileTypes: true }) : []) {
     if (skillFilter !== undefined && name.name !== skillFilter) continue;
     if (!name.isDirectory() || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name.name)) continue;
     const folder = path.join(base, name.name); safe(root, folder);
@@ -141,11 +140,26 @@ export function listLibraryReleases(root: string, skillFilter?: string, options:
       items.push({ skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath, status, verification: options.verifyPayload === false ? 'metadata' : 'verified', ...data, ...(pr ? { pr } : {}) });
     }
   }
+  // Plugin identities occupy their own library and receipt namespace. A bundle
+  // may legitimately have the same name/version as one of its member skills.
+  if (skillFilter === undefined) for (const meta of listPluginReleaseMetadata(root)) {
+    const release = localRelease(root, meta.directory, options.verifyPayload !== false);
+    const key = releaseKey(release), receipt = receiptPath(root, key, release.version);
+    let data: Partial<Publication> = {}, pr: PullRequestRecord | undefined;
+    if (fs.existsSync(receipt)) {
+      const upload = publication(JSON.parse(fs.readFileSync(receipt, 'utf8'))); data = upload;
+      try { pr = readReview(root, key, release.version, upload); }
+      catch { pr = { supported: !!githubRepository(upload.repository), status: 'unknown', error: 'Saved plugin PR metadata could not be verified. Use Check PRs to repair it.' }; }
+    }
+    items.push({ kind: 'plugin', skillName: release.skillName, version: release.version, directory: release.directory, packagePath: release.packagePath,
+      status: data.commit ? 'uploaded' : 'prepared', verification: options.verifyPayload === false ? 'metadata' : 'verified', ...data, ...(pr ? { pr } : {}) });
+  }
   return items.sort((a, b) => a.skillName.localeCompare(b.skillName) || compareReleaseVersions(b.version, a.version) || b.version.localeCompare(a.version));
 }
 
 export function restoreLibraryRelease(root: string, directory: string): WorkbenchSkill {
   const release = localRelease(root, directory, false);
+  if ((release.manifest as { kind?: string }).kind === 'plugin') throw new Error('Open a member skill to edit this plugin bundle; bundles do not replace an editable skill draft.');
   const item = listLibraryReleases(root, release.skillName, { verifyPayload: false }).find(release => path.resolve(release.directory) === path.resolve(directory));
   const draft = restoreSkillRelease(root, directory);
   if (item?.repository && item.baseBranch) return updateSkillRepository(root, draft.id, item.repository, item.baseBranch);
