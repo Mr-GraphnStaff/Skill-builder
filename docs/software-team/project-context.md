@@ -59,6 +59,22 @@ Chromium has separately passed first Save, direct typing/click, Tab focus,
 stale-reply and local ZIP-content cases; its final frozen-source eight-case run
 and the exact-artifact native/browser checks still govern delivery.
 
+CI1000 at `ea154002e3a88d7733ee1796014747a9973315bf` ran 467 tests:
+465 passed, one stale message assertion failed, and one Windows-only case was
+skipped. Publication was skipped, and no 0.15.3 artifact was approved. The test
+now checks the optional-sharing message and actually creates an offline draft;
+its focused rerun passed. Preserve the failed build as evidence.
+
+The newly reachable repository-source button also exposed an inherited online
+dependency before its folder picker. Its local-opening action now uses existing
+read-only local Git identity validation and rechecks settings after validation
+and after the picker. It neither contacts the remote nor rewrites the connection;
+explicit Verify, Pull and sharing keep their online guards. Four focused cases
+passed, including first-save ZIP generation and settings races. The actual
+browser has reached the local repository source, picker and ZIP successfully with
+zero remote attempts; the complete final eight-case verdict and replacement CI
+are still required.
+
 ## Existing repository recovery — November 3, 2026
 
 The owner directed repair after the optional managed-workbench feature became a

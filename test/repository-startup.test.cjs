@@ -41,8 +41,12 @@ test('startup verification reports an unregistered repository without blocking l
   const controller = new GuidedWorkbenchController(f.root, { onRepositoryVerification: state => updates.push(state) });
   await controller.dispatch({ action: 'ready' }); await controller.verifyRepository();
   assert.equal(controller.state.repositoryVerification.status, 'setupRequired');
-  assert.match(controller.state.repositoryVerification.message, /register.*repository/i);
+  assert.match(controller.state.repositoryVerification.message, /GitHub sharing is optional/i);
+  assert.match(controller.state.repositoryVerification.message, /without connecting a repository/i);
   await controller.dispatch({ action: 'showCreate' }); assert.equal(controller.state.form.mode, 'create'); assert.equal(controller.state.error, undefined);
+  await controller.dispatch({ action: 'createSkill', payload: { name: 'offline-draft', description: 'Summarize local notes.', instructions: '# Notes\nKeep supplied facts.' } });
+  assert.equal(controller.state.error, undefined); assert.equal(controller.state.active.id, 'offline-draft');
+  assert(fs.existsSync(path.join(f.root, 'skills/offline-draft/SKILL.md')));
   assert.equal(updates.at(-1).status, 'setupRequired');
 });
 test('registered repository without an explicit local path requires setup and creates no checkout', async t => {

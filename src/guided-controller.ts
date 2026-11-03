@@ -3,7 +3,7 @@ import { assertWorkbenchRepository, assertRemoteDestination } from './workbench-
 import { requireWorkbench } from './workbench-setup.js';
 import { emitWorkbenchMetric, type WorkbenchMetricSink } from './workbench-metrics.js';
 import type { OpenedSkillPackage } from './skill-workbench.js';
-import { verifyProjectRepository, pullProjectRepository } from './managed-repository.js';
+import { verifyProjectRepository, pullProjectRepository, validateProjectRepositoryForPublish } from './managed-repository.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
@@ -472,11 +472,18 @@ export class GuidedWorkbenchController {
           break;
         }
         case 'openRepositorySkill': {
-          this.refreshConnection();
-          const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(beforeWrite, true) : this.state.connection;
-          if (!connection?.localPath) throw new Error('Choose the actual local skills project folder first.');
-          const folder = await this.hooks.pickFolder?.(connection.localPath);
+          // Opening a local source needs only its existing Git identity. Remote
+          // verification, authentication and connection writes belong to the
+          // explicit sharing actions, not the local folder picker.
+          const selected = this.repositorySelection();
+          if (!selected.repository || !selected.localPath) throw new Error('Choose the actual local skills project folder first.');
+          const checkout = await validateProjectRepositoryForPublish(selected.repository, selected.localPath);
+          beforeWrite();
+          const folder = await this.hooks.pickFolder?.(checkout);
+          beforeWrite();
           if (folder) {
+            await validateProjectRepositoryForPublish(selected.repository, checkout);
+            beforeWrite();
             this.progress('Opening the selected skill folder…');
             this.select(await this.runJob({ kind: 'registerFolder', root: this.workspace(), folder, replaceExisting: true }), undefined, true);
           } else { this.state.form = previousForm; this.state.notice = 'Opening canceled. Your current work is retained.'; }

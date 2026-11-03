@@ -20,6 +20,8 @@
 - Update plugin name/version suggestions without interrupting typing or losing
   the user's Save click; preserve explicit versions and the latest edits.
 - Reject late messages from an old panel after another workbench is opened.
+- Open a skill from the configured local repository using local identity checks
+  without requiring remote verification or rewriting the saved connection.
 
 ## 0.15.2 — existing repository recovery (pre-release candidate)
 
