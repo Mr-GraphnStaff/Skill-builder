@@ -40,6 +40,7 @@ function hostFixture(selection, options = {}) {
     }
     async dispatch(message) { await options.dispatch?.(message, this); }
     async verifyRepository() {}
+    async loadHome() { return false; }
     refreshRepositorySettings() {}
   }
   const vscode = {
@@ -181,10 +182,11 @@ test('actual host accepts the existing selection without a marker and only annou
   await setup;
   const checkingIndex = host.events.findIndex((event, index) => index > waitingIndex && event.type === 'message' && event.message.type === 'progress' && event.message.waitingForInput === false);
   assert(checkingIndex > waitingIndex, 'returned selection switches to checking rather than retaining picker wait');
-  const completion = panel.messages.filter(message => message.type === 'operationComplete').at(-1);
-  assert.match(completion.error, /not adopted automatically/);
-  await panel.receive({ action: 'save' });
-  assert.equal(panel.messages.at(-1).type, 'saved', 'unanswered error notification does not hold the queue');
+  const current = host.panels.at(-1);
+  assert.notEqual(current, panel, 'the explicitly selected saved project is opened');
+  assert.equal(host.controllers.at(-1).hooks.workspaceSelection.kind, 'existing-repository');
+  await current.receive({ action: 'save' });
+  assert.equal(current.messages.at(-1).type, 'saved', 'the selected project remains ready for editing');
   errorNotice.resolve();
   assert.equal(fs.existsSync(path.join(f.dataRoot, '.skilljetty-workbench.json')), false);
 });

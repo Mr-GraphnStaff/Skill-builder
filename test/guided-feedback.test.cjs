@@ -435,6 +435,7 @@ test('targeted configuration updates preserve newer unsaved text after an earlie
   h.receive({ type: 'saved' });
   const latest = 'Second edit typed after autosave.\n</textarea><script>not executable</script>';
   h.editor.value = latest;
+  h.elements.get('local-repository-path').textContent = 'P:/Current project';
   const counts = { ...h.lifecycle }, timerCount = h.timers.size, posts = h.posted.length;
   const hostile = '<img src=x onerror=hostile()>';
   h.receive({ type: 'configurationChanged', display: { workFolder: 'P:/Active work', localRepository: hostile,
@@ -444,8 +445,7 @@ test('targeted configuration updates preserve newer unsaved text after an earlie
   assert.deepEqual(h.lifecycle, counts, 'no focus move or persisted editor snapshot');
   assert.equal(h.timers.size, timerCount, 'no autosave scheduled');
   assert.equal(h.posted.length, posts, 'no operation or editor acknowledgement sent');
-  assert.equal(h.elements.get('active-work-folder').textContent, 'P:/Active work');
-  assert.equal(h.elements.get('local-repository-path').textContent, hostile);
+  assert.equal(h.elements.get('local-repository-path').textContent, 'P:/Current project', 'changing Git preferences must not relabel the active project');
   assert.equal(h.elements.get('repository-verification').textContent, hostile);
   assert.equal(h.elements.get('repository-settings-state').textContent, 'Not yet verified');
 });

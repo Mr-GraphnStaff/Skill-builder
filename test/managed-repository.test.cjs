@@ -24,7 +24,7 @@ function fixture(t) {
 test('registered repository is read-only with ordinary skill opening and native settings access', () => {
   const state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable', connection: { repository: 'https://github.com/example/skills.git', localPath: 'P:/Skills', baseBranch: 'trunk' } };
   const html = renderGuidedWorkbench(state, 'managedRepositoryNonce123');
-  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/skills.git<\/dd>/);
+  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/skills.git<\/strong>/);
   assert.match(html, /data-action="openSettings"/);
   assert.match(html, /data-action="openRepositorySkill"/);
   assert.match(html, /id="open-repository-skill"/);

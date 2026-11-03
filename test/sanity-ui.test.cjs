@@ -37,23 +37,34 @@ test('guided Sanity check keeps application advice outside structural findings',
 
 test('Sanity check explains its scope and never gives informational notes a Fix action', () => {
   const html = renderGuidedWorkbench({ ...base, check: { valid: true, errors: [], warnings: [{ message: 'Informational structural note.', file: 'SKILL.md' }], compatibility: 'Application compatibility was not tested.', behaviorNote: 'No AI model was run.' } }, nonce);
-  assert.match(html, /Sanity check passed/);
-  assert.match(html, /Structural checks passed\./);
-  assert.match(html, /Security scanning was not performed by SkillJetty\./);
-  assert.match(html, /Structural notes \(1\)/);
+  assert.match(html, /Ready to build/);
+  assert.match(html, /files passed the structural check/);
+  assert.match(html, /does not run an assistant or scan for security threats/);
+  assert.match(html, /Notes \(1\)/);
   assert.doesNotMatch(html, /data-action="openFile" data-path="SKILL.md"/);
   assert.doesNotMatch(html, /Compatibility and manual testing|Passed — local checks/);
   assert.match(html, /data-action="preparePublish"/);
   const error = renderGuidedWorkbench({ ...base, check: { valid: false, errors: [{ message: 'Name is required.', file: 'SKILL.md' }], warnings: [], compatibility: '', behaviorNote: '' } }, nonce);
   assert.match(error, /data-action="openFile" data-path="SKILL.md"/);
-  assert.doesNotMatch(error, /data-action="preparePublish"/);
+  assert.match(error, /id="primary-action"[^>]*data-action="edit"/);
 });
 
-test('Sanity check is consistently named while the internal action remains stable', () => {
+test('Editor offers Build Share directly while structural validation still runs before review', async t => {
   const html = renderGuidedWorkbench({ ...base, step: 'edit', active: { id: 'draft', name: 'draft' } }, nonce);
-  assert.match(html, /data-action="check"[^>]*>Sanity check /);
-  assert.match(html, /Step 3: <\/span>Sanity check/);
+  assert.match(html, /id="primary-action"[^>]*data-action="preparePublish"[^>]*>Build \/ Share/);
+  assert.doesNotMatch(html, /Step 3:|aria-current="step"/);
   assert.doesNotMatch(html, /Check and continue|Changing the target updates local compatibility checks/);
   assert.equal(activityForAction('check'), 'Running a structural sanity check…');
-  assert.match(renderGuidedLauncher(nonce), /Edit and run Sanity check/);
+  assert.match(renderGuidedLauncher(nonce), /id="open-workbench">Open SkillJetty/);
+  assert.doesNotMatch(renderGuidedLauncher(nonce), /Edit and run Sanity check/);
+  const scratchBase = require('./working-fixture.cjs').workingFixture('direct-build-check');
+  fs.mkdirSync(scratchBase, { recursive: true });
+  const root = fs.mkdtempSync(path.join(scratchBase, 'project-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const controller = new GuidedWorkbenchController(root);
+  await controller.dispatch({ action: 'createSkill', payload: { name: 'direct-check', description: 'Summarize notes when asked.', instructions: '# Notes\nKeep facts.' } });
+  await controller.dispatch({ action: 'preparePublish' });
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.check.valid, true);
+  assert.equal(controller.state.step, 'publish');
 });

@@ -49,6 +49,26 @@ or coherent final build. Frozen-source full CI and exact-artifact reviews govern
 delivery. Original stale compiled/copy fixtures and exploratory QA failures are
 retained rather than reclassified as product acceptance.
 
+CI1004 at `eefd46680ff820314d0bb12ec91052fb00c870f9` ran 484 tests:
+475 passed, eight failed, one Windows-only skip. Six assertions described the
+retired wizard/summary markup, and two host mocks omitted the new read-only
+`loadHome` method. No package was approved or uploaded. Corrected tests retain
+their validation/ownership/focus assertions and now exercise the direct checked
+Build / Share and successful explicit legacy-project opening. The first focused
+fixture update exposed a test-local variable shadow and an old launcher-copy
+assertion; both were corrected, with failures retained.
+
+Real browser review also rejected the narrow layout: at 320×780, long project
+paths and completed activity history pushed the main action out of view. The
+repair shows the project name with its exact path in the tooltip/settings and
+keeps only current status inline. Activity history and timing remain available
+in a named optional dialog even during a busy action; no required choices or
+next actions move into it. Current UI/human tests pass 49/49
+(`working/runs/2da6bdf5d8044bca9f994caac256d261/reports/ui-tests.tap`).
+New plugin reopening tests pass 3/3 (`working/runs/99c5554da3d04ebda0cd282663555da2`);
+independent copy-after-verification tamper regression passed with the copied
+draft retained and no build/upload (`working/runs/ca68806bb87347109de1c835fc62fcee/reports/security-open-plugin-race.json`).
+
 ## Active usability and plugin repair — November 3, 2026
 
 ### Verified delivery: preview 0.15.3

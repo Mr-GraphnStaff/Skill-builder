@@ -48,9 +48,12 @@ function configurationSummary(state: GuidedState): string {
   const project = state.repositoryRoot ?? (state.workspaceMode === 'managed' ? managedProject : local || state.workFolder);
   const projectName = project?.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || project;
   const verification = state.repositoryVerification;
-  const status = invalid ? 'Upload needs attention' : verification?.status === 'verified' ? 'Verified' : repository ? 'Ready to check on upload' : 'Not connected';
+  const status = invalid || verification?.status === 'error' ? 'Upload needs attention'
+    : verification?.status === 'outOfSync' ? 'Local and remote differ'
+    : verification?.status === 'checking' ? 'Checking connection'
+    : verification?.status === 'verified' ? 'Verified' : repository ? 'Ready to check on upload' : 'Not connected';
   return `<section id="workbench-configuration" class="project-strip" aria-label="Current project and sharing destination" data-configuration-error="${invalid}">
-    <div><span class="eyebrow">Working in</span><strong>${escape(projectName || 'Choose a location to begin')}</strong><small id="local-repository-path">${escape(project || '')}</small></div>
+    <div><span class="eyebrow">Working in</span><strong id="local-repository-path" title="${escape(project || '')}">${escape(projectName || 'Choose a location to begin')}</strong></div>
     <div><span class="eyebrow">GitHub destination</span><strong id="configured-repository">${escape(repository || 'Not connected')}</strong><small><span id="configured-target-branch">${escape(state.connection?.baseBranch || (repository ? 'Branch checked before upload' : ''))}</span> <span id="repository-settings-state">${escape(repository || invalid ? status : '')}</span></small></div>
     <div class="project-actions">${secondary('openSettings', repository ? 'Change connection' : 'Connect repository')}${state.githubAccount ? `<small>Signed in as ${escape(state.githubAccount)}</small>` : ''}</div>
     <p id="repository-verification" class="hint" role="status" aria-live="polite" data-status="${invalid ? 'error' : escape(verification?.status ?? 'setupRequired')}">${invalid ? 'GitHub upload needs a corrected connection. Your work can still be edited and saved locally.' : escape(verification?.status === 'error' || verification?.status === 'outOfSync' ? verification.message : '')}</p>
@@ -333,6 +336,13 @@ const styles = `
   @media (max-width: 950px) { .build-layout { grid-template-columns: 1fr; } .build-summary { order: -1; } .project-strip { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .project-actions { grid-column: 1 / -1; } }
   @media (max-width: 560px) { .project-strip, .metadata-grid { grid-template-columns: 1fr; } .project-nav { gap: 0; } .nav-button { flex: 1; padding-inline: .4rem; } .action-bar { flex-wrap: wrap; gap: .5rem; } .action-bar .primary { flex-basis: 100%; } }
 
+  .activity-status { display: flex; justify-content: space-between; align-items: center; gap: .6rem; }
+  .activity-current { flex: 1; min-inline-size: 0; }
+  .activity-history-button { flex: none; min-block-size: 2rem; padding: .25rem .5rem; font-size: .8rem; line-height: 1.2; max-inline-size: 7rem; }
+  #activity-history-dialog .activity-history { max-block-size: min(55vh, 30rem); margin-block: .7rem 1rem; font-size: .9rem; }
+  #activity-history-dialog .diagnostic-actions { margin-block: .6rem 1rem; }
+  #activity-history-dialog .diagnostic-actions .hint { display: block; }
+
 `;
 
 const script = `
@@ -370,8 +380,9 @@ const script = `
     if (!activityHistory || !Array.isArray(entries)) return;
     const nextGeneration = Number.isSafeInteger(generation) && generation >= 0 ? generation : historyGeneration;
     const reset = nextGeneration !== historyGeneration;
-    const follow = reset || (historyInitialized ? activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24 : saved.activityScroll?.follow !== false);
-    const position = reset ? 0 : historyInitialized ? activityHistory.scrollTop : saved.activityScroll?.top || 0;
+    const historyVisible = document.getElementById('activity-history-dialog')?.open !== false;
+    const follow = reset || (historyInitialized && historyVisible ? activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24 : saved.activityScroll?.follow !== false);
+    const position = reset ? 0 : historyInitialized && historyVisible ? activityHistory.scrollTop : saved.activityScroll?.top || 0;
     const labels = { running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' };
     const rows = entries.slice(-100).filter(entry => entry && typeof entry.message === 'string' && Object.prototype.hasOwnProperty.call(labels, entry.status)).map(entry => {
       const row = document.createElement('li');
@@ -385,10 +396,10 @@ const script = `
     });
     activityHistory.replaceChildren(...rows);
     activityHistory.hidden = rows.length === 0;
-    activityHistory.scrollTop = follow ? activityHistory.scrollHeight : position;
+    if (historyVisible) activityHistory.scrollTop = follow ? activityHistory.scrollHeight : position;
     historyInitialized = true;
     historyGeneration = nextGeneration;
-    saved.activityScroll = { top: activityHistory.scrollTop, follow, generation: historyGeneration };
+    saved.activityScroll = { top: historyVisible ? activityHistory.scrollTop : position, follow, generation: historyGeneration };
     vscode.setState(saved);
   }
   function focusActivity() {
@@ -400,6 +411,7 @@ const script = `
   }
   updateActivityHistory(initialActivity, initialActivityGeneration);
   if (activityHistory) activityHistory.addEventListener('scroll', () => {
+    if (document.getElementById('activity-history-dialog')?.open === false) return;
     saved.activityScroll = { top: activityHistory.scrollTop, follow: activityHistory.scrollHeight - activityHistory.scrollTop - activityHistory.clientHeight < 24, generation: historyGeneration };
     vscode.setState(saved);
   });
@@ -578,7 +590,11 @@ const script = `
   }
   function fieldValue(id) { const element = document.getElementById(id); return element ? element.value : ''; }
   document.querySelectorAll('[data-open-dialog]').forEach(button => button.addEventListener('click', () => {
-    document.getElementById(button.dataset.openDialog)?.showModal();
+    const dialog = document.getElementById(button.dataset.openDialog);
+    dialog?.showModal();
+    if (dialog?.id === 'activity-history-dialog' && activityHistory) {
+      activityHistory.scrollTop = saved.activityScroll?.follow !== false ? activityHistory.scrollHeight : saved.activityScroll?.top || 0;
+    }
   }));
   document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => {
     document.getElementById(button.dataset.closeDialog)?.close();
@@ -824,7 +840,7 @@ export function renderGuidedWorkbench(state: GuidedState, nonce: string, brand?:
   const primary = screen.primary;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'; img-src data:; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><title>${escape(screen.title)} | ${escape(productName(brand))}</title><style nonce="${nonce}">${styles}</style></head><body>
     <a href="#main-content" class="skip-link">Skip to content</a><div class="shell">
-    <div id="operation-status" class="activity-status" role="region" aria-labelledby="activity-heading" tabindex="-1" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><h2 id="activity-heading" class="activity-heading">Activity</h2><div class="activity-current"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message" role="status" aria-live="polite" aria-atomic="true">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div><ol id="activity-history" class="activity-history" aria-label="Activity history" aria-live="off" tabindex="0" ${state.activity?.length ? '' : 'hidden'}>${(state.activity ?? []).slice(-100).map(entry => `<li data-status="${escape(entry.status)}"><strong>${escape(({ running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' })[entry.status])}: </strong><span>${escape(entry.message)}</span></li>`).join('')}</ol><div id="activity-timing" class="diagnostic-actions"><div class="button-row">${secondary('openPerformanceLog', 'Open performance log', 'id="open-performance-log" data-diagnostics="true" aria-describedby="performance-log-help"')}</div><p class="hint" id="performance-log-help">Open local timing details, including startup and earlier steps. Available while work is running.</p></div></div>
+    <div id="operation-status" class="activity-status" role="region" aria-labelledby="activity-heading" tabindex="-1" data-working="${!!state.busy && !state.waitingForInput}" data-waiting-for-input="${!!state.waitingForInput}"><h2 id="activity-heading" class="activity-heading">Activity</h2><div class="activity-current"><progress id="operation-indicator" class="activity-indicator" aria-label="Operation in progress" ${!state.busy || state.waitingForInput ? 'hidden' : ''}></progress><div><strong id="progress-message" role="status" aria-live="polite" aria-atomic="true">${escape(state.progress ?? 'Ready.')}</strong><div id="activity-details" aria-live="off"></div></div></div><button type="button" class="secondary activity-history-button" data-open-dialog="activity-history-dialog" data-diagnostics="true">Activity history</button><dialog id="activity-history-dialog" aria-labelledby="activity-history-heading"><h2 id="activity-history-heading">Activity history</h2><ol id="activity-history" class="activity-history" aria-label="Activity history" aria-live="off" tabindex="0" ${state.activity?.length ? '' : 'hidden'}>${(state.activity ?? []).slice(-100).map(entry => `<li data-status="${escape(entry.status)}"><strong>${escape(({ running: 'In progress', waiting: 'Waiting', succeeded: 'Succeeded', failed: 'Needs attention', info: 'Update' })[entry.status])}: </strong><span>${escape(entry.message)}</span></li>`).join('')}</ol><div id="activity-timing" class="diagnostic-actions"><div class="button-row">${secondary('openPerformanceLog', 'Open performance log', 'id="open-performance-log" data-diagnostics="true" aria-describedby="performance-log-help"')}</div><p class="hint" id="performance-log-help">Open local timing details, including startup and earlier steps. Available while work is running.</p></div><button type="button" class="primary" data-close-dialog="activity-history-dialog" data-diagnostics="true">Close history</button></dialog></div>
     <header><div class="header-heading">${brandHeader(brand)}<div class="header-tools">${settingsButton()}</div></div><nav class="project-nav" aria-label="Project"><button type="button" class="nav-button" data-action="startAnother" ${area === 'home' ? 'aria-current="page" disabled data-unavailable="true"' : ''}>Your project</button><button type="button" class="nav-button" data-action="${state.step === 'publish' ? 'back' : 'edit'}" ${area === 'editor' ? 'aria-current="page" disabled data-unavailable="true"' : ''} ${!state.active ? 'disabled data-unavailable="true"' : ''}>Editor</button><button type="button" class="nav-button" data-action="preparePublish" ${area === 'build' ? 'aria-current="page" disabled data-unavailable="true"' : ''} ${!state.active ? 'disabled data-unavailable="true"' : ''}>Build / Share</button></nav>${configurationSummary(state)}</header>
     <main id="main-content" tabindex="-1" data-step="${escape(state.step)}" data-active-id="${escape(state.active?.id ?? '')}" data-form-scope="${escape(formScope)}" data-reviewer-context="${escape(JSON.stringify([state.githubAccount ?? '', state.connection?.repository ?? '']))}" data-busy="${!!state.busy}" data-waiting-for-input="${!!state.waitingForInput}" data-has-error="${!!state.error}" aria-busy="${!!state.busy}">
       <h1 id="stepHeading" tabindex="-1">${escape(screen.title)}</h1><p class="screen-hint">${escape(screen.hint)}</p>

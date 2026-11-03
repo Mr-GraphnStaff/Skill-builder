@@ -194,6 +194,23 @@ test('performance log is in Activity from the first screen through busy later st
   }
 });
 
+test('current status stays visible while full activity history has a separate nonblocking viewer', () => {
+  const html = renderGuidedWorkbench(state({ busy: true, progress: 'Waiting for your selection.', activity: [
+    { id: 1, message: 'Earlier saved action <unsafe>', status: 'succeeded' },
+    { id: 2, message: 'Current action', status: 'waiting' }
+  ] }), nonce);
+  const dialogStart = html.indexOf('<dialog id="activity-history-dialog"');
+  const dialogEnd = html.indexOf('</dialog>', dialogStart);
+  assert(html.indexOf('id="progress-message"') < dialogStart, 'current status is outside the history dialog');
+  assert.match(html, /data-open-dialog="activity-history-dialog" data-diagnostics="true">Activity history/);
+  assert.match(html.slice(dialogStart, dialogEnd), /Earlier saved action &lt;unsafe&gt;/);
+  assert.match(html.slice(dialogStart, dialogEnd), /id="activity-history"/);
+  assert.match(html.slice(dialogStart, dialogEnd), /id="open-performance-log"/);
+  assert.match(html.slice(dialogStart, dialogEnd), /data-close-dialog="activity-history-dialog" data-diagnostics="true"/);
+  assert.doesNotMatch(html, /data-open-dialog="activity-history-dialog"[^>]*disabled/);
+  assert.match(html, /if \(document.getElementById\('activity-history-dialog'\)\?\.open === false\) return/);
+});
+
 test('every area shows the exact project and destination with an always available settings action', () => {
 for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
     const html = renderGuidedWorkbench(state({ step, busy: true, workFolder: 'P:/Actual <work>/folder', configuredRepository: 'https://github.com/desired/Skills', configuredLocalRepository: 'P:/Desired <repo>', check: { valid: true, errors: [], warnings: [], compatibility: '', behaviorNote: '' }, publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
@@ -201,7 +218,7 @@ for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
     assert.match(html, /id="open-settings"[^>]*data-action="openSettings"[^>]*aria-label="Open SkillJetty settings"/);
     assert.doesNotMatch(html, /<button[^>]*id="open-settings"[^>]*\bdisabled/);
     assert.match(html, /id="configured-repository">https:\/\/github.com\/desired\/Skills<\/strong>/);
-    assert.match(html, /id="local-repository-path">P:\/Desired &lt;repo&gt;<\/small>/);
+    assert.match(html, /id="local-repository-path" title="P:\/Desired &lt;repo&gt;">Desired &lt;repo&gt;<\/strong>/);
     assert(html.indexOf('id="workbench-configuration"') < html.indexOf('<main'));
   }
 });
@@ -226,8 +243,7 @@ const html = renderGuidedWorkbench(state({ hasWorkspace: false, connection: unde
 
 test('project identity uses the repository root while preserving the exact storage location', () => {
 const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository', repositoryRoot: 'P:/Projects/Skills', workFolder: 'P:/Projects/Skills/.skilljetty-prerelease', configuredLocalRepository: 'P:/Projects/Skills', configuredRepository: 'https://github.com/example/Skills' }), nonce);
-  assert.match(html, /Working in<\/span><strong>Skills<\/strong>/);
-  assert.match(html, /id="local-repository-path">P:\/Projects\/Skills<\/small>/);
+  assert.match(html, /Working in<\/span><strong id="local-repository-path" title="P:\/Projects\/Skills">Skills<\/strong>/);
   assert.doesNotMatch(html, /Saved in|P:\/Projects\/Skills\/.skilljetty-prerelease/);
   assert.match(html, /id="configured-target-branch">main<\/span>/);
   assert.doesNotMatch(html, /What goes in each|Create another workbench|<details/);
@@ -235,8 +251,7 @@ const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository',
 
 test('managed project identity shows its chosen project once and keeps internal directories out of the task', () => {
   const html = renderGuidedWorkbench(state({ workspaceMode: 'managed', workFolder: 'P:\\Projects\\Alpha10\\.skilljetty-prerelease', connection: undefined }), nonce);
-  assert.match(html, /Working in<\/span><strong>Alpha10<\/strong>/);
-  assert.match(html, /id="local-repository-path">P:\\Projects\\Alpha10<\/small>/);
+  assert.match(html, /Working in<\/span><strong id="local-repository-path" title="P:\\Projects\\Alpha10">Alpha10<\/strong>/);
   assert.doesNotMatch(html, /\.skilljetty-prerelease|Saved in/);
 });
 

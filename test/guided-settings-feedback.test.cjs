@@ -41,7 +41,7 @@ test('background repository results update the read-only summary without moving 
 
 test('setup errors stay visible in the read-only summary without a collapsed settings region', () => {
   const f = fixture({ status: 'error', message: 'Connection needs attention.' });
-  assert.match(f.html, /id="repository-settings-state"[^>]*>Check failed<\/dd>/);
+  assert.match(f.html, /id="repository-settings-state"[^>]*>Upload needs attention<\/span>/);
   assert.match(f.html, /Connection needs attention\./);
   assert.doesNotMatch(f.html, /id="repository-settings"/);
 });
@@ -49,7 +49,7 @@ test('setup errors stay visible in the read-only summary without a collapsed set
 test('background verification cannot make rejected settings appear verified', () => {
   const f = fixture({ status: 'verified', message: 'Saved connection verified' }, 'Invalid credentials-bearing URL');
   f.receive({ status: 'verified', message: 'The saved connection is verified.' });
-  assert.match(f.html, /id="repository-settings-state">Needs attention<\/dd>/);
+  assert.match(f.html, /id="repository-settings-state">Upload needs attention<\/span>/);
   assert.equal(f.nodes.get('repository-settings-state').textContent, '');
   assert.equal(f.nodes.get('repository-verification').textContent, '');
   assert.doesNotMatch(f.html, /Invalid credentials-bearing URL/);
