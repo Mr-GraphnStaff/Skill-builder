@@ -1,102 +1,68 @@
 # SkillJetty — Agent Skills Studio
 
-[User guides, channel status and release notes](https://github.com/Mr-GraphnStaff/Skill-builder/wiki)
-
-Install the stable release of **SkillJetty by DAF-TECH** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace listing and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
-
-The preview can make a portable skill package, a Claude plugin containing one or more skills, or both. Save locally first; GitHub sharing is optional. It also supports Gemini App ZIP exports with compatibility reports. Existing work stays in place. Consult the [Release Channels wiki](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels) for the verified public version and channel status. Production remains unchanged.
+**SkillJetty by DAF-TECH** helps you create skills, bundle them into Claude plugins,
+and share them from VS Code.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
-**Agent Skills Studio — Build it. Improve it. Share it.**
+**Build it. Improve it. Share it.**
 
-Create, edit, check and publish Agent Skills from one guided VS Code workbench.
+## Your project, in one place
 
-Focus on what your skill should do. SkillJetty reads its declared identity, manages release numbers and prepares factual file-change notes. Save an installable package locally without a repository, or connect one when you want to share for review.
+Open **SkillJetty: Open Workbench** from the Command Palette, or click the SkillJetty
+icon. The preview's Home shows your skills, saved builds and GitHub destination.
+Your existing project stays where it is. On first use, choose a location once;
+SkillJetty remembers it and manages its own files there.
 
-The preview acknowledges clicks with an activity indicator and explains what is happening. Expensive local checks run in the background; routine saves no longer reopen every saved release. See [performance measurements and feedback behavior](docs/performance-and-feedback.md).
+1. **Open or create.** Choose an existing skill, **New skill**, or **New plugin**.
+   A skill is reusable instructions. A plugin bundles one or more skills for Claude.
+2. **Edit.** Changes save automatically. Click **Build / Share** when ready.
+   SkillJetty checks the files and points out anything that needs fixing.
+3. **Build and share.** Review the name and contents. With a repository connected,
+   **Build & upload** creates the package and uploads it in one action.
+   **Save locally** is available alongside it. Without a repository, build locally.
 
-## Open the workbench
+The result shows the actual package and GitHub links. Saving a plugin ZIP does
+not install it into Claude. GitHub upload opens a pull request for review; it does
+not merge automatically. SkillJetty manages version numbers and release notes.
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. The header reports the running installed build. Check **Extensions** for the installed version and the linked wiki for public channel status. Switching channels changes the installed version in that profile; it does not migrate your work data.
+There is no separate successful-check step to click through. Required choices
+and next actions are visible. Publisher information has its own optional dialog.
+You can build a skill package, plugin ZIP, both, or add a Gemini App import ZIP.
 
-An explicitly configured, previously connected Skills repository continues with its existing connection and private `.skilljetty-prerelease` data folder. It does not need conversion to a managed workbench. **Manage work location (optional)** offers a separate managed setup when you want one. A local repository setting must identify the Git root containing `.git`; the GitHub setting must identify the repository, not an individual skill's `tree/` or `blob/` page.
+## Use your existing work
 
-Unrelated ignored private files can remain in the local repository. Pull preserves them and stops if incoming files would collide with them; tracked edits and nonignored untracked files still require attention before pulling. No cleanup or deletion of private files is automatic.
+Choose a skill on Home, open it from your connected project, or import a skill file
+or folder. Imported originals stay unchanged. Earlier edits and saved versions
+remain recoverable. Failed checks, canceled selections and failed uploads keep
+your work; the result identifies any incomplete action.
 
-## Choose what to make
+The header shows your project and sharing destination. **Connect repository** or
+**Change connection** opens settings. Use the Git repository root as the local
+repository and its HTTPS GitHub address as the destination. Verify and Pull are
+explicit actions; editing settings never runs them automatically.
 
-**Create a skill** makes one set of instructions and supporting files. Create a
-new draft or open an existing skill, edit it, run the structural check, then save
-the `.skill` package on this computer.
+SkillJetty preserves nested files, binary assets and application-specific metadata.
+It checks structure and file identity; it does not run imported scripts or models,
+perform security scanning, or prove application compatibility. Test the result in
+your intended application.
 
-**Build a plugin** bundles skills for Claude:
+## Release and help
 
-1. Choose **Build a plugin** on Start.
-2. Open a `.skill` file, open a skill folder, or choose a saved skill to include.
-3. Review its content and run the structural check.
-4. Review the plugin name, description and included skills, then save the plugin
-   ZIP on this computer. Optional publisher details can stay closed.
+This redesigned interface is prepared for preview **0.15.4**. Check the
+[public channel status](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels)
+for verified availability. Stable keeps its established interface. Both channels
+use the same listing and command; switching versions does not migrate your data.
+The installed build appears in the header.
 
-A skill is the content; a plugin is the bundle containing that content. The
-plugin ZIP is created when you save it. Installing it into Claude is a separate
-action. Neither local route needs a Git repository or GitHub sign-in.
+[Short guide](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Getting-Started) ·
+[Troubleshooting](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Troubleshooting) ·
+[Plugin and review details](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Plugin-Exports-and-Archiving)
 
-## Create or open your workbench
-
-Choose **Create workbench** and select its parent folder. Review the exact `.skilljetty-prerelease` destination and folder descriptions, then confirm. Setup accepts a new or empty folder and creates a readable `README.md`. It does not clone, pull, upload or move existing files. **Open existing workbench** accepts a previously initialized workbench; an ordinary opened project is never adopted automatically.
-
-[The complete folder guide](docs/workbench-folders.md) explains what belongs in every folder and how local and remote repositories connect. You can create and save a skill package without GitHub. Importing an outside folder or package makes a copy inside the workbench; the original remains unchanged.
-
-Open the gear for **Extension Settings** when ready to share. Set **Prerelease: Repository URL** to a GitHub HTTPS address, with no embedded credentials. The default local copy is `repositories/skills` inside the workbench. An optional custom local path must remain inside `repositories/`. An explicit blank disables local reuse; an unset value uses the default or the saved association. Outside repository folders, linked paths, SSH and local-file remotes are unavailable in this candidate.
-
-Saving settings does not clone, pull or upload. Run **SkillJetty: Pull Skills Repository** to create or update the local copy deliberately; **Verify Skills Repository** checks the local/remote identity and detected default branch. Use **Connect GitHub Account** for VS Code sign-in. Configuration displays the workbench, local repository, remote and target branch separately. Review the destination and changed files again before uploading. Git commits prepared by this candidate identify the SkillJetty bot explicitly.
-
-SkillJetty never writes settings automatically into the currently opened project. Save and close the current workbench panel before switching workbenches. Existing folders stay in place. The older external-folder installation commands are unavailable in this pre-release. VS Code still manages its own settings, credentials and session data; this is an application write boundary, not an OS sandbox.
-
-## What is saved in the repository?
-
-```text
-Skills/
-  meeting-notes/
-    1.0.0/
-      source/meeting-notes/
-        SKILL.md
-        references/...
-        assets/...
-        scripts/...
-        evals/...
-        agents/...
-      meeting-notes-1.0.0.skill
-      CHANGELOG.md
-      release.json
-      original.skill           # only for an originally imported package
-```
-
-Only existing supporting folders are included. Complex nested files and binary assets are preserved. First versions need changelogs too. Prefer a new version for changes; explicitly choosing an existing number replaces that version while retaining recovery copies and Git history.
-
-For GitHub.com, submission uploads a **review branch** and creates a **pull request**, reusing an existing matching PR when retried. Review and merge follow your repository's rules. Approval alone does not put the skill on the default branch; the workbench never merges automatically. It does not upload the skill into an AI application or publish this extension to the Marketplace.
-
-Choose **Merge PR and delete branch** when the submission is ready. SkillJetty verifies the exact uploaded commit and GitHub merge rules, confirms the merge, then deletes only that unchanged submission branch using a Git SHA lease. If cleanup cannot finish, the verified merge remains recorded and the branch is retained for retry.
-
-Use **Check PRs** from Start to refresh saved submissions, including uploads made with older SkillJetty versions. If an older upload has no PR, choose **Create PR**. Refreshing status never creates a PR or requests a reviewer. Status shows awaiting review, changes requested, approved, merged, or closed without merge. If GitHub cannot be reached, the workbench shows the error and last verified status rather than guessing.
-
-This review flow supports **GitHub.com**. Other Git destinations retain branch uploads; their review process must be completed in the hosting service. Additional repository services are a future discussion.
-
-## Portable skills and application guidance
-
-The default is the [open Agent Skills format](https://agentskills.io/specification): `SKILL.md` plus optional supporting files. Application-specific files such as `agents/openai.yaml` are preserved. The guided sanity check verifies structure; it does not verify application compatibility, resolve every link, run a model or perform security scanning. Your selected application is context for your work. Dedicated scanners should inspect the complete package, including preserved originals, before sharing or execution.
-
-## Your work stays recoverable
-
-- Failed checks, canceled file pickers and failed uploads retain your draft.
-- A completed submission removes an unchanged draft from active work and archives it recoverably. A partial submission retains recovery actions; retrying PR creation does not upload the version again.
-- Newer unpublished changes remain active.
-- Resume saved drafts or choose a library version to edit its next version.
-- If another editor changes a file, conflicting workbench edits are saved in local recovery records rather than overwriting the newer file.
-- The UI uses text and icons alongside color. There are no flashing prompts; reduced-motion and high-contrast preferences are respected.
-
-See [the short workflow and recovery guide](docs/workbench-guide.md).
+For storage and administration details, see the [folder reference](docs/workbench-folders.md).
+The preview confines its own work to the selected data boundary. It does not move
+or adopt unrelated folders. VS Code manages its own settings and sign-in data;
+this application boundary is not an operating-system sandbox.
 
 ## Requirements and development
 
@@ -110,6 +76,6 @@ npm test
 npm run package
 ```
 
-Older authoring commands remain internal for compatibility. The guided workbench is the normal entry point. Local preview builds may be newer than the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=DavidFarris.skill-builder).
+Older authoring commands remain internal for compatibility. The SkillJetty project screen is the normal entry point. Local preview builds may be newer than the [Marketplace listing](https://marketplace.visualstudio.com/items?itemName=DavidFarris.skill-builder).
 
 MIT License. See [LICENSE](LICENSE).

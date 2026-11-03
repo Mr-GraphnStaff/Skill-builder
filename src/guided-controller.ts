@@ -10,6 +10,7 @@ import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
 import { assertWorkbenchPath } from './workbench-boundary.js';
 import { initialExportOptions, suggestPluginVersion, readExportOptions, captureExportPreview, exportCompatibility, prepareExportPlan, type ExportPreview } from './guided-exports.js';
 import { exportRelativePath } from './plugin-release.js';
+import type { PluginManifest } from './plugin-release.js';
 import type { ReleaseArchivePlan } from './release-archive.js';
 import { suggestReleaseVersion } from './workbench-library.js';
 import { readSkillIdentity } from './skill-identity.js';
@@ -208,6 +209,12 @@ export class GuidedWorkbenchController {
   private refreshConnection() {
     this.refreshRepositorySettings();
   }
+  /** Home can show editable work immediately, without inspecting release bytes. */
+  private refreshDrafts() {
+    if (!this.root) return;
+    this.state.drafts = listWorkbenchSkills(this.workspace()).map(({ id, name }) => ({ id, name }));
+    this.state.skillsLoaded = true;
+  }
   private async loadSkills() {
     if (!this.root) return;
     this.refreshConnection();
@@ -220,7 +227,26 @@ export class GuidedWorkbenchController {
       this.state.libraryError = undefined;
     } catch { this.state.libraryError = 'A saved version could not be verified. Your drafts are still available.'; this.state.library = []; }
     this.state.skillsLoaded = true;
+    this.state.releasesLoaded = true;
     this.state.skillsStale = false;
+  }
+  /** Read saved-release metadata after first paint, without taking the user's
+   * action queue or changing their editor/form/selection. No network or writes. */
+  async loadHome(): Promise<boolean> {
+    const root = this.root;
+    if (!root) return false;
+    try {
+      this.workspace();
+      const releases = await this.runJob({ kind: 'library', root });
+      if (root !== this.root) return false;
+      this.state.library = releases.map(({ kind, skillName, version, directory, status, pr }) => ({ kind, skillName, version, directory, status, ...(pr ? { pr } : {}) }));
+      this.state.libraryError = undefined;
+    } catch {
+      if (root !== this.root) return false;
+      this.state.libraryError = 'Some saved versions could not be read. Your editable skills are still available; refresh to try again.';
+    }
+    this.state.releasesLoaded = true;
+    return true;
   }
   private async refreshReviews() {
     this.state.reviewQueue = (await this.runJob({ kind: 'reviews', root: this.workspace() })).map(({ directory, skillName, version, repository, pr }) => ({ directory, skillName, version, repository, ...(pr ? { pr } : {}) }));
@@ -425,12 +451,12 @@ export class GuidedWorkbenchController {
           this.state.notice = 'Archived releases restored after integrity checks. Existing paths were not overwritten.';
           this.state.step = 'start'; if (this.state.skillsLoaded) await this.loadSkills(); break;
         }
-        case 'ready': this.refreshConnection(); break;
+        case 'ready': this.refreshConnection(); this.refreshDrafts(); break;
         case 'loadSkills': case 'refresh': this.workspace(); await this.loadSkills(); break;
         case 'unloadSkills':
           this.state.drafts = []; this.state.library = []; this.state.reviewQueue = undefined;
           this.state.libraryError = undefined; this.state.reviewQueueError = undefined;
-          this.state.skillsLoaded = false; this.state.skillsStale = false; break;
+          this.state.skillsLoaded = false; this.state.releasesLoaded = false; this.state.skillsStale = false; break;
         case 'chooseWorkspace': {
           const root = await this.hooks.chooseWorkspace?.();
           if (root) {
@@ -549,6 +575,52 @@ export class GuidedWorkbenchController {
           this.select(skill); break;
         }
         case 'restoreVersion': this.select(await this.runJob({ kind: 'restoreRelease', root: this.workspace(), directory: string('directory') }), undefined, true); break;
+        case 'openPlugin': {
+          const root = this.workspace(), directory = path.resolve(string('directory'));
+          const assertLocalCurrent = () => {
+            this.workspace();
+            if (root !== this.root) throw new Error('The project changed while opening the plugin. Your existing work is preserved.');
+            if (generation !== undefined) this.hooks.assertConfigurationGeneration?.(generation);
+          };
+          // The library is discovery only. Verify the immutable full bundle
+          // before copying any member into editable work, never trust its label.
+          const known = this.state.library.find(item => item.kind === 'plugin' && path.resolve(item.directory) === directory);
+          if (!known || path.relative(path.join(root, 'plugin-releases', known.skillName, known.version), directory)) throw new Error('Choose a plugin saved in this project.');
+          const release = await this.runJob({ kind: 'verifyExport', directory });
+          assertLocalCurrent();
+          const manifest = release.manifest as PluginManifest;
+          if (manifest.kind !== 'plugin' || release.skillName !== known.skillName || release.version !== known.version || !manifest.members.length) throw new Error('The saved plugin identity changed. Your editable work is preserved.');
+          const members = [];
+          for (const member of manifest.members) {
+            assertLocalCurrent();
+            const existing = listWorkbenchSkills(root).find(item => item.name === member.name);
+            // Existing drafts may contain newer work. Reuse them; never replace
+            // one just because an older bundle is being opened.
+            if (existing) members.push(existing);
+            else {
+              const restored = await this.runJob({ kind: 'registerFolder', root,
+                folder: path.join(directory, 'source', 'skills', member.name), replaceExisting: false });
+              assertLocalCurrent();
+              const checked = await this.runJob({ kind: 'validate', skill: restored });
+              assertLocalCurrent();
+              if (!checked.valid || JSON.stringify(checked.files) !== JSON.stringify(member.files)) throw new Error('The plugin files changed while opening. Copied skills are retained for inspection; nothing was built or uploaded.');
+              members.push(restored);
+            }
+          }
+          this.state.workflowIntent = 'plugin';
+          this.select(members[0]);
+          this.refreshDrafts();
+          const initial = initialExportOptions(root, members[0].id, manifest.members[0].version, 'plugin');
+          const descriptor = manifest.plugin, selected = new Set(members.map(member => member.id));
+          this.state.exportOptions = { ...initial, pluginName: descriptor.name,
+            pluginDescription: descriptor.description, pluginVersion: suggestPluginVersion(root, descriptor.name), pluginVersionSource: 'suggested',
+            pluginAuthor: descriptor.author?.name ?? '', pluginLicense: descriptor.license ?? '',
+            pluginIcon: descriptor.icon ?? '', pluginPrivacyPolicyUrl: descriptor.privacyPolicyUrl ?? '',
+            pluginDocumentationUrl: descriptor.documentationUrl ?? '', pluginSupportUrl: descriptor.supportUrl ?? '',
+            members: initial.members.map(member => ({ ...member, selected: selected.has(member.id) })) };
+          this.state.notice = `Opened ${descriptor.name}. Existing editable skills are kept; missing skills were restored from this saved plugin.`;
+          break;
+        }
         case 'openFile': {
           const skill = this.active(); const relative = string('path');
           if (!this.state.files.some(item => item.path === relative)) throw new Error('Choose a file belonging to this skill.');
@@ -831,10 +903,14 @@ export class GuidedWorkbenchController {
           await this.hooks.openLink?.(pullRequestUrl(context.repository, item.pr.number)); break;
         }
         case 'back':
-          this.state.step = this.state.step === 'publish' ? 'check' : this.state.step === 'check' ? 'edit' : 'start'; this.state.form = undefined; break;
+          this.state.step = this.state.step === 'publish' || this.state.step === 'check' ? 'edit' : 'start'; this.state.form = undefined;
+          if (this.state.step === 'start') this.refreshDrafts();
+          break;
         case 'startAnother':
           this.state.step = 'start'; this.state.active = undefined; this.state.editor = undefined; this.state.files = []; this.state.form = undefined; this.state.check = undefined; this.state.publish = undefined; this.state.receipt = undefined;
           this.state.workflowIntent = 'skill'; this.state.exportOptions = undefined; this.exportPreview = undefined;
+          this.refreshDrafts();
+          if (this.state.skillsStale) await this.loadSkills();
           this.resetWorkflowActivity(); break;
         case 'openLink': {
           const url = string('url');
@@ -861,7 +937,7 @@ export class GuidedWorkbenchController {
         if (!this.state.error) this.activity(nextActivityMessage(this.state), 'info');
         this.operationActivity = undefined;
       }
-      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest'].includes(message.action)) this.state.skillsStale = true;
+      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'openPlugin', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest'].includes(message.action)) this.state.skillsStale = true;
     }
     return this.state;
   }

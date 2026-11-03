@@ -97,14 +97,14 @@ test('canceling a native package picker reports cancellation without scanning th
   } finally { jobs.runWorkbenchJob = run; }
 });
 
-test('opening the workbench does not enumerate drafts, read skill data or start a worker', async t => {
+test('Home reads only its draft catalogue before first paint, without package reads or workers', async t => {
   const f = await fixture(t);
   core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Initial package.');
   const controller = new GuidedWorkbenchController(f.root);
   const read = fs.readFileSync, list = core.listWorkbenchSkills, run = jobs.runWorkbenchJob;
   let dataReads = 0, listings = 0, workers = 0;
   fs.readFileSync = function(file, ...args) {
-    if (/catalog\.json$|SKILL\.md$|\.skill$|release\.json$/.test(String(file))) dataReads++;
+    if (/SKILL\.md$|\.skill$|release\.json$/.test(String(file))) dataReads++;
     return read.call(this, file, ...args);
   };
   core.listWorkbenchSkills = (...args) => { listings++; return list(...args); };
@@ -114,13 +114,45 @@ test('opening the workbench does not enumerate drafts, read skill data or start 
     await controller.dispatch({ action: 'showCreate' });
     await controller.dispatch({ action: 'startAnother' });
     assert.equal(controller.state.error, undefined);
-    assert.equal(dataReads, 0); assert.equal(listings, 0); assert.equal(workers, 0);
-    assert.deepEqual(controller.state.drafts, []); assert.deepEqual(controller.state.library, []);
-    assert.equal(controller.state.skillsLoaded, undefined);
+    assert.equal(dataReads, 0); assert.equal(listings, 2); assert.equal(workers, 0);
+    assert.deepEqual(controller.state.drafts, [{ id: f.skill.id, name: f.skill.name }]); assert.deepEqual(controller.state.library, []);
+    assert.equal(controller.state.skillsLoaded, true);
+    assert.notEqual(controller.state.releasesLoaded, true);
   } finally { fs.readFileSync = read; core.listWorkbenchSkills = list; jobs.runWorkbenchJob = run; }
 });
 
-test('saved skills load only on request, use one library job, and unload without rereading', async t => {
+test('saved metadata loads in the background without changing an active editor or form', async t => {
+  const f = await fixture(t);
+  core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Initial package.');
+  const controller = new GuidedWorkbenchController(f.root);
+  await controller.dispatch({ action: 'ready' });
+  const run = jobs.runWorkbenchJob;
+  let release, entered;
+  const waiting = new Promise(resolve => { entered = resolve; });
+  jobs.runWorkbenchJob = async (...args) => {
+    if (args[0].kind !== 'library') return run(...args);
+    const result = await run(...args);
+    entered();
+    await new Promise(resolve => { release = resolve; });
+    return result;
+  };
+  try {
+    const loading = controller.loadHome();
+    await waiting;
+    await controller.dispatch({ action: 'resume', payload: { id: f.skill.id } });
+    controller.state.form = { pluginName: 'unsaved-name' };
+    const editor = { ...controller.state.editor };
+    release(); await loading;
+    assert.equal(controller.state.step, 'edit');
+    assert.deepEqual(controller.state.editor, editor);
+    assert.deepEqual(controller.state.form, { pluginName: 'unsaved-name' });
+    assert.equal(controller.state.library.length, 1);
+    assert.equal(controller.state.releasesLoaded, true);
+    assert.equal(controller.state.busy, false);
+  } finally { release?.(); jobs.runWorkbenchJob = run; }
+});
+
+test('saved metadata refresh uses one library job and unload does not reread it', async t => {
   const f = await fixture(t);
   core.prepareSkillRelease(f.root, f.skill.id, '1.0.0', 'Initial package.');
   const controller = new GuidedWorkbenchController(f.root);

@@ -110,7 +110,7 @@ export type PublishPreview = {
   kind?: 'plugin'; members?: Array<{ name: string; version: string }>;
 };
 
-async function git(cwd: string, args: string[]): Promise<string> {
+async function git(cwd: string, args: string[], localCloneSource?: string): Promise<string> {
   const started = performance.now();
   let outcome: 'ok' | 'error' = 'error', timedOut = false, exitCode: number | undefined;
   // Skip Git global options and their values. Never log arguments, URLs or output.
@@ -128,11 +128,26 @@ async function git(cwd: string, args: string[]): Promise<string> {
     const owned = !!managedRoot && !existingRepositoryRoot
       && isOwnedWorkbenchRepository(managedRoot, cwd);
     const preserveExistingTrust = existingRepositoryRoot && existing?.trustedRepositoryRoot === true;
+    const sourceTrust: string[] = [];
+    if (localCloneSource) {
+      // Local clone checks the source's .git as a repository independently of
+      // cwd. Carry only the already accepted source grant into this process
+      // (and its upload-pack child), never into global configuration or later
+      // fetch/push commands. The lookup rechecks saved mapping/configuration
+      // and user trust fingerprints immediately before starting the clone.
+      const source = path.resolve(localCloneSource);
+      const selectedSource = existingWorkspaceForPath(source);
+      if (operation !== 'clone') throw new Error('Local repository trust is only valid for its clone operation.');
+      if (selectedSource && path.relative(selectedSource.repositoryRoot, source) === '' && selectedSource.trustedRepositoryRoot) {
+        assertWorkspaceRepository(selectedSource, selectedSource.repository, source);
+        sourceTrust.push('-c', `safe.directory=${source.replace(/\\/g, '/')}`, '-c', `safe.directory=${path.join(source, '.git').replace(/\\/g, '/')}`);
+      }
+    }
     if (managedRoot && metadataBoundary) {
       assertWorkbenchGitMetadata(metadataBoundary, cwd);
       if (['ls-remote', 'fetch', 'push', 'clone'].includes(operation)) authentication = workbenchGitAskpass(managedRoot);
     }
-    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...((owned || preserveExistingTrust) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...args], {
+    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...((owned || preserveExistingTrust) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...sourceTrust, ...args], {
       cwd, env: managedRoot ? { ...workbenchGitEnvironment(managedRoot), GIT_CEILING_DIRECTORIES: metadataBoundary, ...authentication?.environment } : { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
     outcome = 'ok'; exitCode = 0; return result.stdout;
@@ -301,7 +316,7 @@ export async function prepareRepositoryPublish(
       const { validateProjectRepositoryForPublish } = await import('./managed-repository.js');
       const local = await validateProjectRepositoryForPublish(repository, options.localPath);
       report(onProgress, 'Reusing your local repository to prepare an isolated submission…');
-      await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--', local, checkoutPath]);
+      await git(temp, ['-c', `core.hooksPath=${emptyHooks}`, 'clone', '--no-checkout', `--template=${emptyTemplate}`, '--no-hardlinks', '--', local, checkoutPath], local);
       if (isManagedWorkbench(workspaceRoot) || existingWorkspaceForPath(workspaceRoot)) recordOwnedWorkbenchRepository(workspaceRoot, checkoutPath);
       await git(checkoutPath, ['remote', 'set-url', 'origin', repository]);
       report(onProgress, 'Fetching the latest destination branch; existing downloaded data is reused…');

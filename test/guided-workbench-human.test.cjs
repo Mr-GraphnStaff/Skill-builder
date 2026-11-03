@@ -22,18 +22,18 @@ function state(overrides = {}) {
 test('sharing a skill needs neither a version decision nor handwritten release notes', () => {
   const html = renderGuidedWorkbench(state(), nonce);
   assert.match(html, /id="managed-version">2\.13\.1<\/strong>/);
-  assert.match(html, /Declared version 2\.13\.0/);
+  assert.match(html, /Version <strong id="managed-version">2\.13\.1/);
   const override = /<input id="releaseVersion"([^>]*)>/.exec(html);
   assert(override);
   assert.match(override[1], /value=""/);
   assert.doesNotMatch(override[1], /\brequired\b/);
-  assert.match(html, /<details class="optional" ><summary>Advanced: choose a release number/);
+  assert.doesNotMatch(html, /<details/);
   const notes = /<textarea id="releaseChangelog"([^>]*)>/.exec(html);
   assert(notes);
   assert.doesNotMatch(notes[1], /\brequired\b/);
-  assert.match(html, /Anything else people should know\? \(optional\)/);
+  assert.match(html, /Add a note \(optional\)/);
   assert.match(html, /1 added · 1 changed · 0 removed · 1 unchanged/);
-  assert.match(html, /Preview automatic release notes/);
+  assert.match(html, /Automatic release notes/);
   assert.match(html, /counts describe file contents, not whether the skill behaves better/);
 });
 
@@ -75,17 +75,17 @@ test('publish sends an override only when the person actually supplies one', () 
 test('a checked skill can become a usable package without a repository or account', () => {
   const html = renderGuidedWorkbench(state({ connection: undefined }), nonce);
   assert.match(html, /data-form-action="savePackage"/);
-  assert.match(html, /id="primary-action"[^>]*form="publish-form"[^>]*>Save package on this computer/);
+  assert.match(html, /id="primary-action"[^>]*form="publish-form"[^>]*>Build skill package/);
   assert.match(html, /id="open-settings"[^>]*aria-label="Open SkillJetty settings"/);
-  assert.match(html, /Saving on this computer needs no GitHub account and uploads nothing/);
+  assert.match(html, /No GitHub connection is required to build/);
   assert.doesNotMatch(html, /id="repository-form"/);
-  assert.match(html, /No repository or sign-in is needed/);
+  assert.match(html, /Connect a repository/);
   assert.doesNotMatch(html, /id="primary-action"[^>]*form="repository-form"/);
 });
 
 test('saving locally from a connected workbench sends no review request', () => {
   const html = renderGuidedWorkbench(state(), nonce);
-  assert.match(html, /type="submit" class="secondary" data-submit-action="savePackage">Save package on this computer/);
+  assert.match(html, /type="submit" form="publish-form" class="secondary" data-submit-action="savePackage">Save locally instead/);
   const source = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)[1];
   const start = source.indexOf("document.querySelectorAll('form[data-form-action]')");
   const end = source.indexOf("document.addEventListener('click'", start);
@@ -131,15 +131,15 @@ test('an empty history explains how to reveal edits saved without leaving the ed
   const html = renderGuidedWorkbench(state({ step: 'edit', editor: { path: 'SKILL.md', content: 'Instructions' }, history: [], form: { historyOpen: 'true' } }), nonce);
   assert.match(html, /data-action="refreshHistory"[^>]*>Refresh earlier edits/);
   assert.match(html, /Refresh to show edits saved since this screen opened/);
-  assert.match(html, /Save changes, then refresh to see earlier content/);
-  assert.match(html, /<details class="optional edit-history" open>/);
+  assert.match(html, /Earlier saved text will appear here after Refresh/);
+  assert.match(html, /<section class="card edit-history">/);
   assert.match(html, /Build it\. Improve it\. Share it\./);
 });
 
 test('saved releases invite improving the skill while preserving earlier releases', () => {
   const html = renderGuidedWorkbench(state({ step: 'start', skillsLoaded: true, library: [{ skillName: 'sample', version: '2.13.0', directory: 'releases/sample/2.13.0', status: 'uploaded' }] }), nonce);
-  assert.match(html, /Saved releases/);
-  assert.match(html, /recovery copies preserve earlier contents/);
-  assert.match(html, /Improve sample from 2\.13\.0/);
-  assert.match(html, /You control the next release number/);
+  assert.match(html, /Built versions/);
+  assert.match(html, /Uploaded to GitHub/);
+  assert.match(html, /Edit sample 2\.13\.0/);
+  assert.match(html, /data-action="restoreVersion" data-directory="releases\/sample\/2\.13\.0"/);
 });

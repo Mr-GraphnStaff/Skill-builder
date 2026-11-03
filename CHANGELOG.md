@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.4 — project experience redesign (pre-release candidate)
+
+- Replace the numbered wizard with a project Home, Editor, and Build / Share.
+  Show existing work automatically, with saved-release metadata loading after
+  first paint. Do not make people load a catalogue before finding their work.
+- Show the project and GitHub destination directly. Keep required fields and
+  next actions visible rather than inside expandable sections.
+- Run structural checks while preparing Build / Share. On a connected project,
+  build and upload in one action; keep Save locally visible alongside it.
+- Recognize an explicitly chosen initialized project or its dedicated data
+  folder, remember that selection, and stay in the current VS Code window.
+- Fix local-source Git cloning on drives without recorded ownership using only
+  exact, previously authorized repository and `.git` trust for that subprocess.
+  Do not change global trust settings or retry an uncertain upload automatically.
+- Open a saved plugin directly from Home, retaining its name and included skills.
+  Keep newer editable skills and restore only missing members from the verified
+  saved bundle; preserve the original ZIP and suggest the next bundle version.
+
 ## 0.15.3 — clearer skill and plugin workflow (pre-release candidate)
 
 - Choose **Create a skill** or **Build a plugin** at Start. Keep that choice

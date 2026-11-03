@@ -8,6 +8,7 @@ export function activityForAction(action: GuidedAction): string {
     chooseWorkspace: 'Choose a folder in the VS Code dialog…', openPackage: 'Choose a skill package in the VS Code dialog…',
     openFolder: 'Choose a skill folder in the VS Code dialog…', addFile: 'Choose a supporting file in the VS Code dialog…',
     createSkill: 'Creating your local draft…', resume: 'Opening your saved draft…', restoreVersion: 'Restoring a saved release into a draft…',
+    openPlugin: 'Opening your saved plugin and its skills…',
     openFile: 'Opening the selected file…', createFile: 'Creating the file…', save: 'Saving your changes locally…',
     restoreEdit: 'Restoring the earlier edit and preserving your current work…', refreshHistory: 'Loading earlier edits…',
     reloadFile: 'Loading the saved file…', check: 'Running a structural sanity check…',

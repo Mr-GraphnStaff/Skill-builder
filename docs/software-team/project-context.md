@@ -1,5 +1,54 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Current assignment — November 3: project experience redesign, preview 0.15.4
+
+The owner explicitly rejected incremental menu/copy changes and authorized a
+whole-experience revamp: "revamp", "make this stupid simple". Replace the numbered
+wizard and internal-folder lessons with Home → Editor → Build / Share. Existing
+files, data roots and repository mapping stay preserved. Current public/installed
+preview is 0.15.3 until exact candidate delivery is verified; 0.15.4 is pending.
+
+Home shows the project and existing editable skills immediately; saved-release
+metadata loads in a worker after first paint without taking the action queue or
+reading package payloads. Required fields and next actions remain visible. Editor
+goes directly to a checked Build / Share review. Connected primary action builds
+and uploads in one operation; saving locally remains a visible alternative.
+First-use location selection recognizes an explicitly chosen initialized project
+or its dedicated marked child; no arbitrary directory adoption or user-file move.
+
+The user also supplied a real Git128 receipt: isolated cloning of the configured
+local repository fails on its `.git` ownership on a volume without ownership.
+Ishan fixes the exact already-granted source trust for the clone subprocess;
+global Git trust settings must remain unchanged. Preserve failed upload receipts
+and do not automatically repeat user uploads.
+
+Avery integrates host/controller/catalogue/docs/release; Mara owns the redesigned
+HTML/client and focused UI tests; Ishan owns the clone fix; Lena independently
+reviews actual user workflows/accessibility; Morgan independently reviews trust
+and final artifacts. Reviews are agent execution, not owner usability acceptance.
+Production and the publisher-transfer wait remain separate.
+
+Implementation adds a direct Edit plugin action on saved bundles: fully verify
+the owned saved plugin, reuse newer existing editable skills, restore missing
+members as copies, and retain the plugin metadata and selected members with its
+next version. Unknown/foreign/corrupt bundles stop before restoration; copied
+member digests and configuration generation are checked after asynchronous work.
+Partial restored drafts remain inspectable on failure. Host saves relevant open
+editor documents before this action. No actual user plugin upload is performed
+as a test.
+
+Focused evidence before CI: UI/human 48/48 (`working/runs/3f20d96f6d2441fa8852803733a1448a/reports/ui-tests.tap`);
+host/performance 59/59 before the final added chooser/plugin cases
+(`working/runs/175d973a58b84d37b0bda7d458af8ecb`); independent delayed host races
+3/3 (`working/runs/6c2c6a23698948c4bbc4f18204b210b0`); independent real local-clone
+trust fixture passed (`working/runs/9049833fe587483699210736ac9c0c84`).
+Earlier evolving-source local full-test run
+`working/runs/9238516ca4164ea1906fe364fa000216/reports/full-tests.log` was interrupted
+after source and compiled modules changed during development; it is not a passing
+or coherent final build. Frozen-source full CI and exact-artifact reviews govern
+delivery. Original stale compiled/copy fixtures and exploratory QA failures are
+retained rather than reclassified as product acceptance.
+
 ## Active usability and plugin repair — November 3, 2026
 
 ### Verified delivery: preview 0.15.3

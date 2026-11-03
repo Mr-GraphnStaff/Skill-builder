@@ -13,14 +13,14 @@ function state(overrides = {}) {
   };
 }
 
-test('older release archives require a reviewed local plan and show recoverable restore actions', () => {
-  const initial = renderGuidedWorkbench(state(), nonce);
+test('older versions remain an explicit reviewed recovery action', () => {
+const initial = renderGuidedWorkbench(state(), nonce);
   assert.match(initial, /data-action="previewArchive"[^>]*>Review older saved releases/);
   assert.doesNotMatch(initial, /data-action="archiveReleases"/);
   const html = renderGuidedWorkbench(state({ archivePreview: { entries: [
     { label: 'example <bundle> 1.0.0', directory: 'P:/Workbench/releases/<old>', bytes: 1024, fileCount: 3 }
-  ], skipped: ['Latest <bundle> 2.0.0 kept', 'Pending PR retained'] }, archives: [{ id: 'safe-id"', label: 'Earlier <release>' }] }), nonce);
-  assert.match(html, /id="archive-management"[^>]*open/);
+  ], skipped: ['Latest <bundle> 2.0.0 kept'] }, archives: [{ id: 'safe-id"', label: 'Earlier <release>' }] }), nonce);
+  assert.match(html, /<section id="archive-management"/);
   assert.match(html, /data-action="archiveReleases" data-confirmed="true"/);
   assert.match(html, /1,024 bytes · 3 files/);
   assert.match(html, /P:\/Workbench\/releases\/&lt;old&gt;/);
@@ -28,17 +28,12 @@ test('older release archives require a reviewed local plan and show recoverable 
   assert.match(html, /data-action="restoreArchive" data-id="safe-id&quot;"/);
   assert.match(html, /does not permanently delete them/);
   assert.match(html, /without replacing newer work/);
-  assert.doesNotMatch(html, /data-action="archiveReleases"[^>]*data-directory|<bundle>|<old>/);
-  const empty = renderGuidedWorkbench(state({ archivePreview: { entries: [], skipped: ['Latest kept'] } }), nonce);
-  assert.match(empty, /No older releases are currently eligible/);
-  assert.doesNotMatch(empty, /data-action="archiveReleases"/);
+  assert.doesNotMatch(html, /data-action="archiveReleases"[^>]*data-directory|<bundle>|<old>|<details/);
 });
 
-test('Submit keeps portable default and exposes explicit plugin and Gemini export choices', () => {
-  const html = renderGuidedWorkbench(state({ step: 'publish', active: { id: 'a', name: 'skill-a' },
-    publish: { version: '1.0.0', changelog: '', fileCount: 2 } }), nonce);
-  assert.match(html, /<legend>What to save<\/legend>/);
-  assert.match(html, /<label for="exportMode">Save as<\/label>/);
+test('Build Share exposes package formats without requiring plugin metadata for a skill', () => {
+const html = renderGuidedWorkbench(state({ step: 'publish', active: { id: 'a', name: 'skill-a' }, publish: { version: '1.0.0', changelog: '', fileCount: 2 } }), nonce);
+  assert.match(html, /<label for="exportMode">Package type<\/label>/);
   assert.match(html, /value="portable" selected>Skill package \(\.skill\)/);
   assert.match(html, /value="plugin" >Claude plugin ZIP/);
   assert.match(html, /value="both" >Both skill package and plugin ZIP/);
@@ -48,6 +43,7 @@ test('Submit keeps portable default and exposes explicit plugin and Gemini expor
   assert.match(html, /id="geminiZip"[^>]*aria-describedby="gemini-export-help"/);
   assert.match(html, /Import and runtime behavior still need testing in your account/);
   assert.match(html, /Saving a ZIP does not install it in Claude or prove application compatibility/);
+  assert.doesNotMatch(html, /<details/);
 });
 
 test('plugin metadata and multiple members are labelled, selected explicitly and escaped', () => {
@@ -74,62 +70,66 @@ test('plugin metadata and multiple members are labelled, selected explicitly and
   assert.match(html, /&lt;\/script&gt;&lt;img/);
 });
 
-test('plugin-first review follows the actual output format while keeping saving local-first', () => {
-  for (const [mode, title, nav, button] of [
-    ['portable', 'Review and save your skill', 'Save skill', 'Save skill package'],
-    ['plugin', 'Review and save your plugin', 'Save plugin', 'Save plugin ZIP'],
-    ['both', 'Review and save both packages', 'Save packages', 'Save both packages']
-  ]) {
-    const html = renderGuidedWorkbench(state({ workflowIntent: 'plugin', step: 'publish',
-      active: { id: 'a', name: 'skill-a' }, publish: { version: '1.0.0', changelog: '', fileCount: 2 },
-      exportOptions: { mode, pluginName: 'team-tools', pluginDescription: 'Team tools', pluginVersion: '1.0.0', members: [] }
-    }), nonce);
-    assert(html.includes(`<h1 id="stepHeading" tabindex="-1">${title}</h1>`));
-    assert(html.includes(`Step 4: </span>${nav}`));
-    assert(html.includes(`>${button} <span aria-hidden="true">`));
-    assert.match(html, /id="publish-form"[^>]*data-form-action="savePackage"/);
-    assert.match(html, /id="plugin-github-upload" class="optional"><summary>Upload to GitHub \(optional\)/);
-    assert.match(html, /<h2>What will be saved<\/h2>/);
-    assert.doesNotMatch(html, /Submitting to|<h2>What will be submitted<\/h2>/);
-    const help = /<details id="step-help"[^>]*>([\s\S]*?)<\/details>/.exec(html)[1];
-    if (mode === 'portable') {
-      assert.match(html, /id="plugin-options" hidden/);
-      assert.match(html, /This format does not create a plugin ZIP/);
-      assert.match(help, /<dt>Save skill package<\/dt>/);
-      assert.doesNotMatch(help, /<dt>Name and description<\/dt>|<dt>Skills to include<\/dt>/);
-    } else {
-      assert.doesNotMatch(html, /id="plugin-options" hidden/);
-      assert.match(help, /<dt>Name and description<\/dt>/);
-      if (mode === 'both') assert.match(help, /both the \.skill package and the Claude plugin ZIP/);
+test('optional publisher editing cannot implicitly submit an upload with Enter', () => {
+  const html = renderGuidedWorkbench(state({ step: 'publish', workflowIntent: 'plugin',
+    publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
+  const source = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html)[1];
+  const start = source.indexOf("document.querySelectorAll('dialog')");
+  const end = source.indexOf('function exportPayload()', start);
+  let keydown, closed = 0, prevented = 0;
+  const dialog = { addEventListener: (event, listener) => { assert.equal(event, 'keydown'); keydown = listener; }, close: () => { ++closed; } };
+  new vm.Script(source.slice(start, end)).runInNewContext({ document: { querySelectorAll: () => [dialog] } });
+  keydown({ key: 'Enter', isComposing: true, target: { tagName: 'INPUT' }, preventDefault: () => { ++prevented; } });
+  assert.equal(closed, 0);
+  keydown({ key: 'Enter', isComposing: false, target: { tagName: 'INPUT' }, preventDefault: () => { ++prevented; } });
+  assert.equal(prevented, 1);
+  assert.equal(closed, 1);
+});
+
+test('Build Share makes connected build and upload primary for every selected package type', () => {
+for (const [mode, noun] of [['portable', 'skill'], ['plugin', 'plugin'], ['both', 'packages']]) {
+    const html = renderGuidedWorkbench(state({ workflowIntent: 'plugin', step: 'publish', active: { id: 'a', name: 'skill-a' },
+      publish: { version: '1.0.0', changelog: '', fileCount: 2 },
+      exportOptions: { mode, pluginName: 'team-tools', pluginDescription: 'Team tools', pluginVersion: '1.0.0', members: [] } }), nonce);
+    assert.match(html, /<h1 id="stepHeading" tabindex="-1">Build \/ Share<\/h1>/);
+    assert(html.includes(`>Build &amp; upload ${noun} <span aria-hidden="true">`));
+    assert.match(html, /id="publish-form"[^>]*data-form-action="publish"/);
+    assert.match(html, /data-submit-action="savePackage">Save locally instead/);
+    assert.match(html, /https:\/\/github.com\/example\/Skills.git/);
+    assert.match(html, /Nothing is merged automatically/);
+    assert.doesNotMatch(html, /<details|aria-current="step"|Step 4/);
+    assert(html.indexOf('id="primary-action"') < html.indexOf('id="publish-form"'), 'action is visible before form content');
+    if (mode !== 'portable') {
+      const modal = /<dialog id="publisher-dialog"[\s\S]*?<\/dialog>/.exec(html)[0];
+      assert.doesNotMatch(modal, /data-plugin-required|name="pluginMembers"/);
+      assert.match(html, /id="pluginVersion"[^>]*data-plugin-required required/);
     }
   }
 });
 
-test('plugin source choices reuse the accepted local repository without exposing a rejected destination', () => {
-  const connected = { workflowIntent: 'plugin', connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' } };
+test('plugin starts with existing skills and a visible project source rather than a dummy draft', () => {
+const connected = { workflowIntent: 'plugin', connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' }, drafts: [{ id: 'a', name: 'existing-skill' }], skillsLoaded: true };
   const html = renderGuidedWorkbench(state(connected), nonce);
-  assert.match(html, /data-action="openRepositorySkill" id="open-repository-skill">Choose a skill from your repository/);
-  assert.match(html, /data-action="openPackage"[^>]*>Open a \.skill file/);
-  assert.match(html, /does not create the plugin ZIP yet/);
+  assert.match(html, /data-action="openRepositorySkill" id="open-repository-skill">Open from your project/);
+  assert.match(html, /data-action="resume" data-id="a">Use existing-skill/);
+  assert.match(html, /data-action="openPackage"[^>]*>Open a skill file/);
+  assert.match(html, /Your originals stay unchanged/);
   const rejected = renderGuidedWorkbench(state({ ...connected, configurationError: 'The inherited destination is outside this work location.' }), nonce);
   assert.doesNotMatch(rejected, /data-action="openRepositorySkill"/);
-  assert.match(rejected, /data-action="openPackage"[^>]*>Open a \.skill file/);
+  assert.match(rejected, /data-action="openPackage"[^>]*>Open a skill file/);
 });
 
-test('plugin destination reports are optional and distinguish directory rules from selected app requirements', () => {
-  const html = renderGuidedWorkbench(state({ workflowIntent: 'plugin', step: 'publish',
-    error: 'Package generation failed. Your draft is preserved.',
+test('package checks and actual build errors stay visible without disclosure controls', () => {
+const html = renderGuidedWorkbench(state({ workflowIntent: 'plugin', step: 'publish', error: 'Package generation failed. Your draft is preserved.',
     publish: { version: '1.0.0', changelog: '', fileCount: 2, compatibility: [
-      { target: 'Claude public directory', issues: ['Missing directory icon.'], tested: false },
-      { target: 'Gemini App', issues: ['Unsupported file type.'], tested: false }
-    ] }, exportOptions: { mode: 'plugin', pluginName: 'team-tools', pluginDescription: 'Tools', pluginVersion: '1.0.0', members: [] }
-  }), nonce);
-  assert.match(html, /<details id="export-compatibility-details" class="optional"><summary>Public directory and app checks \(optional\)<\/summary>/);
-  assert.match(html, /A private plugin ZIP does not need a public directory listing/);
+      { target: 'Claude public directory', issues: ['Missing directory icon.'], tested: false }, { target: 'Gemini App', issues: ['Unsupported file type.'], tested: false }
+    ] }, exportOptions: { mode: 'plugin', pluginName: 'team-tools', pluginDescription: 'Tools', pluginVersion: '1.0.0', members: [] } }), nonce);
   assert.match(html, /<h3>Claude public directory<\/h3>/);
   assert.match(html, /<h3>Gemini App<\/h3>/);
+  assert.match(html, /They do not block a private local ZIP/);
   assert.match(html, /Application import and runtime behavior have not been tested/);
-  assert(html.indexOf('Package generation failed.') < html.indexOf('id="export-compatibility-details"'), 'actual save errors remain in the visible feedback region');
+  assert(html.indexOf('Package generation failed.') < html.indexOf('id="export-compatibility-details"'));
+  assert.doesNotMatch(html, /<details/);
 });
 
 test('client serializes selected members and active format and disables hidden plugin requirements', () => {
@@ -143,7 +143,7 @@ test('client serializes selected members and active format and disables hidden p
     geminiZip: { checked: true }, 'export-package-summary': { textContent: '' },
     'plugin-options': { hidden: false, querySelectorAll: () => controls }
   };
-  const document = { getElementById: id => elements[id], querySelectorAll: () => [{ value: 'current' }, { value: 'other' }] };
+  const document = { getElementById: id => elements[id], querySelectorAll: selector => selector === 'input[name="pluginMembers"]:checked' ? [{ value: 'current' }, { value: 'other' }] : [] };
   const result = new vm.Script(functions + ';updateExportVisibility();({payload:exportPayload(),hidden:document.getElementById("plugin-options").hidden});').runInNewContext({ document });
   assert.equal(result.payload.exportMode, 'portable');
   assert.deepEqual(Array.from(result.payload.pluginMembers), ['current', 'other']);
@@ -194,86 +194,65 @@ test('performance log is in Activity from the first screen through busy later st
   }
 });
 
-test('read-only configuration and its labelled settings gear remain available on every screen', () => {
-  for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
-    for (const hasWorkspace of [false, true]) {
-      const html = renderGuidedWorkbench(state({ step, hasWorkspace, busy: true,
-        workFolder: 'P:/Actual <work>/folder', configuredRepository: 'https://github.com/desired/Skills',
-        configuredLocalRepository: 'P:/Desired <repo>',
-        check: { valid: true, errors: [], warnings: [], compatibility: '', behaviorNote: '' },
-        publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
-      assert.equal((html.match(/id="open-settings"/g) || []).length, 1);
-      assert.match(html, /id="open-settings"[^>]*data-action="openSettings"[^>]*aria-label="Open SkillJetty settings"/);
-      assert.doesNotMatch(html, /<button[^>]*id="open-settings"[^>]*\bdisabled/);
-      assert.match(html, /id="active-work-folder">P:\/Actual &lt;work&gt;\/folder<\/dd>/);
-      assert.match(html, /id="configured-repository">https:\/\/github.com\/desired\/Skills<\/dd>/);
-      assert.match(html, /id="local-repository-path">P:\/Desired &lt;repo&gt;<\/dd>/);
-      assert.doesNotMatch(html, /id="repository-form"|id="create-repository-form"|id="repository-settings"|data-action="connectGitHub"|data-action="pullRepository"|data-action="verifyRepository"|data-action="setRepositoryFolder"/);
-    }
+test('every area shows the exact project and destination with an always available settings action', () => {
+for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
+    const html = renderGuidedWorkbench(state({ step, busy: true, workFolder: 'P:/Actual <work>/folder', configuredRepository: 'https://github.com/desired/Skills', configuredLocalRepository: 'P:/Desired <repo>', check: { valid: true, errors: [], warnings: [], compatibility: '', behaviorNote: '' }, publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
+    assert.equal((html.match(/id="open-settings"/g) || []).length, 1);
+    assert.match(html, /id="open-settings"[^>]*data-action="openSettings"[^>]*aria-label="Open SkillJetty settings"/);
+    assert.doesNotMatch(html, /<button[^>]*id="open-settings"[^>]*\bdisabled/);
+    assert.match(html, /id="configured-repository">https:\/\/github.com\/desired\/Skills<\/strong>/);
+    assert.match(html, /id="local-repository-path">P:\/Desired &lt;repo&gt;<\/small>/);
+    assert(html.indexOf('id="workbench-configuration"') < html.indexOf('<main'));
   }
 });
 
-test('empty settings do not resurrect saved repository values and unconfigured users have a settings route', () => {
-  const html = renderGuidedWorkbench(state({ configuredRepository: '', configuredLocalRepository: '', hasWorkspace: false }), nonce);
-  assert.match(html, /id="configured-repository">Not configured<\/dd>/);
-  assert.match(html, /id="local-repository-path">Not configured<\/dd>/);
-  assert.match(html, /id="active-work-folder">Not selected<\/dd>/);
-  assert.match(html, /data-action="createWorkbench"[^>]*>Create workbench/);
-  assert.match(html, /data-action="openWorkbenchFolder"[^>]*>Open existing workbench/);
+test('blank settings do not pretend a saved repository is selected', () => {
+const html = renderGuidedWorkbench(state({ configuredRepository: '', configuredLocalRepository: '', hasWorkspace: false }), nonce);
+  assert.match(html, /id="configured-repository">Not connected<\/strong>/);
+  assert.match(html, /Choose a location to begin/);
+  assert.match(html, /data-action="createWorkbench"[^>]*>Choose a location/);
   assert.match(html, /id="open-settings"/);
   assert.doesNotMatch(html, /data-action="chooseWorkspace"/);
 });
 
-test('workbench setup explains local folders and has explicit, cancellable setup actions', () => {
-  const html = renderGuidedWorkbench(state({ hasWorkspace: false, connection: undefined }), nonce);
-  assert.match(html, /Setup creates local folders only/);
-  assert.match(html, /does not move existing work, clone a repository or upload anything/);
-  assert.match(html, /review the exact destination before creating/);
-  assert.match(html, /old work folder is not moved or adopted automatically/);
-  assert.doesNotMatch(html, /data-action="showCreate"|data-action="openPackage"|data-action="loadSkills"/);
-  for (const folder of ['skills/', 'repositories/', 'releases/', 'scratch/', 'recovery/', 'logs/', '.skill-workbench/']) {
-    assert(html.includes(`<code>${folder}</code>`), folder);
-  }
+test('first use asks for one home without teaching internal folder architecture', () => {
+const html = renderGuidedWorkbench(state({ hasWorkspace: false, connection: undefined }), nonce);
+  assert.match(html, /One home for your work/);
+  assert.match(html, /exact save location before anything is created/);
+  assert.match(html, /Your existing files stay where they are/);
+  assert.match(html, /data-action="createWorkbench"[^>]*>Choose a location/);
+  assert.doesNotMatch(html, /<code>skills\/|<code>repositories\/|<code>scratch\/|Give SkillJetty a workbench|<details/);
 });
 
-test('folder guide distinguishes drafts, local repositories, remote destination and target branch', () => {
-  const html = renderGuidedWorkbench(state({ workspaceMode: 'managed', workFolder: 'P:/Workbench/.skilljetty-prerelease',
-    configuredLocalRepository: 'P:/Workbench/.skilljetty-prerelease/repositories/skills' }), nonce);
-  assert.match(html, /<summary>What goes in each workbench folder\?<\/summary>/);
-  assert.match(html, /<dt>Working files<\/dt>/);
-  assert.match(html, /<dt>Local Git repository<\/dt>/);
-  assert.match(html, /<dt>GitHub repository<\/dt>/);
-  assert.match(html, /<dt>Branch<\/dt><dd id="configured-target-branch">main<\/dd>/);
-  assert.match(html, /Opening a different project in VS Code does not choose a new destination/);
-  assert.match(html, /changing settings does not clone, pull or upload/);
-  assert.match(html, /<dl class="action-help"><dt><code>skills\//);
-  assert.match(html, /README.md/);
-  assert.match(html, /SkillJetty blocks destinations outside this workbench/);
-  assert.match(html, /including AI-tool install folders outside it/);
-  assert.match(html, /This preview connects to GitHub using an HTTPS address/);
-  assert.match(html, /SSH addresses, local paths and file URLs are unavailable as remote destinations/);
-  assert.match(html, /Earlier edits and completed draft archives/);
+test('project identity uses the repository root while preserving the exact storage location', () => {
+const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository', repositoryRoot: 'P:/Projects/Skills', workFolder: 'P:/Projects/Skills/.skilljetty-prerelease', configuredLocalRepository: 'P:/Projects/Skills', configuredRepository: 'https://github.com/example/Skills' }), nonce);
+  assert.match(html, /Working in<\/span><strong>Skills<\/strong>/);
+  assert.match(html, /id="local-repository-path">P:\/Projects\/Skills<\/small>/);
+  assert.doesNotMatch(html, /Saved in|P:\/Projects\/Skills\/.skilljetty-prerelease/);
+  assert.match(html, /id="configured-target-branch">main<\/span>/);
+  assert.doesNotMatch(html, /What goes in each|Create another workbench|<details/);
 });
 
-test('an existing repository keeps normal Start and makes managed workbench setup a closed optional disclosure', () => {
-  const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository',
-    workFolder: 'P:/Projects/Skills/.skilljetty-prerelease',
-    configuredLocalRepository: 'P:/Projects/Skills', skillsLoaded: true,
-    drafts: [{ id: 'saved-draft', name: 'saved-draft' }],
-    connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' }
-  }), nonce);
-  assert.match(html, /data-action="showCreate"[^>]*>Create a skill/);
-  assert.match(html, /data-action="showPlugin"[^>]*>Build a plugin/);
-  assert.match(html, /data-action="openPackage"[^>]*>Open a \.skill file/);
-  assert.match(html, /Resume saved-draft/);
-  assert.match(html, /id="local-repository-path">P:\/Projects\/Skills<\/dd>/);
-  assert.match(html, /<dt>Branch<\/dt><dd id="configured-target-branch">main<\/dd>/);
-  assert.match(html, /<details id="optional-workbench-setup" class="optional" data-persist-open><summary>Manage work location \(optional\)<\/summary>/);
-  assert.doesNotMatch(html, /<details[^>]*id="optional-workbench-setup"[^>]*\sopen(?:\s|>)/);
-  assert.match(html, /Using your existing workspace\. Managed workbench setup is optional/);
-  assert.doesNotMatch(html, /Give SkillJetty a workbench|Local repository — inside repositories\/|What goes in each workbench folder/);
-  assert(html.indexOf('data-action="showCreate"') < html.indexOf('Manage work location (optional)'));
-  assert(html.indexOf('id="repository-details"') > html.indexOf('</main>'), 'repository settings must follow the primary task');
+test('managed project identity shows its chosen project once and keeps internal directories out of the task', () => {
+  const html = renderGuidedWorkbench(state({ workspaceMode: 'managed', workFolder: 'P:\\Projects\\Alpha10\\.skilljetty-prerelease', connection: undefined }), nonce);
+  assert.match(html, /Working in<\/span><strong>Alpha10<\/strong>/);
+  assert.match(html, /id="local-repository-path">P:\\Projects\\Alpha10<\/small>/);
+  assert.doesNotMatch(html, /\.skilljetty-prerelease|Saved in/);
+});
+
+test('built plugins are editable project objects with a direct action', () => {
+  const html = renderGuidedWorkbench(state({ skillsLoaded: true, releasesLoaded: true, library: [{ kind: 'plugin', skillName: 'team-tools', version: '1.0.0', directory: 'P:/builds/<plugin>', status: 'prepared' }] }), nonce);
+  assert.match(html, /data-action="openPlugin" data-directory="P:\/builds\/&lt;plugin&gt;">Edit plugin team-tools/);
+  assert.doesNotMatch(html, /choose its skills above|data-action="openPlugin"[^>]*<plugin>/);
+});
+
+test('existing projects open their catalogue without another location setup choice', () => {
+const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository', workFolder: 'P:/Projects/Skills/.skilljetty-prerelease', configuredLocalRepository: 'P:/Projects/Skills', skillsLoaded: true, releasesLoaded: true, drafts: [{ id: 'saved-draft', name: 'saved-draft' }], connection: { repository: 'https://github.com/example/Skills', localPath: 'P:/Projects/Skills', baseBranch: 'main' } }), nonce);
+  assert.match(html, /data-action="showCreate"[^>]*>New skill/);
+  assert.match(html, /data-action="showPlugin"[^>]*>New plugin/);
+  assert.match(html, /Edit saved-draft/);
+  assert.match(html, /Open from your project/);
+  assert.doesNotMatch(html, /data-action="createWorkbench"|data-action="openWorkbenchFolder"|workbench-setup|<details/);
 });
 
 test('invalid settings do not disclose rejected credentials or claim the new configuration is verified', () => {
@@ -283,58 +262,49 @@ test('invalid settings do not disclose rejected credentials or claim the new con
     repositoryVerification: { status: 'verified', message: 'Saved connection verified' } }), nonce);
   assert.doesNotMatch(html, new RegExp(secret));
   assert.doesNotMatch(html, /Rejected &lt;folder&gt;|Saved connection verified/);
-  assert.match(html, /id="repository-settings-state">Needs attention<\/dd>/);
-  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/Skills.git<\/dd>/);
+  assert.match(html, /id="repository-settings-state">Upload needs attention<\/span>/);
+  assert.match(html, /id="configured-repository">https:\/\/github.com\/example\/Skills.git<\/strong>/);
 });
 
 test('invalid native settings keep local packaging available without enabling upload through a saved connection', () => {
   const html = renderGuidedWorkbench(state({ step: 'publish', configurationError: 'Invalid native setting',
     publish: { version: '1.0.0', changelog: '', fileCount: 1, reviewSupported: true } }), nonce);
   assert.match(html, /id="publish-form"[^>]*data-form-action="savePackage"/);
-  assert.match(html, /id="primary-action"[^>]*>Save package on this computer/);
+  assert.match(html, /id="primary-action"[^>]*>Build skill package/);
   assert.doesNotMatch(html, /data-form-action="publish"|>Upload &amp; create PR|>Upload version|Submitting to/);
 });
 
-test('saved skills are opt-in and unloaded content is not rendered', () => {
-  const saved = { drafts: [{ id: 'private-draft', name: 'private-draft' }], library: [{ skillName: 'private-release', version: '1.0.0', directory: 'local', status: 'archived' }] };
-  const unloaded = renderGuidedWorkbench(state(saved), nonce);
-  assert.match(unloaded, /data-action="loadSkills"[^>]*>Load skills/);
-  assert.match(unloaded, /saved skills load only when you ask/);
-  assert.doesNotMatch(unloaded, /Resume private-draft|Improve private-release/);
-  assert.doesNotMatch(unloaded, /data-action="unloadSkills"/);
-  const loaded = renderGuidedWorkbench(state({ ...saved, skillsLoaded: true }), nonce);
-  assert.match(loaded, /Resume private-draft/);
-  assert.match(loaded, /Improve private-release/);
-  assert.match(loaded, /data-action="unloadSkills"[^>]*>Unload skills/);
-  assert.match(loaded, /Your files stay saved/);
-  const empty = renderGuidedWorkbench(state({ skillsLoaded: true }), nonce);
-  assert.match(empty, /No saved skills were found/);
-  const stale = renderGuidedWorkbench(state({ ...saved, skillsLoaded: true, skillsStale: true }), nonce);
-  assert.match(stale, /saved list may be out of date/);
-  assert.match(stale, /Choose Reload skills to include your latest changes/);
+test('home shows available skills immediately and reads saved versions without a Load step', () => {
+const html = renderGuidedWorkbench(state({ skillsLoaded: true, drafts: [{ id: 'a', name: 'existing-work' }], library: [{ skillName: 'saved-work', version: '1.0.0', directory: 'local', status: 'archived' }], releasesLoaded: true }), nonce);
+  assert.match(html, /Edit existing-work/);
+  assert.match(html, /Edit saved-work 1.0.0/);
+  assert.doesNotMatch(html, />Load skills|>Unload skills|load only when you ask/);
+  const loading = renderGuidedWorkbench(state({ skillsLoaded: true, releasesLoaded: false }), nonce);
+  assert.match(loading, /Reading saved versions/);
+  const stale = renderGuidedWorkbench(state({ skillsLoaded: true, skillsStale: true }), nonce);
+  assert.match(stale, /Refresh to include changes made in another window/);
 });
 
-test('a keyboard-accessible optional path form bypasses the native file chooser', () => {
-  const html = renderGuidedWorkbench(state({ form: { path: 'C:\\Downloads\\sample.skill' } }), nonce);
-  assert.match(html, /<summary>Open by file path<\/summary>/);
+test('a visible path form provides an alternative to the native file chooser', () => {
+const html = renderGuidedWorkbench(state({ form: { path: 'C:\\Downloads\\sample.skill' } }), nonce);
   assert.match(html, /data-form-action="openPackagePath"/);
-  assert.match(html, /<label for="packagePath">Full package path \(required\)<\/label>/);
+  assert.match(html, /<label for="packagePath">Or paste a skill file path<\/label>/);
   assert.match(html, /id="packagePath"[^>]*value="C:\\Downloads\\sample.skill"[^>]*required/);
+  assert.doesNotMatch(html, /<details/);
   assert.match(html, /if \(action === 'openPackagePath'\) payload = \{ path: fieldValue\('packagePath'\) \}/);
 });
 
-test('each guided step marks progress; Start offers equal choices and later steps have one next action', () => {
-  for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
-    const html = renderGuidedWorkbench(state({ step, active: { id: 'sample', name: 'sample' }, check: { valid: true, errors: [], warnings: [], compatibility: 'Portable', behaviorNote: 'No model was run.' }, publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
+test('project areas replace the numbered wizard and every active task has one visible main action', () => {
+for (const step of ['start', 'edit', 'check', 'publish', 'done']) {
+    const html = renderGuidedWorkbench(state({ step, active: { id: 'sample', name: 'sample' }, check: { valid: true, errors: [], warnings: [], compatibility: 'Portable', behaviorNote: '' }, publish: { version: '1.0.0', changelog: '', fileCount: 1 } }), nonce);
     assert.equal((html.match(/id="primary-action"/g) || []).length, step === 'start' ? 0 : 1, step);
-    assert.equal((html.match(/aria-current="step"/g) || []).length, 1, step);
-    if (step !== 'start') assert.match(html, /data-action="back"/, step);
-    else for (const action of ['showCreate', 'openPackage', 'openFolder']) assert.match(html, new RegExp(`class="secondary" data-action="${action}"`));
-    assert.match(html, /Step 1: <\/span>Start/, step);
-    assert.match(html, /Step 5: <\/span>Done/, step);
+    assert.equal((html.match(/<button[^>]*aria-current="page"/g) || []).length, 1, step);
+    assert.match(html, /<nav class="project-nav" aria-label="Project">/);
+    assert.doesNotMatch(html, /aria-current="step"|Step 1:|Step 5:|<details/);
     const scripts = [...html.matchAll(/<script nonce="[^"]+">([\s\S]*?)<\/script>/g)];
     assert.equal(scripts.length, 1);
     assert.doesNotThrow(() => new vm.Script(scripts[0][1]));
+    if (step === 'edit') assert.match(html, /id="primary-action"[^>]*data-action="preparePublish"[^>]*>Build \/ Share/);
   }
 });
 
@@ -343,14 +313,14 @@ test('start keeps local skill choices while repository setup lives in native set
   assert.match(repository, /id="open-settings"[^>]*data-action="openSettings"/);
   assert.doesNotMatch(repository, /id="repository-choice"|id="repository-form"|id="repository" name="repository"|data-form-action="connectRepository"|id="create-repository-form"/);
   for (const action of ['showCreate', 'openPackage', 'openFolder']) assert.match(repository, new RegExp(`data-action="${action}"`));
-  assert.match(repository, /Both can be saved on this computer without GitHub setup/);
-  assert.match(repository, /data-action="showPlugin"[^>]*>Build a plugin/);
+  assert.match(repository, /Create something new, continue your work/);
+  assert.match(repository, /data-action="showPlugin"[^>]*>New plugin/);
   assert.doesNotMatch(repository, /id="primary-action"/);
   const creation = renderGuidedWorkbench(state({ form: { mode: 'create', name: 'weekly-status', description: 'Summarize project updates.', instructions: 'Keep unknowns explicit.' } }), nonce);
   assert.match(creation, /id="skillName"[^>]*value="weekly-status"/);
   assert.match(creation, />Summarize project updates\.<\/textarea>/);
   assert.match(creation, />Keep unknowns explicit\.<\/textarea>/);
-  assert.match(creation, /form="create-form"[^>]*>Create draft/);
+  assert.match(creation, /form="create-form"[^>]*>Create and edit/);
 });
 
 test('skill contents and paths remain inert text, including textarea and script closing payloads', () => {
@@ -414,19 +384,19 @@ test('dense skill file lists offer a native keyboard skip link directly to the e
 test('check and publish explain their limits and show actionable file findings', () => {
   const check = renderGuidedWorkbench(state({ step: 'check', check: { valid: false, errors: [{ message: 'Description is missing.', file: 'SKILL.md' }], warnings: [], compatibility: 'Portable structure only.', behaviorNote: 'No AI model has been executed.' } }), nonce);
   assert.match(check, /data-action="openFile" data-path="SKILL.md"/);
-  assert.match(check, /Fix and return to editing/);
-  assert.match(check, /No AI model has been executed/);
+  assert.match(check, /Return to editor/);
+  assert.match(check, /does not run an assistant or scan for security threats/);
   const publish = renderGuidedWorkbench(state({ step: 'publish', publish: { version: '2.0.1', changelog: 'Improved input handling.', repository: 'https://github.com/example/Skills.git', fileCount: 4 } }), nonce);
   assert.match(publish, /id="releaseVersion"[^>]*value=""/);
   assert.match(publish, /2.0.1/);
   assert.match(publish, /Improved input handling\.<\/textarea>/);
-  assert.match(publish, /Editable source/);
-  assert.match(publish, /Installable .skill package/);
-  assert.match(publish, /CHANGELOG.md/);
+  assert.match(publish, /Original files and earlier versions are preserved/);
+  assert.match(publish, /Skill package \(\.skill\)/);
+  assert.match(publish, /Release notes/);
   assert.match(publish, /id="open-settings"[^>]*aria-label="Open SkillJetty settings"/);
   assert.doesNotMatch(publish, /Change or reconnect the repository|id="repository-form"/);
-  assert.match(publish, /form="publish-form"[^>]*>Upload &amp; create PR/);
-  assert.match(publish, /Step 4: <\/span>Submit/);
+  assert.match(publish, /form="publish-form"[^>]*>Build &amp; upload skill/);
+  assert.doesNotMatch(publish, /aria-current="step"/);
   assert.match(publish, /data-action="loadReviewers"/);
   assert.match(publish, /Selecting a reviewer sends that person a review request when you submit/);
 });
@@ -476,8 +446,8 @@ test('non-GitHub uploads do not advertise automatic PRs or reviewer requests', (
   const html = renderGuidedWorkbench(state({ step: 'publish', connection: { repository: 'C:/local/repository.git', baseBranch: 'main' },
     publish: { version: '1.0.0', changelog: 'Initial version.', fileCount: 4, reviewSupported: false }, reviewersLoaded: true, reviewers: [{ login: 'casey' }]
   }), nonce);
-  assert.match(html, /form="publish-form"[^>]*>Upload version/);
-  assert.match(html, /GitHub PRs and reviewer requests are unavailable/);
+  assert.match(html, /form="publish-form"[^>]*>Build &amp; upload skill/);
+  assert.match(html, /This repository has no automatic pull request support/);
   assert.doesNotMatch(html, /id="reviewer"|data-action="loadReviewers"|>Upload &amp; create PR/);
 });
 
@@ -510,7 +480,7 @@ test('PR request failure leaves uploaded contents visible and offers a bounded r
 test('launcher has one plain Open Workbench action rather than nested command menus', () => {
   const html = renderGuidedLauncher(nonce);
   assert.equal((html.match(/<button\b/g) || []).length, 1);
-  assert.match(html, /Open Workbench/);
+  assert.match(html, /Open SkillJetty/);
   assert.match(html, /action:'openWorkbench'/);
   assert.doesNotMatch(html, /data-tab=|role="tree"|command:/);
 });

@@ -29,6 +29,7 @@ function fixture(options = {}) {
       controllers.push(this);
     }
     async verifyRepository() { events.push({ type: 'repository-check', controller: this }); }
+    async loadHome() { events.push({ type: 'home-catalogue', controller: this }); return options.loadHome ? options.loadHome(this) : false; }
     updatePluginMetadata(input) {
       events.push({ type: 'plugin-metadata', input, controller: this });
       return options.metadataResult ?? input;
@@ -70,6 +71,7 @@ function fixture(options = {}) {
   try {
     Module._load = function(id, parent, main) {
       if (parent?.filename === file && id === 'vscode') return vscode;
+      if (parent?.filename === file && id === './workspace-selection.js' && options.resolveExistingWorkspace) return { ...originalLoad.call(this, id, parent, main), resolveExistingRepositoryWorkspace: options.resolveExistingWorkspace };
       if (parent?.filename === file && id === './guided-workspace.js' && options.connection) return { getWorkspaceConnection: () => { if (options.connection instanceof Error) throw options.connection; return options.connection; } };
       if (parent?.filename === file && id === './guided-controller.js') return { GuidedWorkbenchController: Controller };
       return originalLoad.call(this, id, parent, main);
@@ -86,6 +88,47 @@ function fixture(options = {}) {
     changeConfiguration(key, value) { settings.set(key, value); configurationListener({ affectsConfiguration: target => target === `skillBuilder.${key}` }); },
     async open() { await commands.get('skillBuilder.openWorkbench')(); return panels.at(-1); } };
 }
+
+test('late remembered project resolution cannot restore a root invalidated by changed settings', async () => {
+  const previous = managedRoot(), current = managedRoot(), entered = deferred(), release = deferred();
+  const rememberedState = new Map([['skillBuilder.selectedWorkbench.v1', {
+    format: 1, dataRoot: previous, repositoryRoot: previous,
+    rootSettingsFingerprint: JSON.stringify(['', undefined, undefined, undefined])
+  }]]);
+  const f = fixture({ root: current, rememberedState, resolveExistingWorkspace: async () => {
+    entered.resolve(); await release.promise;
+    // A delayed accepted descriptor isolates host selection caching from Git.
+    // Real legacy resolver/chooser identity is covered separately below.
+    return { kind: 'managed', dataRoot: previous };
+  } });
+  const opening = f.open().catch(error => error);
+  await entered.promise;
+  f.changeConfiguration('projectRoot', current);
+  release.resolve();
+  await opening;
+  await f.open();
+  assert.equal(f.controllers.at(-1).root, current, 'the late old descriptor must not be cached for the next opening');
+});
+
+test('late home metadata cannot replace an active create form', async () => {
+  const loaded = deferred(), f = fixture({ loadHome: () => loaded.promise });
+  const panel = await f.open(), controller = f.controllers.at(-1);
+  controller.state.form = { mode: 'create' };
+  const renders = panel.htmlWrites;
+  loaded.resolve(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(panel.htmlWrites, renders, 'background metadata must not replace the input document');
+});
+
+test('late home metadata cannot rerender after a later user action returns home', async () => {
+  const loaded = deferred(), f = fixture({ loadHome: () => loaded.promise });
+  const panel = await f.open();
+  await panel.receive({ action: 'showSkillStart' });
+  const renders = panel.htmlWrites;
+  loaded.resolve(true);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(panel.htmlWrites, renders, 'an unchanged home step does not erase later interaction provenance');
+});
 
 test('actual host delivers activity before dispatch and sends stage updates without replacing the page', async () => {
   const f = fixture(), panel = await f.open();
@@ -118,14 +161,14 @@ test('actual host delivers activity before dispatch and sends stage updates with
   assert(f.events.findIndex(event => event.type === 'render') > completion);
 });
 
-test('opening initializes before a single document render and emits no startup progress race', async () => {
+test('opening paints Home before background saved metadata and emits no progress race', async () => {
   const f = fixture(), panel = await f.open();
   assert.equal(panel.htmlWrites, 1);
   assert.deepEqual(panel.messages, []);
   const initialized = f.events.findIndex(event => event.type === 'dispatch' && event.action === 'ready');
   const rendered = f.events.findIndex(event => event.type === 'render');
   assert(initialized >= 0 && rendered > initialized);
-  assert(panel.html.indexOf('data-action="showPlugin"') < panel.html.indexOf('data-action="loadSkills"'), 'the task control precedes optional saved-work loading');
+  assert(f.events.findIndex(event => event.type === 'home-catalogue') > rendered);
 });
 
 test('autosave receives only its acknowledgement and keeps the rendered editor intact', async () => {
@@ -425,7 +468,7 @@ test('changing settings during the setup confirmation prevents folder creation',
   const destination = path.join(root, 'scratch', '.skilljetty-prerelease');
   const action = panel.receive({ action: 'createWorkbench' }); await entered.promise;
   f.changeConfiguration('projectRoot', path.join(root, 'different-selection'));
-  release.resolve('Create workbench'); await action;
+  release.resolve('Use this location'); await action;
   assert.equal(fs.existsSync(destination), false);
   assert(f.events.some(event => event.type === 'error-dialog' && /changed while setup was open/.test(event.args[0])));
   assert(panel.messages.some(message => message.type === 'operationComplete'));
@@ -486,9 +529,52 @@ test('a rejected workbench picker reports its actual error and releases controls
   assert.equal(panel.messages.at(-1).type, 'saved');
 });
 
+test('choosing an existing project reuses its marked storage without another location or window', async () => {
+  const parent = fs.mkdtempSync(path.join(scratch, 'project-parent-'));
+  fixtureRoots.push(parent);
+  const selectedRoot = createWorkbench(path.join(parent, '.skilljetty-prerelease'));
+  const f = fixture({ showOpenDialog: async () => [{ fsPath: parent }] });
+  const panel = await f.open();
+  const before = fs.readdirSync(selectedRoot).sort();
+  await panel.receive({ action: 'createWorkbench' });
+  assert.equal(f.controllers.at(-1).root, selectedRoot);
+  assert.deepEqual(fs.readdirSync(selectedRoot).sort(), before);
+  assert.equal(f.events.some(event => event.type === 'information'), false);
+  assert.equal(f.events.some(event => event.type === 'native-command' && event.args[0] === 'vscode.openFolder'), false);
+  assert.equal(f.rememberedState.get('skillBuilder.selectedWorkbench.v1').dataRoot, selectedRoot);
+});
+
+test('choosing a previously connected repository opens and remembers its existing data without conversion', async () => {
+  const { execFileSync } = require('node:child_process');
+  const project = fs.mkdtempSync(path.join(scratch, 'existing-project-'));
+  fixtureRoots.push(project);
+  const git = (...args) => execFileSync('git', args, { cwd: project, windowsHide: true, stdio: 'pipe' });
+  git('init', '--initial-branch=main');
+  git('remote', 'add', 'origin', 'https://github.com/example/project.git');
+  const config = fs.readFileSync(path.join(project, '.git/config'));
+  const dataRoot = path.join(project, '.skilljetty-prerelease');
+  fs.mkdirSync(path.join(dataRoot, '.skill-workbench'), { recursive: true });
+  const connection = Buffer.from(JSON.stringify({ format: 1, repository: 'https://github.com/example/project.git', localPath: project, baseBranch: 'main' }));
+  fs.writeFileSync(path.join(dataRoot, '.skill-workbench/connection.json'), connection);
+  const rememberedState = new Map();
+  const first = fixture({ rememberedState, showOpenDialog: async () => [{ fsPath: project }] });
+  const panel = await first.open();
+  await panel.receive({ action: 'createWorkbench' });
+  assert.equal(first.controllers.at(-1).root, dataRoot);
+  assert.equal(first.controllers.at(-1).hooks.workspaceSelection.kind, 'existing-repository');
+  assert.equal(fs.existsSync(path.join(dataRoot, '.skilljetty-workbench.json')), false);
+  assert.equal(first.events.some(event => event.type === 'information'), false);
+  assert.equal(rememberedState.get('skillBuilder.selectedWorkbench.v1').repositoryRoot, project);
+  const reopened = fixture({ rememberedState });
+  await reopened.open();
+  assert.equal(reopened.controllers.at(-1).root, dataRoot);
+  assert.deepEqual(fs.readFileSync(path.join(project, '.git/config')), config);
+  assert.deepEqual(fs.readFileSync(path.join(dataRoot, '.skill-workbench/connection.json')), connection);
+});
+
 for (const outcome of ['selected', 'canceled', 'failed']) {
-  test(`package picker remains usable with an unanswered setup notification: ${outcome}`, async () => {
-    const notificationEntered = deferred(), notificationAnswer = deferred(), pickerEntered = deferred();
+  test(`project opens in the same window without another folder notification: ${outcome}`, async () => {
+    const pickerEntered = deferred();
     const selectedRoot = managedRoot();
     const selectedPackage = path.join(selectedRoot, 'scratch', 'example.skill');
     const f = fixture({
@@ -497,19 +583,14 @@ for (const outcome of ['selected', 'canceled', 'failed']) {
         pickerEntered.resolve(options);
         if (outcome === 'failed') throw new Error('Native picker unavailable.');
         return outcome === 'selected' ? [{ fsPath: selectedPackage }] : undefined;
-      },
-      showInformationMessage: async message => {
-        if (message.startsWith('Workbench ready.')) {
-          notificationEntered.resolve();
-          return notificationAnswer.promise;
-        }
       }
     });
     const originalPanel = await f.open();
-    const setup = originalPanel.receive({ action: 'openWorkbenchFolder' });
-    await notificationEntered.promise;
+    await originalPanel.receive({ action: 'openWorkbenchFolder' });
     const panel = f.panels.at(-1);
-    assert.notEqual(panel, originalPanel, 'setup has already rendered the usable replacement workbench');
+    assert.notEqual(panel, originalPanel, 'setup renders the usable project');
+    assert.equal(f.events.some(event => event.type === 'information'), false);
+    assert.equal(f.events.some(event => event.type === 'native-command' && event.args[0] === 'vscode.openFolder'), false);
     let selected;
     f.dispatchHooks.set('openPackage', async controller => {
       // Exercise the actual host hook, including pickerRoot and showOpenDialog.
@@ -523,7 +604,7 @@ for (const outcome of ['selected', 'canceled', 'failed']) {
         pickerEntered.promise,
         new Promise(resolve => { timer = setTimeout(() => resolve(undefined), 1500); })
       ]);
-      assert(options, 'the optional unanswered notification must not block the real package picker hook');
+      assert(options, 'the project must be ready for opening content');
       assert.equal(options.title, 'Open a .skill package');
       assert.deepEqual(options.filters, { 'Skill packages': ['skill'] });
       assert.equal(options.canSelectFiles, true);
@@ -537,8 +618,6 @@ for (const outcome of ['selected', 'canceled', 'failed']) {
       assert.equal(panel.messages.at(-1).type, 'saved', 'a completed picker must release the host queue');
     } finally {
       clearTimeout(timer);
-      notificationAnswer.resolve(undefined);
-      await setup;
       await opening;
     }
   });

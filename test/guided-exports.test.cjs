@@ -27,6 +27,86 @@ async function summary(controller) {
 }
 const options = (ids, extra = {}) => ({ exportMode: 'both', pluginName: 'team-notes', pluginVersion: '1.0.0', pluginDescription: 'Team note skills.', pluginAuthor: 'DAF-TECH', pluginMembers: ids, geminiZip: true, ...extra });
 
+function savedPlugin(t) {
+  const root = fixture(t), releases = [], drafts = [];
+  for (const name of ['alpha-notes', 'beta-notes']) {
+    const source = path.join(root, 'scratch', name);
+    fs.mkdirSync(path.join(source, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'SKILL.md'), `---\nname: ${name}\ndescription: Summarize notes when requested.\n---\n# Notes\nKeep the evidence.\n`);
+    fs.writeFileSync(path.join(source, 'assets', 'sample.bin'), Buffer.from([0, 255, 1, 200]));
+    const draft = core.registerSkillFolder(root, source);
+    drafts.push(draft);
+    releases.push(core.prepareSkillRelease(root, draft.id, '1.0.0', 'First version.'));
+  }
+  const plugin = require('../out/plugin-release.js').preparePluginRelease(root, {
+    name: 'team-notes', description: 'Team notes bundle.', version: '2.0.0', author: 'DAF-TECH',
+    license: 'MIT', documentationUrl: 'https://example.com/notes', changelog: 'Team release.',
+    members: releases.map(release => ({ directory: release.directory }))
+  });
+  return { root, drafts, releases, plugin };
+}
+
+test('Home reopens a plugin as editable work, preserving newer drafts and restoring missing members', async t => {
+  const f = savedPlugin(t);
+  const newer = fs.readFileSync(path.join(f.drafts[0].sourcePath, 'SKILL.md'), 'utf8') + '\nNewer local instructions.\n';
+  fs.writeFileSync(path.join(f.drafts[0].sourcePath, 'SKILL.md'), newer);
+  core.completeWorkbenchSkill(f.root, f.drafts[1].id, f.releases[1].directory);
+  const packed = fs.readFileSync(f.plugin.packagePath);
+  const controller = new GuidedWorkbenchController(f.root, { enforceWorkbench: true });
+  await controller.dispatch({ action: 'ready' }); await controller.loadHome();
+  await controller.dispatch({ action: 'openPlugin', payload: { directory: f.plugin.directory } });
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.step, 'edit'); assert.equal(controller.state.workflowIntent, 'plugin');
+  assert.equal(controller.state.exportOptions.pluginName, 'team-notes');
+  assert.equal(controller.state.exportOptions.pluginVersion, '2.0.1');
+  assert.equal(controller.state.exportOptions.pluginAuthor, 'DAF-TECH');
+  assert.equal(controller.state.exportOptions.pluginDocumentationUrl, 'https://example.com/notes');
+  assert.equal(controller.state.exportOptions.members.filter(member => member.selected).length, 2);
+  assert.equal(fs.readFileSync(path.join(f.drafts[0].sourcePath, 'SKILL.md'), 'utf8'), newer);
+  const restored = core.listWorkbenchSkills(f.root).find(skill => skill.id === 'beta-notes');
+  assert.deepEqual(fs.readFileSync(path.join(restored.sourcePath, 'assets/sample.bin')), Buffer.from([0, 255, 1, 200]));
+  await summary(controller);
+  assert.equal(controller.state.exportOptions.pluginName, 'team-notes');
+  assert.equal(controller.state.exportOptions.pluginVersion, '2.0.1');
+  assert.equal(controller.state.exportOptions.members.filter(member => member.selected).length, 2);
+  await controller.dispatch({ action: 'savePackage', payload: { exportMode: 'plugin' } });
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.receipt.version, '2.0.1');
+  assert.deepEqual(fs.readFileSync(f.plugin.packagePath), packed);
+});
+
+test('Home refuses a corrupt or foreign plugin before restoring any draft', async t => {
+  const f = savedPlugin(t);
+  for (let index = 0; index < f.drafts.length; index++) core.completeWorkbenchSkill(f.root, f.drafts[index].id, f.releases[index].directory);
+  const controller = new GuidedWorkbenchController(f.root, { enforceWorkbench: true });
+  await controller.dispatch({ action: 'ready' }); await controller.loadHome();
+  await controller.dispatch({ action: 'openPlugin', payload: { directory: path.join(f.root, 'scratch') } });
+  assert.match(controller.state.error, /plugin saved in this project/);
+  assert.deepEqual(core.listWorkbenchSkills(f.root), []);
+  fs.appendFileSync(f.plugin.packagePath, 'tampered');
+  await controller.dispatch({ action: 'openPlugin', payload: { directory: f.plugin.directory } });
+  assert.match(controller.state.error, /hash mismatch/);
+  assert.deepEqual(core.listWorkbenchSkills(f.root), []);
+});
+
+test('project settings changed after plugin verification stop restoration before writes', async t => {
+  const f = savedPlugin(t);
+  for (let index = 0; index < f.drafts.length; index++) core.completeWorkbenchSkill(f.root, f.drafts[index].id, f.releases[index].directory);
+  const jobs = require('../out/workbench-jobs.js'), original = jobs.runWorkbenchJob;
+  let generation = 0;
+  const controller = new GuidedWorkbenchController(f.root, { enforceWorkbench: true,
+    captureConfigurationGeneration: () => generation,
+    assertConfigurationGeneration: expected => { if (expected !== generation) throw new Error('Project settings changed.'); }
+  });
+  await controller.dispatch({ action: 'ready' }); await controller.loadHome();
+  jobs.runWorkbenchJob = async (...args) => { const result = await original(...args); if (args[0].kind === 'verifyExport') generation++; return result; };
+  try {
+    await controller.dispatch({ action: 'openPlugin', payload: { directory: f.plugin.directory } });
+    assert.match(controller.state.error, /Project settings changed/);
+    assert.deepEqual(core.listWorkbenchSkills(f.root), []);
+  } finally { jobs.runWorkbenchJob = original; }
+});
+
 test('managed controller prepares Both and Gemini from two reviewed skill snapshots without network', async t => {
   const root = fixture(t); const controller = new GuidedWorkbenchController(root, { enforceWorkbench: true, getRepositorySettings: () => ({}) });
   const first = await create(controller, 'first-notes'), second = await create(controller, 'second-notes');
