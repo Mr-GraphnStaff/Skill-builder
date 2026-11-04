@@ -1,21 +1,98 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
-## Active incident — November 3: completed portable upload blocks plugin retry
+## Current assignment — November 3: merged-upload retry repaired, preview 0.15.5
+
+Public preview **0.15.5 is validated/latest and installed from the official
+gallery in Default**. Its open window was not reloaded; the user must save work
+and reload before retrying. No user package, draft, repository or receipt was
+deleted or uploaded. Production, the Beta profile and publisher transfer are
+unchanged. Live user retry and human usability acceptance remain unverified.
 
 Owner reproduced the failure in installed preview 0.15.4: a Both submission
 reuses portable `i-yam-a-skill-i-tells-ya` 1.0.0 while preparing plugin 1.0.2.
 The portable upload receipt points to PR 17 and commit
 `4ef657ba22c92ad726d15a8a4bec056eed1ef654`. A fresh GitHub read confirms PR 17
-is merged into `main` with that exact head. The publisher currently requires the
-old branch tip and stops before attempting the new plugin upload.
+is merged into `main` with that exact head. Publisher 0.15.4 required the
+old branch tip and stopped before attempting the new plugin upload.
 
-Fix in progress: freshly verify the exact merged PR as an alternative to a live
+Delivered fix: freshly verify the exact merged PR as an alternative to a live
 upload branch, preserve upload/review receipts, and continue only the incomplete
 artifact. Cached merged flags alone must not authorize reuse. No user package,
 draft, repository, receipt or cache was deleted; no user upload was attempted.
 Ishan owns implementation, Lena independent QA, Morgan independent trust review,
 and Avery delivery coordination. Publication and installed-fix verification are
-pending; the previous 0.15.4 delivery below remains historical evidence.
+complete within this scope; the previous 0.15.4 delivery below is historical.
+
+Released 0.15.5 runtime source is
+`f50bfde2a2638c6b4fbd41ea98d9aa4084ab88c4`, CI1013, SHA-256
+`b0395a4606eb62d9e2802e62c424d2dc0991163324b1db2eba859e2704c7fc08`.
+CI Build passed 506 tests: 505 passed, zero failed, one Windows-only skip on Linux;
+production dependency audit zero, packaging tooling six moderate within its gate.
+Raw CI evidence: `working/runs/db3dd481125d4337beee64ff37865789/reports/ci1013-evidence.json`.
+Independent source regression passed 15/15; Morgan's two additional fixtures
+reject a wrong live PR number and package mutation during lookup. Exact artifact
+security review passed all 196 files, 32 compiled modules and 32 maps:
+`working/runs/c3a8e62bc2a74070aa44e156b1c98386/reports/security-artifact-review.json`.
+Initial CI1010 and CI1011 failed only the version-bound packaging filename check;
+the filename was corrected in f50bfde. Neither candidate gate was approved and
+neither build uploaded. The failed results are retained, not relabelled green.
+Pending incident wiki notice published at `7e6c73d` and anonymous Home readback
+confirmed. Actual user's plugin 1.0.2 has automatic notes matching portable 1.0.0;
+independent reload tests reuse that ZIP without creating 1.0.3. A separate
+pre-existing custom-plugin-only-notes reload mismatch remains a limitation:
+immutable-version verification refuses the mismatch, retains the old ZIP and
+performs no upload. This repair does not claim that separate issue is fixed.
+
+Exact installed-package QA passed:
+`working/runs/d4d0f9a1d0ae40c1bfed0c917bf8e45c/native/native-final-receipt.json`.
+Actual native exit 0, 38 local transitions, three exports/reopens, and 196-file
+parity. Seven required retry criteria passed among eight executed cases; the
+separate custom-notes limitation remains ATTENTION, with explicit-original-notes
+workaround verified and ZIP preservation confirmed. The old 0.15.4 artifact
+reproduced the reported Both blockage; the 0.15.5 fixture reuses the old merged
+portable with zero duplicate pushes and submits the plugin once. API failure,
+unmerged PR and wrong head produce no new upload. Actual current draft bytes
+were checked read-only against the prepared member and match. No live user
+GitHub submission or human usability/screen-reader acceptance was performed.
+Owner-authorized automated gate approval is recorded at
+`working/runs/fef46bb5b5e54b4aafc79f1403a9ea8f/reports/approval.json`; it is not
+owner UAT. Public validation and actual Default installation are recorded below.
+
+CI1013 uploaded version 0.15.5 once at **01:41:04 UTC on November 4**
+(November 3 locally). The original publication job failed at **01:46:13 UTC**
+after its public-catalog deadline; its eleven reads all verified the public
+payload while the catalog did not yet list the version. Preserve that failed
+result and original upload log:
+`working/runs/4f9c798701214ba8a9225e02baf888c0/reports/publish-1013-22.log`.
+Read-only reconciliation CI1014 targets original CI1013 with uploads disabled.
+The separate public verifier continued bounded reads until validation; no upload
+was repeated.
+
+Final public validation was observed at **01:49:40 UTC November 4**:
+`working/runs/6012ef99ea9d4cba9d7dace3410fe654/reports/public-verification.json`.
+The public package bytes exactly match the reviewed SHA-256 above; latest
+validated pre-release is 0.15.5 and stable remains 0.12.2. Read-only reconciliation
+**1014 succeeded**, original 1013, no rebuild/upload:
+`working/runs/d84107eec0dd4065aba638015e878771/reports/reconcile-result.json`.
+Both bounded runtime channel-switch cases remain enabled:
+`working/runs/76b0fc70b76a46e6bef27c993aa0a80c/reports/channel-switch.json`.
+Actual Default gallery install passed 196-file parity, pre-release flags and
+existing pin/channel preference preservation:
+`working/runs/16783bd51ce54800b043676f13308f9d/reports/default-gallery-install.json`.
+The preference restoration uses guarded before/after hashes and backups; it is
+not an atomic cross-process transaction. No foreground/reload/close was issued.
+Public wiki Home, Getting Started, Release Channels, Release Notes and affected
+Troubleshooting were updated at `75834e6`, with exact delivery evidence added at
+`4fd6bd8`. Anonymous current-page readback was verified. The original failed
+publication result remains intact; completion relies on the independent public
+proof and successful read-only reconciliation, not a repeated upload.
+
+Verified retry instructions for this actual automatic-notes export: save work,
+Developer: Reload Window, confirm Installed pre-release 0.15.5, Home → Edit plugin
+1.0.2 → Build / Share → Both skill package and plugin ZIP → plugin Version 1.0.2
+→ Build & upload. Keep member 1.0.0, notes and other metadata unchanged. Fixtures
+confirm the prepared ZIP is reused without creating 1.0.3. No real user upload,
+merge, repository reset, folder migration or global Git trust change occurred.
 
 ## Current assignment — November 3: project experience redesign, preview 0.15.4
 
