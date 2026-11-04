@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.5 — resume exports after a completed merge (pre-release candidate)
+
+- Recognize an already merged upload using a fresh GitHub check of its exact
+  repository, target branch, PR and uploaded commit, even after its review branch
+  was deleted. A Both submission can then continue with the pending plugin.
+- Preserve prior packages and receipts. Unavailable or mismatched PR evidence
+  stops the retry without repeating an upload or relying on cached merge status.
+
 ## 0.15.4 — project experience redesign (pre-release candidate)
 
 - Replace the numbered wizard with a project Home, Editor, and Build / Share.

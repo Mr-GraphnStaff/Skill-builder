@@ -1,5 +1,22 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Active incident — November 3: completed portable upload blocks plugin retry
+
+Owner reproduced the failure in installed preview 0.15.4: a Both submission
+reuses portable `i-yam-a-skill-i-tells-ya` 1.0.0 while preparing plugin 1.0.2.
+The portable upload receipt points to PR 17 and commit
+`4ef657ba22c92ad726d15a8a4bec056eed1ef654`. A fresh GitHub read confirms PR 17
+is merged into `main` with that exact head. The publisher currently requires the
+old branch tip and stops before attempting the new plugin upload.
+
+Fix in progress: freshly verify the exact merged PR as an alternative to a live
+upload branch, preserve upload/review receipts, and continue only the incomplete
+artifact. Cached merged flags alone must not authorize reuse. No user package,
+draft, repository, receipt or cache was deleted; no user upload was attempted.
+Ishan owns implementation, Lena independent QA, Morgan independent trust review,
+and Avery delivery coordination. Publication and installed-fix verification are
+pending; the previous 0.15.4 delivery below remains historical evidence.
+
 ## Current assignment — November 3: project experience redesign, preview 0.15.4
 
 ### Verified delivery — completed within pre-release scope

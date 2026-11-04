@@ -13,6 +13,7 @@ import { exportRelativePath } from './plugin-release.js';
 import type { PluginManifest } from './plugin-release.js';
 import type { ReleaseArchivePlan } from './release-archive.js';
 import { suggestReleaseVersion } from './workbench-library.js';
+import { listLibraryReleases } from './workbench-library.js';
 import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
 import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, publishPreparedGuidedRelease, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
@@ -792,9 +793,25 @@ export class GuidedWorkbenchController {
             let failed = false;
             for (const release of plan.submissions) {
               const artifact = plan.artifacts.find(item => item.directory === release.directory)!;
+              const savedUpload = listLibraryReleases(this.workspace(), undefined, { verifyPayload: false })
+                .find(item => item.directory === release.directory && item.status === 'uploaded'
+                  && item.repository && repositoryIdentity(item.repository) === repositoryIdentity(connection.repository));
+              if (savedUpload?.commit && savedUpload.branch) {
+                artifact.status = 'uploaded';
+                const repo = githubRepository(connection.repository);
+                if (repo) {
+                  const prefix = exportRelativePath(release).split('/').map(encodeURIComponent).join('/');
+                  artifact.url = `https://github.com/${repo.fullName}/blob/${encodeURIComponent(savedUpload.commit)}/${prefix}/${encodeURIComponent(path.basename(release.packagePath))}`;
+                  if (savedUpload.pr?.number) artifact.reviewUrl = pullRequestUrl(connection.repository, savedUpload.pr.number);
+                }
+                if (release.directory === first.directory) Object.assign(this.state.receipt, {
+                  repository: savedUpload.repository, branch: savedUpload.branch, commit: savedUpload.commit,
+                  ...(savedUpload.pr ? { pr: savedUpload.pr } : {})
+                });
+              }
               try {
                 const result = await publishPreparedGuidedRelease(this.workspace(), release.directory, connection,
-                  (message, status) => this.progress(message, false, status), remoteGuard);
+                  (message, status) => this.progress(message, false, status), remoteGuard, this.hooks.github);
                 artifact.status = 'uploaded';
                 const receipt = receiptFor(result);
                 const plugin = artifact.kind === 'plugin';

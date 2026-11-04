@@ -321,15 +321,40 @@ function connectedRepository(root: string, repository: string): boolean {
 /** Submit an already captured export. Never re-read or remove its draft while
  * a multi-artifact submission is in progress. Retries reuse recorded uploads. */
 export async function publishPreparedGuidedRelease(root: string, directory: string, connection: WorkspaceConnection,
-  onProgress?: import('./guided-contract.js').GuidedProgress, beforeWrite?: () => void): Promise<GuidedPublication> {
+  onProgress?: import('./guided-contract.js').GuidedProgress, beforeWrite?: () => void, runner?: GitHubRunner): Promise<GuidedPublication> {
   ensureSafe(root, directory);
   const release = verifyExportRelease(directory);
   const prior = listLibraryReleases(root, undefined, { verifyPayload: false }).find(item => item.directory === release.directory && item.status === 'uploaded');
   beforeWrite?.();
   if (prior?.repository && prior.branch && prior.commit) {
     if (!sameRepository(prior.repository, connection.repository)) throw new Error('This export was already uploaded to a different repository. Its receipt is preserved; choose a new version for a different destination.');
+    const receiptIdentity = (item: LibraryRelease) => JSON.stringify([item.directory, item.status, item.repository, item.baseBranch, item.branch, item.commit, item.pr?.number]);
+    const recheckReceipt = () => {
+      beforeWrite?.();
+      const current = listLibraryReleases(root, undefined, { verifyPayload: false }).find(item => item.directory === release.directory);
+      if (!current || receiptIdentity(current) !== receiptIdentity(prior)
+          || JSON.stringify(verifyExportRelease(directory).manifest) !== JSON.stringify(release.manifest)) {
+        throw new Error('The saved export or upload receipt changed while verifying its previous upload. Nothing was uploaded again.');
+      }
+    };
     if (await verifyRepositoryBranchCommit(prior.repository, prior.branch, prior.commit, root)) {
+      recheckReceipt();
       return { release, publication: { repository: prior.repository, branch: prior.branch, commit: prior.commit } };
+    }
+    recheckReceipt();
+    // A successfully merged PR remains evidence after its upload branch is
+    // deleted or reused. Cached review flags alone never establish delivery.
+    if (githubRepository(prior.repository) && prior.baseBranch === connection.baseBranch && prior.pr?.number) {
+      const { context } = libraryReviewContext(root, directory);
+      const checked = await new GitHubReviewService(root, runner).check(context, prior.pr);
+      recheckReceipt();
+      if (checked.status === 'merged' && checked.identityVerified === true && !checked.error
+          && !checked.creationUncertain && !checked.reviewRequestUncertain
+          && checked.number === prior.pr.number && checked.headCommit === prior.commit
+          && checked.head === prior.branch && checked.base === prior.baseBranch) {
+        recordLibraryReview(root, directory, checked);
+        return { release, publication: { repository: prior.repository, branch: prior.branch, commit: prior.commit } };
+      }
     }
     throw new Error('This export has a recorded upload, but its branch changed or was removed. Check its PR before submitting another version; no upload was repeated.');
   }

@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "SkillJetty — Agent Skills Studio",
   "description": "Create skills, build Claude plugin bundles, and save or share them with SkillJetty by DAF-TECH.",
-  "version": "0.15.4",
+  "version": "0.15.5",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
