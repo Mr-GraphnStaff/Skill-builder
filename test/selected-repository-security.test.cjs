@@ -152,4 +152,11 @@ test('external connection drift never silently revives stale native repository s
   assert.equal(controller.state.configuredRepository, undefined, 'the stale native remote must never become active');
   assert.match(controller.state.configurationError || '', /configuration changed|reconnect|Connect/i);
   assert.equal(JSON.parse(fs.readFileSync(f.connection)).repository, remote, 'the saved external pair remains unchanged for recovery');
+  fs.writeFileSync(f.connection, '{"format":1,"separateRepository":true,');
+  const malformed = new GuidedWorkbenchController(f.root, {
+    enforceWorkbench: true,
+    getRepositorySettings: () => ({ repositoryUrl: 'https://github.com/example/old.git', localRepositoryPath: path.join(f.root, 'repositories', 'legacy') })
+  });
+  assert.equal(malformed.state.configuredRepository, undefined, 'an unparsable saved record must not revive stale native settings');
+  assert(malformed.state.configurationError, 'the damaged saved record requires explicit repair');
 });

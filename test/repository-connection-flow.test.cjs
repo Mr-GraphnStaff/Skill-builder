@@ -3,9 +3,13 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { renderGuidedWorkbench } = require('../out/guided-workbench-html.js');
 const { connectRepositoryFlow, normalizeGitHubRepository } = require('../out/repository-connection-flow.js');
+const flowRoot = path.resolve(__dirname, '../working/flow-fixture');
+const workbenchFolder = path.join(flowRoot, 'workbench');
+const localParent = path.join(flowRoot, 'repositories');
+const nextLocal = path.join(localParent, 'next');
 
 function state(overrides = {}) {
-  return { step: 'start', hasWorkspace: true, workFolder: 'C:/SkillJetty/workbench',
+  return { step: 'start', hasWorkspace: true, workFolder: workbenchFolder,
     repositories: [], drafts: [], library: [], files: [], target: 'portable', ...overrides };
 }
 
@@ -18,7 +22,7 @@ function connectionButtons(html) {
 for (const connected of [false, true]) {
   test(`${connected ? 'changing' : 'connecting'} the project repository enters a connection flow instead of Settings`, () => {
     const html = renderGuidedWorkbench(state(connected ? {
-      connection: { repository: 'https://github.com/example/skills', localPath: 'C:/Repositories/skills', baseBranch: 'main' }
+      connection: { repository: 'https://github.com/example/skills', localPath: path.join(localParent, 'skills'), baseBranch: 'main' }
     } : {}), 'connectionFlowNonce');
     const buttons = connectionButtons(html);
     assert(buttons.length > 0, 'the project must expose a directly labelled connection action');
@@ -41,15 +45,15 @@ test('Build / Share offers the same real connection flow when no repository is c
 
 function fixture(overrides = {}) {
   const events = [];
-  const previous = { repository: 'https://github.com/example/previous.git', localPath: 'C:/Repositories/previous' };
+  const previous = { repository: 'https://github.com/example/previous.git', localPath: path.join(localParent, 'previous') };
   let connection = { ...previous };
   const hooks = {
-    workbenchFolder: 'C:/SkillJetty/workbench', currentRepository: previous.repository,
+    workbenchFolder, currentRepository: previous.repository,
     currentLocalRepository: previous.localPath,
     assertCurrent() { events.push(['assert']); },
     async inputRepository(current) { events.push(['input', current]); return 'example/next'; },
     async chooseLocalMode() { events.push(['mode']); return 'existing'; },
-    async chooseFolder(mode, suggested) { events.push(['folder', mode, suggested]); return 'C:/Repositories/next'; },
+    async chooseFolder(mode, suggested) { events.push(['folder', mode, suggested]); return nextLocal; },
     async confirm(selection) { events.push(['confirm', selection]); return true; },
     async validateExisting(repository, localPath) { events.push(['validate', repository, localPath]); },
     async clone(repository, localPath) { events.push(['clone', repository, localPath]); },
@@ -78,20 +82,20 @@ test('repository input rejects credential URLs, subdirectories and alternate tra
 test('a verified existing local repository outside the workbench can become the complete active pair', async () => {
   const f = fixture();
   assert.equal(await connectRepositoryFlow(f.hooks), true);
-  assert.deepEqual(f.connection(), { repository: 'https://github.com/example/next.git', localPath: path.resolve('C:/Repositories/next') });
+  assert.deepEqual(f.connection(), { repository: 'https://github.com/example/next.git', localPath: nextLocal });
   assert.equal(f.events.filter(([event]) => event === 'activate').length, 1);
   assert.equal(f.events.some(([event]) => event === 'clone'), false);
   const confirmation = f.events.find(([event]) => event === 'confirm')[1];
   assert.equal(confirmation.repository, 'https://github.com/example/next.git');
-  assert.equal(confirmation.localPath, path.resolve('C:/Repositories/next'));
+  assert.equal(confirmation.localPath, nextLocal);
   assert.equal(confirmation.workbenchFolder, f.hooks.workbenchFolder);
   assert.equal(confirmation.clone, false);
 });
 
 test('clone shows the exact destination and completes before activating the new pair', async () => {
-  const f = fixture({ chooseLocalMode: async () => 'clone', chooseFolder: async () => 'C:/Repositories' });
+  const f = fixture({ chooseLocalMode: async () => 'clone', chooseFolder: async () => localParent });
   assert.equal(await connectRepositoryFlow(f.hooks), true);
-  const destination = path.join('C:/Repositories', 'next');
+  const destination = path.join(localParent, 'next');
   const confirmation = f.events.find(([event]) => event === 'confirm')[1];
   assert.equal(confirmation.localPath, destination);
   assert.equal(confirmation.clone, true);

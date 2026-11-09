@@ -47,7 +47,7 @@ export function hasGuidedRepositoryConnection(root: string): boolean {
   const file = connectionPath(root);
   if (!fs.existsSync(file)) return false;
   try { return JSON.parse(fs.readFileSync(file, 'utf8')).separateRepository === true; }
-  catch { return false; }
+  catch { return true; /* A damaged saved record requires explicit guided repair. */ }
 }
 
 export function getWorkspaceConnection(root: string): WorkspaceConnection | undefined {

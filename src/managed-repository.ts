@@ -67,8 +67,10 @@ async function promoteClone(source: string, destination: string, beforeWrite: ()
   await fs.mkdir(destination);
   try {
     const expected = await repositoryCopyInventory(source);
-    await fs.cp(source, destination, { recursive: true, force: false, errorOnExist: true, dereference: false, verbatimSymlinks: true,
-      filter: (_source, target) => { beforeWrite(); assertWorkbenchPath(destination, target); return true; } });
+    for (const entry of await fs.readdir(source)) {
+      await fs.cp(path.join(source, entry), path.join(destination, entry), { recursive: true, force: false, errorOnExist: true, dereference: false, verbatimSymlinks: true,
+        filter: (_source, target) => { beforeWrite(); assertWorkbenchPath(destination, target); return true; } });
+    }
     const actual = await repositoryCopyInventory(destination), stable = await repositoryCopyInventory(source);
     const matches = (other: Map<string, string>) => expected.size === other.size && [...expected].every(([file, digest]) => other.get(file) === digest);
     if (!matches(actual) || !matches(stable)) throw new Error('The local repository copy changed before verification completed.');

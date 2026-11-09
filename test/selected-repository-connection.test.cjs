@@ -184,7 +184,7 @@ test('a file created during cross-volume copying is retained and the partial cop
     return rename(source, target, ...rest);
   };
   fs.promises.cp = async (source, target, options) => {
-    if (path.resolve(target) === f.local) {
+    if (!collided && (path.resolve(target) === f.local || path.dirname(path.resolve(target)) === f.local)) {
       collided = true;
       fs.writeFileSync(path.join(f.local, 'README.md'), 'User file that appeared during copying.\n');
     }

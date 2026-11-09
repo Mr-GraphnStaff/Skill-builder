@@ -471,7 +471,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       return Promise.resolve();
     }
     if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'openPerformanceLog') { activityLog.show(true); return Promise.resolve(); }
-    if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'openSettings') return openSettings().then(() => undefined);
+    if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'openSettings') return Promise.resolve(openSettings()).then(() => undefined);
     const operation = handling.then(() => processMessage(input));
     handling = operation.then(() => undefined, () => undefined);
     return operation;
