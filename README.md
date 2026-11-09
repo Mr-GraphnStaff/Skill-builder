@@ -60,7 +60,7 @@ your intended application.
 
 ## Release and help
 
-The guided repository connection fix is prepared for preview **0.15.6**. Check the
+The guided repository connection fix is published in preview **0.15.6** and stable **0.12.3**. Check the
 [public channel status](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels)
 for verified availability. Stable keeps its established interface. Both channels
 use the same listing and command; switching versions does not migrate your data.

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.15.6 — guided repository connection (pre-release candidate)
+## 0.15.6 — guided repository connection (public pre-release, 2026-11-09)
 
 - Connect repository and Change connection now guide you through the GitHub
   address, an existing local copy or a confirmed new clone, and the exact pair
