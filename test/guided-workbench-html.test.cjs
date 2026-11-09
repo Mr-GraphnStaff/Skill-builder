@@ -252,24 +252,25 @@ const html = renderGuidedWorkbench(state({ hasWorkspace: false, connection: unde
 
 test('project identity uses the repository root while preserving the exact storage location', () => {
 const html = renderGuidedWorkbench(state({ workspaceMode: 'existing-repository', repositoryRoot: 'P:/Projects/Skills', workFolder: 'P:/Projects/Skills/.skilljetty-prerelease', configuredLocalRepository: 'P:/Projects/Skills', configuredRepository: 'https://github.com/example/Skills' }), nonce);
-  assert.match(html, /Build space<\/span><strong id="active-work-folder" title="P:\/Projects\/Skills\/.skilljetty-prerelease">Skills builds<\/strong>/);
+  assert.match(html, /Workbench folder<\/span><strong id="active-work-folder" title="P:\/Projects\/Skills\/.skilljetty-prerelease">Skills builds<\/strong><small>P:\/Projects\/Skills\/.skilljetty-prerelease<\/small>/);
   assert.match(html, /Local repository<\/span><strong id="local-repository-path" title="P:\/Projects\/Skills">Skills<\/strong>/);
   assert.match(html, /Remote repository<\/span><strong id="configured-repository" title="https:\/\/github.com\/example\/Skills">example\/Skills<\/strong>/);
-  assert.doesNotMatch(html, /Saved in|>P:\/Projects\/Skills\/.skilljetty-prerelease/);
+  assert.doesNotMatch(html, /Saved in/);
+  assert.match(html, /id="local-repository-path"[^>]*>Skills<\/strong><small>P:\/Projects\/Skills<\/small>/);
   assert.match(html, /id="configured-target-branch">main<\/span>/);
   assert.doesNotMatch(html, /What goes in each|Create another workbench|<details/);
 });
 
-test('managed project identity shows its chosen project once and keeps internal directories out of the task', () => {
+test('managed project identity names the workbench and visibly shows its exact location', () => {
   const html = renderGuidedWorkbench(state({ workspaceMode: 'managed', workFolder: 'P:\\Projects\\Alpha10\\.skilljetty-prerelease', connection: undefined }), nonce);
-  assert.match(html, /Build space<\/span><strong id="active-work-folder" title="P:\\Projects\\Alpha10\\.skilljetty-prerelease">Alpha10 builds<\/strong>/);
-  assert.doesNotMatch(html, />P:\\Projects\\Alpha10|Saved in/);
+  assert.match(html, /Workbench folder<\/span><strong id="active-work-folder" title="P:\\Projects\\Alpha10\\.skilljetty-prerelease">Alpha10 builds<\/strong><small>P:\\Projects\\Alpha10\\.skilljetty-prerelease<\/small>/);
+  assert.doesNotMatch(html, /Saved in/);
 });
 
 test('the local and remote repository model exposes sync and only promises implicit preparation when authorized', () => {
   const model = { workspaceMode: 'managed', workFolder: 'P:/Alpha/.skilljetty-prerelease', configuredLocalRepository: 'P:/Alpha/.skilljetty-prerelease/repositories/skills', localRepositoryAvailable: false };
   const pending = renderGuidedWorkbench(state({ ...model, localRepositorySetupPending: true }), nonce);
-  assert.match(pending, /Build space<\/span>/);
+  assert.match(pending, /Workbench folder<\/span>/);
   assert.match(pending, /Local repository<\/span>/);
   assert.match(pending, /Remote repository<\/span>/);
   assert.match(pending, /Prepared on first upload/);
