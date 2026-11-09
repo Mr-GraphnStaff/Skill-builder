@@ -219,12 +219,14 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
   if (entries.length) await identity(checkout, repository);
   if (createOnly) beforeWrite?.();
   await fs.mkdir(hooks, { recursive: true });
+  let operationFailure: unknown;
   try {
     const remote = await advertised(workspaceRoot, repository);
     if (!entries.length) {
       const staging = path.join(runtime, `clone-${randomUUID()}`);
       if (createOnly) beforeWrite?.();
       const template = path.join(hooks, 'empty-template'); await fs.mkdir(template);
+      let cloneFailure: unknown;
       try {
         progress?.('Downloading the registered Skills repository into the selected project folder…');
         await run(runtime, ['clone', '--no-checkout', '--no-hardlinks', `--template=${template}`, '--single-branch', '--branch', remote.branch, '--', repository, staging]);
@@ -250,7 +252,14 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
           for (const entry of stagedEntries) await renameCloneEntry(path.join(staging, entry), path.join(checkout, entry));
         }
         if (isManagedWorkbench(workspaceRoot) && !separate) recordOwnedWorkbenchRepository(workspaceRoot, checkout, true);
-      } finally { await fs.rm(staging, { recursive: true, force: true }); }
+      } catch (error) { cloneFailure = error; throw error; }
+      finally {
+        try { await fs.rm(staging, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 }); }
+        catch (cleanupError) {
+          if (cloneFailure) throw new Error(`${cloneFailure instanceof Error ? cloneFailure.message : String(cloneFailure)} Temporary clone cleanup also failed; its workbench folder was retained. ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, { cause: cloneFailure });
+          throw cleanupError;
+        }
+      }
     }
     await identity(checkout, repository);
     const branch = (await run(checkout, ['branch', '--show-current'])).trim();
@@ -272,12 +281,17 @@ export async function pullProjectRepository(workspaceRoot: string, repository: s
     // covering files created after the inventory above.
     await run(checkout, ['merge', '--ff-only', '--no-edit', '--no-overwrite-ignore', fetchedCommit]);
     return { path: checkout, branch, commit: (await run(checkout, ['rev-parse', 'HEAD'])).trim() };
-  } finally {
+  } catch (error) { operationFailure = error; throw error; }
+  finally {
     if (fetchedCommit) {
       try { await run(checkout, ['update-ref', '--no-deref', '-d', fetchRef, fetchedCommit]); }
       catch { /* Retain a changed or uncertain private ref; never delete another value. */ }
     }
-    await fs.rm(hooks, { recursive: true, force: true });
+    try { await fs.rm(hooks, { recursive: true, force: true, maxRetries: 6, retryDelay: 100 }); }
+    catch (cleanupError) {
+      if (operationFailure) throw new Error(`${operationFailure instanceof Error ? operationFailure.message : String(operationFailure)} Background Git cleanup also failed; its workbench folder was retained. ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, { cause: operationFailure });
+      throw cleanupError;
+    }
   }
 }
 /** Read-only validation for a native, explicitly chosen remote/local pair. */

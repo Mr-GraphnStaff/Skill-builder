@@ -197,3 +197,36 @@ test('a file created during cross-volume copying is retained and the partial cop
     assert.equal(fs.existsSync(path.join(f.root, '.skill-workbench', 'connection.json')), false);
   } finally { fs.promises.rename = rename; fs.promises.cp = copy; }
 });
+test('a busy staging cleanup preserves the original clone failure and leaves the connection inactive', async t => {
+  const f = cloneFixture(t), originalGit = publisher.repositoryGit, remove = fs.promises.rm;
+  let attemptedClone = false, attemptedCleanup = false;
+  publisher.repositoryGit = async (cwd, args, ...rest) => {
+    if (args.includes('clone')) {
+      attemptedClone = true;
+      throw new Error('fixture clone failure');
+    }
+    return originalGit(cwd, args, ...rest);
+  };
+  fs.promises.rm = async (target, ...rest) => {
+    if (['clone-', 'disabled-hooks-'].some(prefix => path.basename(path.resolve(target)).startsWith(prefix))) {
+      attemptedCleanup = true;
+      throw Object.assign(new Error('fixture cleanup busy'), { code: 'EBUSY' });
+    }
+    return remove(target, ...rest);
+  };
+  try {
+    await assert.rejects(pullProjectRepository(f.root, f.remote, f.local, undefined, undefined, true), error => {
+      assert.match(error.message, /fixture clone failure/);
+      assert.match(error.message, /fixture cleanup busy/);
+      assert.match(error.message, /cleanup|retained/i);
+      return true;
+    });
+    assert.equal(attemptedClone, true, 'the original clone failure must actually execute');
+    assert.equal(attemptedCleanup, true, 'the staging cleanup failure must actually execute');
+    assert.equal(fs.existsSync(f.local), false, 'a failed clone must not create the selected local repository');
+    assert.equal(fs.existsSync(path.join(f.root, '.skill-workbench', 'connection.json')), false);
+  } finally {
+    publisher.repositoryGit = originalGit;
+    fs.promises.rm = remove;
+  }
+});
