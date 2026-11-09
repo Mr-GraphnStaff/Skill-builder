@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.12.3 — guided repository connection (stable candidate)
+## 0.12.3 — guided repository connection (stable, 2026-11-09)
 
 - Show the workbench folder, separate local Git repository and matching remote clearly.
 - Connect or Change connection guides GitHub selection, an existing local copy or a confirmed clone, and saves the verified pair together.

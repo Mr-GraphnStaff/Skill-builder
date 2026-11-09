@@ -1,20 +1,23 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
-## Current assignment — November 9: guided connection fix, stable 0.12.3
+## Delivered — November 9: repository connection repair, both channels
 
-David explicitly authorized publishing the repository connection fix to BOTH
-Marketplace channels. Stable 0.12.3 ports only the connection flow, pair
-persistence, scoped credential handling and clone safeguards. Public preview
-0.15.6 remains numerically newer. No preview plugins, Gemini exports, managed
-workbench features or data are promoted into stable.
+Stable **0.12.3** and preview **0.15.6** are published and publicly verified.
+Owner explicitly authorized BOTH channels. Connect/Change now opens the native
+URL → existing local copy or confirmed clone → exact mapping flow. Workbench,
+local Git and remote are separate visible locations. Stable features/storage
+remain separate from preview; drafts, repositories and receipts were preserved.
 
-Avery coordinates, Ishan implements, Lena independently reviews QA/accessibility,
-and Morgan independently reviews security. Initial stable changes were only
-.gitignore (+/working/), .vscodeignore (+working/**), and the owner policy in
-AGENTS.md. Preserve AGENTS.md uncommitted. The two exact exclusion additions
-are included deliberately because source/runtime scratch must never be packaged.
-No other unrelated initial changes existed. Source tests, artifact verification,
-protected pipelines and Marketplace verification are pending; no release claim.
+CI1085 preview passed 556 tests with one platform skip; CI1087 stable passed
+386/386. Independent security/artifact review and exact-installed native seven
+connection checks passed for both, with zero Settings openings. Original upload
+builds retain catalog wait timeouts; read-only verification confirmed both
+validated versions and exact public bytes at 23:19:51 UTC. No upload was repeated.
+The wiki is current at 2ea289eaad447fc8aad4aa4a889c40eb922666f4. Neither user
+computer was installed/reloaded, and human/live-GitHub UAT is not claimed.
+
+See [the delivery record](2026-11-09-guided-connection-release.md) for exact
+runtime source commits, hashes, reviews, retained evidence, preservation and limits.
 
 ## Channel availability and public wiki — November 1, 2026
 
