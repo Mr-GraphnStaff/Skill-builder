@@ -13,10 +13,12 @@ import { githubRepository, GitHubReviewService, type GitHubRunner, type ReviewCo
 import type { PullRequestRecord } from './guided-contract.js';
 import { resolveRepositoryDefaultBranch, verifyRepositoryBranchCommit, prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview } from './repository-publisher.js';
 import { measureWorkbenchPhase, currentWorkbenchMetrics } from './workbench-metrics.js';
+import { recognizeSelectedRepository, withSelectedRepository, assertSelectedRepository, selectedRepositoryConfigDigest } from './repository-connection-security.js';
+import { validateProjectRepositoryForPublish } from './managed-repository.js';
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
 const MAX_TEXT = 16 * 1024 * 1024;
-export type WorkspaceConnection = { repository: string; baseBranch: string; localPath?: string };
+export type WorkspaceConnection = { repository: string; baseBranch: string; localPath?: string; separateRepository?: true; gitConfigDigest?: string };
 export type GuidedFile = { path: string; size: number; text: boolean };
 export type GuidedPublication = {
   release: WorkbenchRelease;
@@ -59,8 +61,9 @@ export function getWorkspaceConnection(root: string): WorkspaceConnection | unde
     || !value.baseBranch || /[\s~^:?*\[\\\0]/.test(value.baseBranch) || value.baseBranch.startsWith('-')
     || value.baseBranch.includes('..') || value.baseBranch.includes('@{')) throw new Error('The saved repository connection needs reconnecting.');
   if (value.localPath !== undefined && (typeof value.localPath !== 'string' || !path.isAbsolute(value.localPath) || /[\r\n\0]/.test(value.localPath))) throw new Error('Choose an absolute local skills project folder.');
+  if (value.separateRepository === true) { recognizeSelectedRepository(root); assertSelectedRepository(root, value.localPath, value.repository); }
   return { repository: validateRepository(value.repository), baseBranch: value.baseBranch,
-    ...(value.localPath ? { localPath: path.resolve(value.localPath) } : {}) };
+    ...(value.localPath ? { localPath: path.resolve(value.localPath) } : {}), ...(value.separateRepository === true ? { separateRepository: true as const, gitConfigDigest: value.gitConfigDigest } : {}) };
 }
 
 /** Preserve conflicting webview edits outside distributable skill contents. */
@@ -122,6 +125,7 @@ export function restoreGuidedEdit(root: string, skill: WorkbenchSkill, relative:
 }
 
 function saveWorkspaceConnection(root: string, connection: WorkspaceConnection): void {
+  if (connection.separateRepository) assertSelectedRepository(root, connection.localPath!, connection.repository);
   const file = connectionPath(root);
   fs.mkdirSync(path.dirname(file), { recursive: true }); ensureSafe(root, file);
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -137,13 +141,38 @@ export function setWorkspaceRepositoryFolder(root: string, localPath: string): W
   const updated = { ...connection, localPath: path.resolve(localPath) };
   saveWorkspaceConnection(root, updated); return updated;
 }
-export async function connectWorkspaceRepository(root: string, repository: string): Promise<WorkspaceConnection> {
-  repository = validateRepository(repository);
-  const baseBranch = await resolveRepositoryDefaultBranch(repository);
+export async function connectWorkspaceRepository(root: string, repository: string, options?: { localPath?: string; beforeSave?: () => void; separateRepository?: true }): Promise<WorkspaceConnection> {
+  if (!options?.separateRepository) {
+    let saved: WorkspaceConnection | undefined;
+    try { saved = getWorkspaceConnection(root); } catch { /* Explicit reconnect may repair invalid metadata. */ }
+    if (saved?.separateRepository && sameRepository(saved.repository, repository) && (!options || options.localPath && !path.relative(saved.localPath!, path.resolve(options.localPath)))) {
+      options = { ...options, localPath: saved.localPath, separateRepository: true };
+    }
+  }
+  if (options?.separateRepository) {
+    if (!options.localPath) throw new Error('Choose the local repository before connecting.');
+    const record = connectionPath(root);
+    const priorRecord = fs.existsSync(record) ? fs.readFileSync(record, 'utf8') : undefined;
+    return withSelectedRepository(root, repository, options.localPath, async () => {
+      await validateProjectRepositoryForPublish(repository, options.localPath!);
+      const baseBranch = await resolveRepositoryDefaultBranch(repository, root);
+      // Validate again after network I/O so a raced origin/config cannot be accepted.
+      await validateProjectRepositoryForPublish(repository, options.localPath!);
+      const connection: WorkspaceConnection = { repository: validateRepository(repository), baseBranch, localPath: path.resolve(options.localPath!), separateRepository: true, gitConfigDigest: selectedRepositoryConfigDigest(options.localPath!) };
+      options.beforeSave?.();
+      if ((fs.existsSync(record) ? fs.readFileSync(record, 'utf8') : undefined) !== priorRecord) throw new Error('The saved connection changed while setup was open. It was preserved; review it before trying again.');
+      saveWorkspaceConnection(root, connection);
+      recognizeSelectedRepository(root);
+      return connection;
+    });
+  }
+  repository = validateRepository(repository);  if (options) await validateProjectRepositoryForPublish(repository, options.localPath!);
+  const baseBranch = await resolveRepositoryDefaultBranch(repository, root);
   let previous: WorkspaceConnection | undefined;
   try { previous = getWorkspaceConnection(root); } catch { /* Reconnection can repair damaged metadata. */ }
-  const connection: WorkspaceConnection = { repository, baseBranch,
-    ...(previous?.localPath && sameRepository(previous.repository, repository) ? { localPath: previous.localPath } : {}) };
+  const localPath = options ? options.localPath : previous?.localPath && sameRepository(previous.repository, repository) ? previous.localPath : undefined;
+  const connection: WorkspaceConnection = { repository, baseBranch, ...(localPath ? { localPath } : {}) };
+  options?.beforeSave?.();
   saveWorkspaceConnection(root, connection);
   // Repair matching old per-skill branch selections such as "makeitfire".
   // Other associated destinations are left alone until that draft is published

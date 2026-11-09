@@ -1,5 +1,21 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Current assignment — November 9: guided connection fix, stable 0.12.3
+
+David explicitly authorized publishing the repository connection fix to BOTH
+Marketplace channels. Stable 0.12.3 ports only the connection flow, pair
+persistence, scoped credential handling and clone safeguards. Public preview
+0.15.6 remains numerically newer. No preview plugins, Gemini exports, managed
+workbench features or data are promoted into stable.
+
+Avery coordinates, Ishan implements, Lena independently reviews QA/accessibility,
+and Morgan independently reviews security. Initial stable changes were only
+.gitignore (+/working/), .vscodeignore (+working/**), and the owner policy in
+AGENTS.md. Preserve AGENTS.md uncommitted. The two exact exclusion additions
+are included deliberately because source/runtime scratch must never be packaged.
+No other unrelated initial changes existed. Source tests, artifact verification,
+protected pipelines and Marketplace verification are pending; no release claim.
+
 ## Channel availability and public wiki — November 1, 2026
 
 Preview 0.13.0 was published separately from `codex/public-prerelease` via

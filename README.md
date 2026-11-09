@@ -4,7 +4,7 @@
 
 Install the stable release of **SkillJetty by DAF-TECH** for the established workbench, or choose **Install Pre-Release Version** in VS Code to try the public preview. Both channels use the same Marketplace listing and **SkillJetty: Open Workbench** command; they are alternate versions in the selected VS Code profile. The separate local UAT extension remains a distinct installation.
 
-Release **0.12.2** includes the tested stable workflow and fixes a false publication mismatch when unchanged files move. Stable uses the work folder you select and your configured stable directories. Preview work remains separate beneath `.skilljetty-prerelease`; switching channels does not automatically migrate drafts, history, packages or repository connections. Import a package explicitly when you want to copy a skill between channels.
+Release **0.12.3** adds a guided repository connection: choose a GitHub repository and its matching local copy, or create a local copy after reviewing its destination. Stable uses the work folder you select and your configured stable directories. Preview work remains separate beneath `.skilljetty-prerelease`; switching channels does not automatically migrate drafts, history, packages or repository connections. Import a package explicitly when you want to copy a skill between channels.
 
 <img src="https://raw.githubusercontent.com/Mr-GraphnStaff/Skill-builder/02f32bb5282b87ef81ba4929c11dd88094403741/images/icon.png" alt="DAF-TECH" width="96" />
 
@@ -18,7 +18,7 @@ Activity acknowledges clicks and explains what is happening. Each new skill star
 
 ## Open the workbench
 
-Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. Confirm the **Release 0.12.1** descriptor. For troubleshooting, run **SkillJetty: Show Performance Log** from the Command Palette; production keeps timing diagnostics without a workbench log button. Use a separate VS Code profile when evaluating the preview alongside stable.
+Click the **SkillJetty** icon on VS Code's left activity bar, or run **SkillJetty: Open Workbench** from the Command Palette. Confirm the **Release 0.12.3** descriptor. For troubleshooting, run **SkillJetty: Show Performance Log** from the Command Palette; production keeps timing diagnostics without a workbench log button. Use a separate VS Code profile when evaluating the preview alongside stable.
 
 Choose how to start, then follow the highlighted **Next step** action:
 
@@ -29,6 +29,24 @@ Choose how to start, then follow the highlighted **Next step** action:
 5. **Done:** open the pull request or the source, `.skill` and changelog links. Use **Check status** to refresh review progress. Choose **Work on another skill** when finished.
 
 No terminal commands or Git branch names are needed for normal use. The extension detects the repository's actual default branch. Git credentials and repository access still need to work on your machine.
+
+## Connect a repository
+
+The configuration shows three separate locations:
+
+- **Workbench folder:** SkillJetty drafts, builds and recovery files.
+- **Local repository:** the separate Git copy holding your shared skills and ZIPs.
+- **Remote repository:** the matching GitHub repository.
+
+Choose **Connect repository** or **Change connection**, enter the GitHub URL,
+then choose an existing local Git copy or **Create a local copy**. Review all
+three locations before connecting. VS Code handles GitHub sign-in. Connecting
+an existing copy does not pull or change its files, and setup never uploads.
+Canceling or failing setup preserves your previous connection and files.
+
+Use **Sync repository** when you want to pull updates, or **Change workbench
+folder** to choose where SkillJetty keeps its background work. Existing work
+stays in its original folder; switching does not automatically move drafts.
 
 ## What is saved in the repository?
 

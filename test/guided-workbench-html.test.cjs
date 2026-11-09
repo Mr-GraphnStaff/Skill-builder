@@ -69,16 +69,18 @@ test('each guided step marks progress; Start offers equal choices and later step
   }
 });
 
-test('start uses inline repository selection and preserves create inputs without a branch prompt', () => {
+test('start offers guided repository connection and preserves create inputs without a branch prompt', () => {
   const repository = renderGuidedWorkbench(state({ connection: undefined, repositories: [{ label: 'My Skills', repository: 'https://github.com/example/Skills.git' }] }), nonce);
-  assert.match(repository, /<select id="repository-choice"/);
-  assert.match(repository, /id="repository" name="repository"/);
+  assert.match(repository, /data-action="configureRepository"[^>]*>Connect repository/);
+  assert.match(repository, /Workbench folder:/);
+  assert.match(repository, /Local repository:/);
+  assert.match(repository, /Remote repository:/);
+  assert.doesNotMatch(repository, /<select id="repository-choice"|id="repository" name="repository"/);
   assert.doesNotMatch(repository, /<(?:input|select)[^>]+(?:id|name)="[^"]*branch/i);
-  assert.match(repository, /data-form-action="connectRepository"/);
-  assert.match(repository, /<button type="submit" class="secondary">Connect repository/);
+  assert.doesNotMatch(repository, /data-form-action="connectRepository"/);
   for (const action of ['showCreate', 'openPackage', 'openFolder']) assert.match(repository, new RegExp(`data-action="${action}"`));
   assert.match(repository, /No repository connection is needed to create, open, or edit a skill/);
-  assert(repository.indexOf('class="start-choices"') < repository.indexOf('id="repository-form"'));
+  assert(repository.indexOf('id="connect-repository"') < repository.indexOf('class="start-choices"'), 'connection is a visible action, not hidden inside optional setup');
   assert.doesNotMatch(repository, /id="primary-action"/);
   const creation = renderGuidedWorkbench(state({ form: { mode: 'create', name: 'weekly-status', description: 'Summarize project updates.', instructions: 'Keep unknowns explicit.' } }), nonce);
   assert.match(creation, /id="skillName"[^>]*value="weekly-status"/);
@@ -98,10 +100,10 @@ test('skill contents and paths remain inert text, including textarea and script 
   assert.match(html, /&lt;unsafe&gt;/);
 });
 
-test('repository discovery leaves Start connection controls expanded so the returned choices are visible', () => {
+test('repository discovery keeps the direct guided connection action visible instead of reopening an inline form', () => {
   const html = renderGuidedWorkbench(state({ repositories: [{ label: 'My Skills', repository: 'https://github.com/example/Skills.git' }] }), nonce);
-  assert.match(html, /<details class="optional" open><summary>Change the connected repository<\/summary>/);
-  assert.match(html, /<select id="repository-choice"/);
+  assert.match(html, /data-action="configureRepository"[^>]*id="connect-repository"[^>]*>Change connection/);
+  assert.doesNotMatch(html, /<summary>Change the connected repository<\/summary>|<select id="repository-choice"/);
 });
 
 test('serialized file data restores both textarea values before the baseline without opening a script boundary', () => {
@@ -156,7 +158,7 @@ test('check and publish explain their limits and show actionable file findings',
   assert.match(publish, /Editable source/);
   assert.match(publish, /Installable .skill package/);
   assert.match(publish, /CHANGELOG.md/);
-  assert.match(publish, /Change or reconnect the repository/);
+  assert.match(publish, /data-action="configureRepository"[^>]*>Change connection/);
   assert.match(publish, /form="publish-form"[^>]*>Upload &amp; create PR/);
   assert.match(publish, /Step 4: <\/span>Submit/);
   assert.match(publish, /data-action="loadReviewers"/);

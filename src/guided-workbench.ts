@@ -12,6 +12,10 @@ import { GuidedMessage } from './guided-contract.js';
 import { createGitHubSessionRunner } from './github-session.js';
 import { stableWorkspaceRoot } from './stable-workspace.js';
 import { activityForAction, actionNeedsInput } from './guided-activity.js';
+import { connectRepositoryFlow, normalizeGitHubRepository } from './repository-connection-flow.js';
+import { cloneSelectedRepository, validateSelectedRepository } from './managed-repository.js';
+import { assertWorkbenchPath } from './repository-connection-security.js';
+import { withWorkbenchGitCredentials } from './repository-credentials.js';
 
 export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks: { getRoot(): Promise<string | undefined> }) {
   const brand = {
@@ -24,6 +28,11 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
   let controller: GuidedWorkbenchController | undefined;
   let opening: Promise<void> | undefined;
   let handling: Promise<void> = Promise.resolve();
+  let configurationGeneration = 0;
+  type EditorBuffer = Pick<GuidedMessage, 'editorSkillId' | 'editorPath' | 'editorContent'>;
+  const bufferRequests = new Map<string, { panel: vscode.WebviewPanel; controller: GuidedWorkbenchController; resolve(value: EditorBuffer): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+  const configChange = vscode.workspace.onDidChangeConfiguration?.(event => { if (event.affectsConfiguration('skillBuilder')) ++configurationGeneration; });
+  if (configChange) context.subscriptions.push(configChange);
   let operationTiming: { waitMs: number; waitingSince?: number } | undefined;
   const activityLog = vscode.window.createOutputChannel('SkillJetty — Performance');
   context.subscriptions.push(activityLog);
@@ -79,6 +88,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     if (message.action === 'ready') return; // Initial loading is owned by the host.
     const activePanel = panel;
     const activeController = controller;
+    const generation = configurationGeneration;
     const started = Date.now();
     operationTiming = { waitMs: 0 };
     const metricContext = metricContexts.get(activeController)!;
@@ -95,10 +105,23 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         // Deliver feedback before synchronous local work can occupy this host.
         await new Promise<void>(resolve => setImmediate(resolve));
       }
-      if (['pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPackage', 'openPackagePath'].includes(message.action)) await saveExternalEdits();
+      if (['configureRepository', 'pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPackage', 'openPackagePath'].includes(message.action)) await saveExternalEdits();
       if (panel !== activePanel || controller !== activeController) return;
       const operationContext = { ...metricContext };
-      await withWorkbenchMetrics(metric => logMetric(metric, operationContext), () => activeController.dispatch(message));
+      if (message.action === 'configureRepository' || message.action === 'connectRepository' || message.action === 'setRepositoryFolder') {
+        await configureConnection(activeController, activePanel, generation, message);
+      } else {
+        const needsGit = ['verifyRepository', 'pullRepository', 'publish'].includes(message.action);
+        await withWorkbenchMetrics(metric => logMetric(metric, operationContext), async () => {
+          if (!needsGit || !activeController.state.connection || !/^https:\/\/github\.com\//i.test(activeController.state.connection.repository)) return activeController.dispatch(message);
+          const connectionFile = assertWorkbenchPath(activeController.state.workFolder!, path.join(activeController.state.workFolder!, '.skill-workbench', 'connection.json'));
+          const connectionBeforeSignIn = readFileSync(connectionFile, 'utf8');
+          const session = await vscode.authentication.getSession('github', ['repo'], { createIfNone: true });
+          if (!session || generation !== configurationGeneration || panel !== activePanel || controller !== activeController) throw new Error('The connection or workbench changed during GitHub sign-in. Your draft was preserved.');
+          if (readFileSync(connectionFile, 'utf8') !== connectionBeforeSignIn) throw new Error('Another window changed the repository during GitHub sign-in. That connection was preserved; retry the action.');
+          return withWorkbenchGitCredentials(activeController.state.workFolder!, session.accessToken, () => activeController.dispatch(message));
+        });
+      }
     } catch (error) { activeController.state.error = error instanceof Error ? error.message : String(error); }
     finally { clearInterval(heartbeat); }
     const elapsed = Date.now() - started;
@@ -120,7 +143,107 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       render();
     }
   };
+  const configureConnection = async (owner: GuidedWorkbenchController, ownerPanel: vscode.WebviewPanel, generation: number, message: GuidedMessage) => {
+    const root = owner.state.workFolder;
+    if (!root) throw new Error('Choose your workbench folder first, then connect a repository. Your workbench holds SkillJetty drafts, builds and recovery; your Git repository is chosen separately.');
+    const readConnectionRecord = () => {
+      try { return readFileSync(assertWorkbenchPath(root, path.join(root, '.skill-workbench', 'connection.json')), 'utf8'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+    };
+    let expectedRecord = readConnectionRecord();
+    const assertCurrent = () => {
+      if (panel !== ownerPanel || controller !== owner || configurationGeneration !== generation) {
+        throw new Error('The workbench or settings changed during connection setup. Your previous connection and drafts are preserved. Start Connect repository again.');
+      }
+      stableWorkspaceRoot(root);
+      if (readConnectionRecord() !== expectedRecord) throw new Error('Another window changed the repository connection during setup. That connection and your drafts are preserved. Start Change connection again.');
+    };
+    assertCurrent();
+    // Persist the carried editor buffer before a modal picker can hide the webview.
+    if (message.editorSkillId && message.editorPath && typeof message.editorContent === 'string') {
+      await owner.dispatch({ ...message, action: 'save' });
+      if (owner.state.error) throw new Error(owner.state.error);
+    }
+    owner.state.error = undefined;
+    let token: string | undefined;
+    const authenticated = async <T>(operation: () => Promise<T>) => {
+      assertCurrent();
+      if (!token) {
+        const session = await vscode.authentication.getSession('github', ['repo'], { createIfNone: true });
+        assertCurrent();
+        if (!session) throw new Error('GitHub sign-in was canceled. Your previous connection is unchanged.');
+        token = session.accessToken;
+      }
+      return withWorkbenchGitCredentials(root, token, async () => { assertCurrent(); return operation(); });
+    };
+    const progress = async (text: string, waitingForInput: boolean) => {
+      assertCurrent();
+      await ownerPanel.webview.postMessage({ type: 'progress', message: text, waitingForInput });
+    };
+    const connected = await connectRepositoryFlow({
+      workbenchFolder: root,
+      currentRepository: typeof message.payload?.repository === 'string' ? message.payload.repository : owner.state.form?.repository ?? owner.state.connection?.repository,
+      currentLocalRepository: owner.state.connection?.localPath,
+      assertCurrent,
+      inputRepository: async current => {
+        await progress('Enter the GitHub repository in the VS Code input box.', true);
+        return vscode.window.showInputBox({ title: 'Connect repository · 1 of 3', prompt: 'GitHub repository URL or owner/repository',
+          placeHolder: 'https://github.com/your-org/your-repo', value: current,
+          validateInput: value => { if (!value.trim()) return 'Enter the repository you want to connect.'; try { normalizeGitHubRepository(value); return undefined; } catch (error) { return (error as Error).message; } } });
+      },
+      chooseLocalMode: async () => {
+        await progress('Choose an existing local repository or create a local copy.', true);
+        return (await vscode.window.showQuickPick([
+          { label: 'Use an existing local repository', description: 'Choose its folder. SkillJetty checks that it matches GitHub.', mode: 'existing' as const },
+          { label: 'Create a local copy', description: 'Choose a parent folder. SkillJetty downloads the repository for you.', mode: 'clone' as const }
+        ], { title: 'Connect repository · 2 of 3', placeHolder: 'Where will your skills and ZIP files live?' }))?.mode;
+      },
+      chooseFolder: async (mode, suggested) => {
+        await progress(mode === 'clone' ? 'Choose the parent folder for your new local repository.' : 'Choose the local Git repository folder.', true);
+        return (await vscode.window.showOpenDialog({ title: mode === 'clone' ? 'Create local copy — choose a parent folder' : 'Choose existing local Git repository',
+          defaultUri: vscode.Uri.file(await pickerRoot(suggested ? mode === 'clone' ? path.dirname(suggested) : suggested : path.dirname(root))),
+          canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0]?.fsPath;
+      },
+      validateExisting: async (repository, localPath) => {
+        await progress('Checking the local repository. Existing files will not be changed.', false);
+        await authenticated(() => validateSelectedRepository(root, repository, localPath));
+      },
+      confirm: async choice => {
+        await progress('Review the connection in the VS Code confirmation dialog.', true);
+        const action = choice.clone ? 'Create local copy and connect' : 'Connect repository';
+        return await vscode.window.showInformationMessage('Connect this repository?', { modal: true,
+          detail: `Workbench folder (drafts, builds and recovery):\n${choice.workbenchFolder}\n\nLocal repository (skills and ZIPs):\n${choice.localPath}\n\nRemote repository:\n${choice.repository}\n\n${choice.clone ? 'A new local copy will be downloaded into the displayed folder.' : 'The existing local repository will be connected without pulling or changing its files.'}\nYour existing drafts and earlier uploads stay where they are. Nothing is uploaded.` }, action) === action;
+      },
+      clone: async (repository, localPath) => {
+        await progress('Creating your local repository copy…', false);
+        await authenticated(() => cloneSelectedRepository(root, repository, localPath, text => { void progress(text, false).catch(() => undefined); }, assertCurrent));
+      },
+      activate: async (repository, localPath) => {
+        await progress('Verifying and saving the complete repository connection…', false);
+        await authenticated(() => owner.acceptRepositoryConnection(repository, localPath, assertCurrent));
+        expectedRecord = readConnectionRecord();
+      }
+    });
+    assertCurrent();
+    if (connected) {
+      ++configurationGeneration;
+      owner.state.notice = 'Repository connected. Your workbench stays in its folder; your local repository is ready to sync with GitHub.';
+    } else owner.state.notice = 'Connection setup canceled. Your previous connection and files are unchanged.';
+  };
+
   const handle = (input: unknown) => {
+    if (input && typeof input === 'object' && (input as { action?: unknown }).action === 'editorBufferCaptured') {
+      const response = input as Record<string, unknown>, requestId = response.requestId;
+      if (typeof requestId !== 'string') return Promise.resolve();
+      const pending = bufferRequests.get(requestId); if (!pending) return Promise.resolve();
+      clearTimeout(pending.timer); bufferRequests.delete(requestId);
+      if (panel !== pending.panel || controller !== pending.controller) { pending.reject(new Error('The workbench changed before its editor buffer was captured.')); return Promise.resolve(); }
+      const fields = ['editorSkillId', 'editorPath', 'editorContent'] as const;
+      if (fields.every(key => response[key] === undefined)) pending.resolve({});
+      else if (fields.every(key => typeof response[key] === 'string') && Buffer.byteLength(response.editorContent as string, 'utf8') <= 16 * 1024 * 1024) pending.resolve({ editorSkillId: response.editorSkillId as string, editorPath: response.editorPath as string, editorContent: response.editorContent as string });
+      else pending.reject(new Error('The editor buffer could not be read safely. Your draft was preserved.'));
+      return Promise.resolve();
+    }
     const operation = handling.then(() => processMessage(input));
     handling = operation.then(() => undefined, () => undefined);
     return operation;
@@ -159,7 +282,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         },
         pickPackage: () => pick('package'), pickFolder: initialPath => pick('folder', initialPath), pickFile: () => pick('file'),
         chooseWorkspace: async () => {
-          const folder = (await vscode.window.showOpenDialog({ title: 'Choose your local skill work folder', defaultUri: vscode.Uri.file(await pickerRoot()), canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
+          const folder = (await vscode.window.showOpenDialog({ title: 'Choose the workbench folder for SkillJetty background work', defaultUri: vscode.Uri.file(await pickerRoot(controller?.state.workFolder)), canSelectFiles: false, canSelectFolders: true, canSelectMany: false }))?.[0];
           if (folder) {
             const selectedRoot = stableWorkspaceRoot(folder.fsPath);
             if (vscode.workspace.workspaceFolders?.length) await vscode.workspace.getConfiguration('skillBuilder').update('projectRoot', selectedRoot, vscode.ConfigurationTarget.Workspace);
@@ -184,7 +307,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       });
       metricContexts.set(createdController, createdMetrics);
       controller = createdController;
-      context.subscriptions.push(panel.webview.onDidReceiveMessage(handle), panel.onDidDispose(() => { panel = undefined; controller = undefined; }));
+      context.subscriptions.push(createdPanel.webview.onDidReceiveMessage(message => { if (panel !== createdPanel || controller !== createdController) return Promise.resolve(); return handle(message); }), createdPanel.onDidDispose(() => { if (panel === createdPanel) { panel = undefined; controller = undefined; } }));
       // Initialize connection metadata before the first document. Startup has
       // no scan and must not send progress that can arrive in a later document.
       await createdController.dispatch({ action: 'ready' });
@@ -201,6 +324,20 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     try { await opening; } finally { opening = undefined; }
   };
   context.subscriptions.push(vscode.commands.registerCommand('skillBuilder.openWorkbench', open));
+  context.subscriptions.push(vscode.commands.registerCommand('skillBuilder.configureRepository', async () => {
+    await open(); if (!panel || !controller) return;
+    const activePanel = panel, activeController = controller;
+    const requestId = randomUUID();
+    const buffer = await new Promise<EditorBuffer>((resolve, reject) => {
+      const timer = setTimeout(() => { bufferRequests.delete(requestId); reject(new Error('The workbench did not return its current edit. Your draft is preserved. Retry when the workbench is ready.')); }, 5000);
+      bufferRequests.set(requestId, { panel: activePanel, controller: activeController, resolve, reject, timer });
+      void activePanel.webview.postMessage({ type: 'captureEditorBuffer', requestId }).then(sent => {
+        if (!sent) { clearTimeout(timer); bufferRequests.delete(requestId); reject(new Error('The workbench is not ready. No connection changed.')); }
+      }, () => { clearTimeout(timer); bufferRequests.delete(requestId); reject(new Error('The workbench is unavailable. No connection changed.')); });
+    });
+    if (panel !== activePanel || controller !== activeController) throw new Error('The workbench changed. No connection changed.');
+    return handle({ action: 'configureRepository', ...buffer });
+  }));
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('skillBuilder.guidedLauncher', {
     resolveWebviewView(view) {
       view.webview.options = { enableScripts: true, localResourceRoots: [] };

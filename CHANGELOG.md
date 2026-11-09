@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.3 — guided repository connection (stable candidate)
+
+- Show the workbench folder, separate local Git repository and matching remote clearly.
+- Connect or Change connection guides GitHub selection, an existing local copy or a confirmed clone, and saves the verified pair together.
+- Preserve prior connections, local files, drafts and upload receipts on cancel or failure; never silently repoint origin, pull an existing copy or upload during setup.
+- Keep stable storage and features separate from the preview; no preview feature or data migration is included.
+
 ## 0.12.2 — 2026-11-01 (documentation correction)
 
 - Correct installation copy to SkillJetty by DAF-TECH. The publisher display name is SeñorFarris.

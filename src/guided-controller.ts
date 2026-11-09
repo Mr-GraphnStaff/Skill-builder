@@ -36,7 +36,15 @@ export class GuidedWorkbenchController {
   private activitySequence = 0;
   private operationActivity?: number;
   state: GuidedState = { step: 'start', hasWorkspace: false, repositories: [], drafts: [], library: [], files: [], target: 'portable' };
-  constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; }
+  constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; this.state.workFolder = root; }
+  async acceptRepositoryConnection(repository: string, localPath: string, beforeSave?: () => void): Promise<void> {
+    const connection = await connectWorkspaceRepository(this.workspace(), repository, { localPath, beforeSave, separateRepository: true });
+    this.previewInventory = undefined; this.state.publish = undefined;
+    this.state.connection = connection; this.state.repositoryCheckout = undefined; this.state.repositoryVerification = undefined;
+    ++this.verificationSequence;
+    this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
+    this.state.error = undefined; this.state.notice = 'Repository connected. Your workbench and existing drafts stayed in place.';
+  }
   private async runJob<J extends WorkbenchJob>(job: J) {
     const phases: Record<string, string> = {
       archiveRead: 'Package bytes read.', archiveDecode: 'Package contents decoded.',
@@ -85,6 +93,7 @@ export class GuidedWorkbenchController {
     if (!this.root) return;
     const previousConnection = JSON.stringify(this.state.connection);
     this.state.hasWorkspace = true;
+    this.state.workFolder = this.root;
     try { this.state.connection = getWorkspaceConnection(this.root); }
     catch { this.state.connection = undefined; this.state.notice = 'Your repository connection needs reconnecting. Saved drafts are still available.'; }
     if (previousConnection !== JSON.stringify(this.state.connection)) {
@@ -333,8 +342,8 @@ export class GuidedWorkbenchController {
           const visibility = payload.visibility === 'public' ? 'public' : 'private';
           this.state.busy = true; this.progress('Creating your repository…');
           const created = await createGitHubRepository(this.workspace(), string('name'), visibility);
-          this.state.connection = await connectWorkspaceRepository(this.workspace(), created.repository);
-          this.state.notice = 'Repository created and connected. Select its local skills project folder.'; void this.verifyRepository(); break;
+          this.state.form = { ...this.state.form, repository: created.repository };
+          this.state.notice = `Repository created: ${created.repository}. Choose Connect repository to select or create its local copy. Your existing connection was preserved.`; break;
         }
         case 'showCreate': this.workspace(); this.state.step = 'start'; this.state.form = { mode: 'create' }; break;
         case 'createSkill': {
