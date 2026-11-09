@@ -4,7 +4,7 @@ import { assertWorkbenchPath, isManagedWorkbench, WORKBENCH_MARKER } from './wor
 
 export const WORKBENCH_FOLDERS = {
   skills: 'Editable drafts. Imports are copied here; their original files stay untouched.',
-  repositories: 'Local Git repositories. Connect a remote address in Settings, then use Pull to clone or update here.',
+  repositories: 'Legacy local Git copies. New connections use a separate local repository chosen through Connect repository.',
   releases: 'Saved version packages and upload receipts. A saved package is not proof of a remote upload.',
   'plugin-releases': 'Claude plugin bundles with their own versions, member hashes and marketplace handoff files.',
   'gemini-releases': 'Gemini App ZIP exports and compatibility reports for manual import.',
@@ -27,7 +27,7 @@ export function createWorkbench(root: string): string {
   }
   const guide = '# Your SkillJetty workbench\n\nSkillJetty by DAF-TECH keeps its local work inside this folder.\n\n'
     + Object.entries(WORKBENCH_FOLDERS).map(([name, purpose]) => `- **${name}/** — ${purpose}`).join('\n')
-    + '\n\nLocal and remote are separate: repositories/ contains local copies; the remote address and detected target branch appear in Configuration and the sharing summary. Creating this folder does not clone, pull, upload, or move existing work.\n\nTo connect: open the settings gear, enter your GitHub HTTPS repository address, and use Pull Skills Repository. The default local copy is repositories/skills. An optional custom local path must remain inside repositories/.\n\nExternal folders and packages can be imported as read-only sources; SkillJetty edits the copied draft inside skills/. AI tools must use files inside this workbench; outside-folder installation is unavailable.\n\nVS Code manages its own application settings, authentication and session data. This boundary covers SkillJetty-owned work files and Git operations; it is not an operating-system sandbox.\n';
+    + '\n\nYour workbench holds drafts, builds and recovery. Your separate local Git repository holds the skills and ZIPs you share. The remote GitHub repository is its sync destination. Creating this folder does not clone, pull, upload, or move existing work.\n\nTo connect: choose Connect repository, enter the GitHub address, then choose an existing local repository or Create a local copy. Review the exact workbench, local folder and remote before connecting. Use Sync repository when you want to pull updates. Earlier work and upload receipts stay in place when you change repositories.\n\nExternal folders and packages can be imported as read-only sources; SkillJetty edits the copied draft inside skills/. AI tools must use files inside this workbench; outside-folder installation is unavailable.\n\nVS Code manages its own application settings, authentication and session data. Background files stay inside this workbench; Git operations can also use your explicitly connected local repository; it is not an operating-system sandbox.\n';
   fs.writeFileSync(assertWorkbenchPath(absolute, path.join(absolute, 'README.md')), guide, { flag: 'wx' });
   // Write the acceptance record last; interrupted setup cannot become active.
   fs.writeFileSync(assertWorkbenchPath(absolute, path.join(absolute, WORKBENCH_MARKER)), JSON.stringify({ format: 1 }, null, 2) + '\n', { flag: 'wx' });

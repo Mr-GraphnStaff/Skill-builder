@@ -14,6 +14,7 @@ export function activityForAction(action: GuidedAction): string {
     reloadFile: 'Loading the saved file…', check: 'Running a structural sanity check…',
     preparePublish: 'Comparing your changes and preparing the sharing summary…',
     savePackage: 'Checking and saving your local package…', publish: 'Preparing your submission…',
+    configureRepository: 'Choose your GitHub repository and local copy in VS Code…',
     discoverRepositories: 'Finding repositories you can connect…', connectRepository: 'Checking the repository connection…',
     verifyRepository: 'Verifying local and remote skills repositories…', setRepositoryFolder: 'Choose the local skills project folder in VS Code…',
     pullRepository: 'Pulling the registered repository…', openRepositorySkill: 'Choose a skill folder from the pulled repository…',
@@ -30,7 +31,7 @@ export function activityForAction(action: GuidedAction): string {
 }
 
 export function actionNeedsInput(action: GuidedAction): boolean {
-  return ['setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action);
+  return ['configureRepository', 'setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action);
 }
 
 /** Navigation guidance follows the actual result, including partial uploads. */

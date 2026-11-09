@@ -1,4 +1,4 @@
-import { assertWorkbenchPath, assertWorkbenchRepository, assertRemoteDestination, isManagedWorkbench, workbenchScratch, workbenchRecovery } from './workbench-boundary.js';
+import { assertWorkbenchPath, assertWorkbenchRepository, assertRemoteDestination, isManagedWorkbench, workbenchScratch, workbenchRecovery, recognizeSelectedRepository, withSelectedRepository, assertSelectedRepository, selectedRepositoryConfigDigest } from './workbench-boundary.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +18,7 @@ import { verifyExportRelease, exportRelativePath, listPluginReleaseMetadata } fr
 
 const yaml: { dump(value: unknown): string } = require('js-yaml');
 const MAX_TEXT = 16 * 1024 * 1024;
-export type WorkspaceConnection = { repository: string; baseBranch: string; localPath?: string };
+export type WorkspaceConnection = { repository: string; baseBranch: string; localPath?: string; separateRepository?: true; gitConfigDigest?: string };
 export type GuidedFile = { path: string; size: number; text: boolean };
 export type GuidedPublication = {
   release: WorkbenchRelease;
@@ -42,6 +42,14 @@ function connectionPath(root: string): string {
 }
 function sameRepository(left: string, right: string): boolean { return left.replace(/\.git\/?$/, '').replace(/\/$/, '') === right.replace(/\.git\/?$/, '').replace(/\/$/, ''); }
 
+/** Read the association mode without requiring its Git checkout to be healthy. */
+export function hasGuidedRepositoryConnection(root: string): boolean {
+  const file = connectionPath(root);
+  if (!fs.existsSync(file)) return false;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')).separateRepository === true; }
+  catch { return false; }
+}
+
 export function getWorkspaceConnection(root: string): WorkspaceConnection | undefined {
   const file = connectionPath(root);
   if (!fs.existsSync(file)) return undefined;
@@ -50,9 +58,10 @@ export function getWorkspaceConnection(root: string): WorkspaceConnection | unde
     || !value.baseBranch || /[\s~^:?*\[\\\0]/.test(value.baseBranch) || value.baseBranch.startsWith('-')
     || value.baseBranch.includes('..') || value.baseBranch.includes('@{')) throw new Error('The saved repository connection needs reconnecting.');
   if (value.localPath !== undefined && (typeof value.localPath !== 'string' || !path.isAbsolute(value.localPath) || /[\r\n\0]/.test(value.localPath))) throw new Error('Choose an absolute local skills project folder.');
+  if (value.separateRepository === true) { recognizeSelectedRepository(root); assertSelectedRepository(root, value.localPath, value.repository); }
   if (isManagedWorkbench(root)) { assertRemoteDestination(value.repository); if (value.localPath) assertWorkbenchRepository(root, value.localPath); }
   return { repository: validateRepository(value.repository), baseBranch: value.baseBranch,
-    ...(value.localPath ? { localPath: path.resolve(value.localPath) } : {}) };
+    ...(value.localPath ? { localPath: path.resolve(value.localPath) } : {}), ...(value.separateRepository === true ? { separateRepository: true as const, gitConfigDigest: value.gitConfigDigest } : {}) };
 }
 
 /** Preserve conflicting webview edits outside distributable skill contents. */
@@ -114,6 +123,7 @@ export function restoreGuidedEdit(root: string, skill: WorkbenchSkill, relative:
 }
 
 function saveWorkspaceConnection(root: string, connection: WorkspaceConnection): void {
+  if (connection.separateRepository) assertSelectedRepository(root, connection.localPath!, connection.repository);
   if (isManagedWorkbench(root)) { assertRemoteDestination(connection.repository); if (connection.localPath) assertWorkbenchRepository(root, connection.localPath); }
   const file = connectionPath(root);
   fs.mkdirSync(path.dirname(file), { recursive: true }); ensureSafe(root, file);
@@ -130,7 +140,31 @@ export function setWorkspaceRepositoryFolder(root: string, localPath: string): W
   const updated = { ...connection, localPath: path.resolve(localPath) };
   saveWorkspaceConnection(root, updated); return updated;
 }
-export async function connectWorkspaceRepository(root: string, repository: string, options?: { localPath?: string; beforeSave?: () => void }): Promise<WorkspaceConnection> {
+export async function connectWorkspaceRepository(root: string, repository: string, options?: { localPath?: string; beforeSave?: () => void; separateRepository?: true }): Promise<WorkspaceConnection> {
+  if (!options?.separateRepository) {
+    let saved: WorkspaceConnection | undefined;
+    try { saved = getWorkspaceConnection(root); } catch { /* Explicit reconnect may repair invalid metadata. */ }
+    if (saved?.separateRepository && sameRepository(saved.repository, repository) && (!options || options.localPath && !path.relative(saved.localPath!, path.resolve(options.localPath)))) {
+      options = { ...options, localPath: saved.localPath, separateRepository: true };
+    }
+  }
+  if (options?.separateRepository) {
+    if (!options.localPath) throw new Error('Choose the local repository before connecting.');
+    const record = connectionPath(root);
+    const priorRecord = fs.existsSync(record) ? fs.readFileSync(record, 'utf8') : undefined;
+    return withSelectedRepository(root, repository, options.localPath, async () => {
+      await validateLocalRepositorySelection(repository, options.localPath);
+      const baseBranch = await resolveRepositoryDefaultBranch(repository, root);
+      // Validate again after network I/O so a raced origin/config cannot be accepted.
+      await validateLocalRepositorySelection(repository, options.localPath);
+      const connection: WorkspaceConnection = { repository: validateRepository(repository), baseBranch, localPath: path.resolve(options.localPath!), separateRepository: true, gitConfigDigest: selectedRepositoryConfigDigest(options.localPath!) };
+      options.beforeSave?.();
+      if ((fs.existsSync(record) ? fs.readFileSync(record, 'utf8') : undefined) !== priorRecord) throw new Error('The saved connection changed while setup was open. It was preserved; review it before trying again.');
+      saveWorkspaceConnection(root, connection);
+      recognizeSelectedRepository(root);
+      return connection;
+    });
+  }
   repository = validateRepository(repository);
   if (isManagedWorkbench(root)) { assertRemoteDestination(repository); if (options?.localPath) assertWorkbenchRepository(root, options.localPath); }
   if (options) await validateLocalRepositorySelection(repository, options.localPath);

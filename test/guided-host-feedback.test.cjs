@@ -35,6 +35,10 @@ function fixture(options = {}) {
       return options.metadataResult ?? input;
     }
     refreshRepositorySettings() { events.push({ type: 'settings-refresh', controller: this }); }
+    async acceptRepositoryConnection(repository, localPath, beforeSave) {
+      beforeSave?.(); events.push({ type: 'connection-accepted', repository, localPath });
+      this.state.connection = { repository, localPath, baseBranch: 'main' };
+    }
     async dispatch(message) {
       events.push({ type: 'dispatch', action: message.action, message, controller: this });
       return dispatchHooks.has(message.action) ? dispatchHooks.get(message.action)(this, message) : this.state;
@@ -50,6 +54,8 @@ function fixture(options = {}) {
       onDidChangeConfiguration(listener) { configurationListener = listener; return disposable(); },
       getConfiguration() { const snapshot = options.configurationSnapshots ? new Map(settings) : settings; return { inspect: key => snapshot.has(key) ? { workspaceValue: snapshot.get(key) } : { defaultValue: '' }, get: key => snapshot.get(key) ?? '', async update(key, value, target) { if (value === undefined) settings.delete(key); else settings.set(key, value); updates.push({ key, value, target }); configurationListener?.({ affectsConfiguration: candidate => candidate === `skillBuilder.${key}` }); await options.onUpdate?.(key, value); } }; } },
     window: {
+      async showInputBox(...args) { events.push({ type: 'repository-input', args }); return options.showInputBox?.(...args); },
+      async showQuickPick(...args) { events.push({ type: 'repository-mode', args }); return options.showQuickPick?.(...args); },
       async showOpenDialog(...args) { events.push({ type: 'folder-picker', args }); return options.showOpenDialog?.(...args); },
       async showInformationMessage(...args) { events.push({ type: 'information', args }); return options.showInformationMessage?.(...args); },
       async showErrorMessage(...args) { events.push({ type: 'error-dialog', args }); return options.showErrorMessage?.(...args); },
@@ -71,6 +77,10 @@ function fixture(options = {}) {
   try {
     Module._load = function(id, parent, main) {
       if (parent?.filename === file && id === 'vscode') return vscode;
+      if (parent?.filename === file && id === './managed-repository.js' && options.repositoryFlow) return {
+        async validateSelectedRepository(...args) { events.push({ type: 'local-validated', args }); await options.repositoryFlow.validate?.(...args); },
+        async cloneSelectedRepository(...args) { events.push({ type: 'local-cloned', args }); await options.repositoryFlow.clone?.(...args); }
+      };
       if (parent?.filename === file && id === './workspace-selection.js' && options.resolveExistingWorkspace) return { ...originalLoad.call(this, id, parent, main), resolveExistingRepositoryWorkspace: options.resolveExistingWorkspace };
       if (parent?.filename === file && id === './guided-workspace.js' && options.connection) return { getWorkspaceConnection: () => { if (options.connection instanceof Error) throw options.connection; return options.connection; } };
       if (parent?.filename === file && id === './guided-controller.js') return { GuidedWorkbenchController: Controller };
@@ -847,4 +857,48 @@ test('a late message from a disposed panel cannot act on the replacement workben
   assert.equal(f.events.some(event => event.type === 'plugin-metadata' || event.type === 'dispatch'), false);
   assert.equal(current.htmlWrites, writes); assert.deepEqual(current.messages, []);
   assert.equal(f.controllers.at(-1).root, selected);
+});
+
+test('Connect repository opens the guided native flow, preserves editor buffer and saves one complete pair', async () => {
+  const f = fixture({ repositoryFlow: {},
+    showInputBox: async () => 'example/next',
+    showQuickPick: async () => ({ mode: 'existing' }),
+    showOpenDialog: async () => [{ fsPath: path.join(scratch, 'separate-next') }],
+    showInformationMessage: async (_message, _options, action) => action,
+    getSession: async () => ({ accessToken: 'test-fixture-only', account: { label: 'fixture' } })
+  });
+  const panel = await f.open();
+  await panel.receive({ action: 'configureRepository', editorSkillId: 'draft', editorPath: 'SKILL.md', editorContent: 'current unsaved text' });
+  assert.equal(f.events.filter(event => event.type === 'connection-accepted').length, 1);
+  assert.equal(f.controllers[0].state.connection.repository, 'https://github.com/example/next.git');
+  assert.equal(f.controllers[0].state.connection.localPath, path.join(scratch, 'separate-next'));
+  assert.ok(f.events.find(event => event.type === 'dispatch' && event.action === 'save' && event.message.editorContent === 'current unsaved text'));
+  assert.equal(f.events.some(event => event.type === 'native-command' && event.args[0] === 'workbench.action.openSettings'), false);
+  assert.equal(f.updates.length, 0, 'connection does not partially rewrite native settings');
+});
+
+test('canceling guided repository setup keeps the current connection and never opens Settings', async () => {
+  const f = fixture({ repositoryFlow: {}, showInputBox: async () => undefined });
+  const panel = await f.open();
+  const previous = { repository: 'https://github.com/example/old.git', localPath: path.join(scratch, 'old'), baseBranch: 'main' };
+  f.controllers[0].state.connection = previous;
+  await panel.receive({ action: 'configureRepository' });
+  assert.deepEqual(f.controllers[0].state.connection, previous);
+  assert.equal(f.events.some(event => event.type === 'connection-accepted' || event.type === 'local-cloned'), false);
+  assert.equal(f.events.some(event => event.type === 'native-command'), false);
+  assert.match(f.controllers[0].state.notice, /canceled/);
+});
+
+test('another window changing the saved connection while the URL prompt is open cancels activation', async () => {
+  let f;
+  const replacement = JSON.stringify({ format: 1, repository: 'https://github.com/example/other.git', baseBranch: 'main' });
+  f = fixture({ repositoryFlow: {}, showInputBox: async () => {
+    fs.writeFileSync(path.join(f.root, '.skill-workbench', 'connection.json'), replacement);
+    return 'example/next';
+  } });
+  const panel = await f.open();
+  await panel.receive({ action: 'configureRepository' });
+  assert.match(f.controllers[0].state.error, /Another window changed/);
+  assert.equal(fs.readFileSync(path.join(f.root, '.skill-workbench', 'connection.json'), 'utf8'), replacement);
+  assert.equal(f.events.some(event => event.type === 'connection-accepted' || event.type === 'local-cloned'), false);
 });

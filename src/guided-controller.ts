@@ -16,7 +16,7 @@ import { suggestReleaseVersion } from './workbench-library.js';
 import { listLibraryReleases } from './workbench-library.js';
 import { readSkillIdentity } from './skill-identity.js';
 import { listRepositoryChoices, createGitHubRepository } from './repository-publisher.js';
-import { connectWorkspaceRepository, getWorkspaceConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, publishPreparedGuidedRelease, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
+import { connectWorkspaceRepository, getWorkspaceConnection, hasGuidedRepositoryConnection, setWorkspaceRepositoryFolder, migrateAssociation, createGuidedSkill, listGuidedFiles, openGuidedFile, readGuidedFile, writeGuidedFile, copyGuidedFile, saveGuidedRecovery, listGuidedHistory, restoreGuidedEdit, publishGuidedSkill, publishPreparedGuidedRelease, reviewLibraryRelease, libraryReviewContext } from './guided-workspace.js';
 import { GitHubReviewService, githubRepository, pullRequestUrl, githubError, type GitHubRunner } from './github-review.js';
 import { GuidedState, GuidedMessage, SkillTarget, RepositoryCheckState, type GuidedActivityStatus } from './guided-contract.js';
 import { runWorkbenchJob, type WorkbenchJob } from './workbench-jobs.js';
@@ -58,11 +58,12 @@ export class GuidedWorkbenchController {
   constructor(private root: string | undefined, private hooks: GuidedHooks = {}) { this.state.hasWorkspace = !!root; this.refreshRepositorySettings(); }
   private savedConnection(settings: RepositorySettings) {
     try { return this.root ? getWorkspaceConnection(this.root) : undefined; }
-    catch (error) { if (settings.repositoryUrl !== undefined) return undefined; throw error; }
+    catch (error) { if (this.root && hasGuidedRepositoryConnection(this.root)) throw error; if (settings.repositoryUrl !== undefined) return undefined; throw error; }
   }
   private repositorySelection() {
     const settings = this.hooks.getRepositorySettings?.() ?? {};
-    const selected = selectRepositorySettings(settings, this.savedConnection(settings));
+    const saved = this.savedConnection(settings);
+    const selected = selectRepositorySettings(saved?.separateRepository ? {} : settings, saved);
     if (this.hooks.workspaceSelection) {
       assertWorkspaceSelection(this.hooks.workspaceSelection);
       if (selected.repository) assertWorkspaceRepository(this.hooks.workspaceSelection, selected.repository, selected.localPath);
@@ -77,13 +78,25 @@ export class GuidedWorkbenchController {
       }
       if (selected.localPath) {
         const relative = path.relative(path.join(this.root, 'repositories'), path.resolve(selected.localPath));
-        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+        if (!saved?.separateRepository && (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))) {
           throw new Error('For GitHub sharing, choose a repository folder inside your SkillJetty workbench\'s repositories folder. The saved Git folder belongs to another work location. Local skills and plugin packages can still be saved.');
         }
         assertWorkbenchRepository(this.root, selected.localPath);
       }
     }
     return selected;
+  }
+  /** Native guided connection owns one complete pair; stale settings cannot split it. */
+  async acceptRepositoryConnection(repository: string, localPath: string, beforeSave?: () => void): Promise<void> {
+    const connection = await connectWorkspaceRepository(this.workspace(), repository, { localPath, beforeSave, separateRepository: true });
+    this.previewInventory = undefined; this.previewDestination = undefined; this.previewConfigurationGeneration = undefined;
+    this.exportPreview = undefined; this.state.publish = undefined;
+    this.state.repositoryCheckout = undefined; this.state.repositoryVerification = undefined;
+    this.state.reviewers = []; this.state.reviewersLoaded = false; this.state.reviewersError = undefined;
+    this.refreshRepositorySettings();
+    this.state.connection = connection;
+    this.state.error = undefined;
+    this.state.notice = 'Repository connected. Your workbench and existing drafts stayed in place.';
   }
   private destinationFingerprint(): string {
     const selected = this.repositorySelection();

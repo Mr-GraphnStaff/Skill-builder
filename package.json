@@ -2,7 +2,7 @@
   "name": "skill-builder",
   "displayName": "SkillJetty — Agent Skills Studio",
   "description": "Create skills, build Claude plugin bundles, and save or share them with SkillJetty by DAF-TECH.",
-  "version": "0.15.5",
+  "version": "0.15.6",
   "publisher": "DavidFarris",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -50,6 +50,7 @@
         "title": "SkillJetty: Open Workbench",
         "icon": "$(tools)"
       },
+      { "command": "skillBuilder.configureRepository", "title": "SkillJetty: Connect or Change Repository" },
       {
         "command": "skillBuilder.showPerformanceLog",
         "title": "SkillJetty (Pre-release): Show Performance Log"
@@ -102,21 +103,21 @@
           "default": "",
           "order": 10,
           "scope": "window",
-          "description": "Explicit existing connected Skills repository root or managed-workbench location. A saved repository setup can resume without creating a managed workbench. Preview working files stay in .skilljetty-prerelease. Changing this does not move files; save your draft and reopen SkillJetty. Arbitrary folders are not adopted automatically."
+          "description": "Workbench folder for SkillJetty drafts, builds and recovery, or a previously connected legacy project root. Select the local Git repository separately using Connect or Change Repository. A saved repository setup can resume without creating a managed workbench. Preview working files stay in .skilljetty-prerelease. Changing this does not move files; save your draft and reopen SkillJetty. Arbitrary folders are not adopted automatically."
         },
         "skillBuilder.prerelease.repositoryUrl": {
           "type": "string",
           "default": "",
           "order": 20,
           "scope": "window",
-          "description": "GitHub sharing repository address, for example https://github.com/your-org/skills.git, rather than an individual skill's tree or file page. Existing-repository mode uses its saved remote. An explicitly empty value disconnects sharing; Reset preserves an existing saved connection. The default branch is detected when you verify or submit. Use VS Code Accounts or SkillJetty: Connect GitHub Account to sign in. No credentials belong here."
+          "description": "Legacy preference. Use SkillJetty: Connect or Change Repository to save a verified local and remote pair. GitHub sharing repository address, for example https://github.com/your-org/skills.git, rather than an individual skill's tree or file page. Existing-repository mode uses its saved remote. An explicitly empty value disconnects sharing; Reset preserves an existing saved connection. The default branch is detected when you verify or submit. Use VS Code Accounts or SkillJetty: Connect GitHub Account to sign in. No credentials belong here."
         },
         "skillBuilder.prerelease.localRepositoryPath": {
           "type": "string",
           "default": "",
           "order": 30,
           "scope": "window",
-          "description": "Absolute Git repository root containing .git, not an individual skill folder. Existing-repository mode reuses its saved root. Managed-workbench mode requires a folder inside repositories/ and defaults to repositories/skills. An explicit blank disables local reuse. Pull runs only when requested; linked paths are blocked and existing repositories are not moved automatically."
+          "description": "Legacy preference. Use SkillJetty: Connect or Change Repository to choose or create your local copy. Absolute Git repository root containing .git, not an individual skill folder. Existing-repository mode reuses its saved root. A guided connection keeps the local repository separate from the workbench; older connections keep their original locations. An explicit blank disables local reuse. Pull runs only when requested; linked paths are blocked and existing repositories are not moved automatically."
         },
         "skillBuilder.distDirectory": {
           "type": "string",
@@ -162,7 +163,7 @@
     "test": "npm run compile && node --test --test-concurrency=4 test/*.test.cjs",
     "watch": "tsc -watch -p ./",
     "package": "npm run package:pre-release",
-    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.15.5.vsix",
+    "package:pre-release": "vsce package --pre-release --out dist/skill-builder-0.15.6.vsix",
     "ci:package": "node scripts/ci/release.cjs prepare",
     "ci:beta-package": "node scripts/ci/beta-release.cjs prepare",
     "import-skill": "node scripts/import-skill.mjs",

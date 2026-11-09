@@ -1,6 +1,6 @@
 import { workbenchGitAskpass, disposeWorkbenchGitAskpass, currentWorkbenchGitToken } from './workbench-git-auth.js';
 export { withWorkbenchGitCredentials } from './workbench-git-auth.js';
-import { assertWorkbenchPath, assertWorkbenchGitMetadata, assertWorkbenchRepository, assertRemoteDestination, containingWorkbench, isManagedWorkbench, workbenchScratch, workbenchGitEnvironment, recordOwnedWorkbenchRepository, isOwnedWorkbenchRepository } from './workbench-boundary.js';
+import { assertWorkbenchPath, assertWorkbenchGitMetadata, assertWorkbenchRepository, assertRemoteDestination, containingWorkbench, isManagedWorkbench, workbenchScratch, workbenchGitEnvironment, recordOwnedWorkbenchRepository, isOwnedWorkbenchRepository, selectedRepositoryForPath, assertSelectedRepository } from './workbench-boundary.js';
 import { existingWorkspaceForPath, assertWorkspaceRepository } from './workspace-selection.js';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -120,12 +120,13 @@ async function git(cwd: string, args: string[], localCloneSource?: string): Prom
   let authentication: ReturnType<typeof workbenchGitAskpass>;
   let managedRoot: string | undefined;
   try {
-    managedRoot = containingWorkbench(cwd);
+    const selected = selectedRepositoryForPath(cwd);
+    managedRoot = selected?.root ?? containingWorkbench(cwd);
     const existing = managedRoot ? undefined : existingWorkspaceForPath(cwd);
-    const metadataBoundary = managedRoot ?? existing?.repositoryRoot;
+    const metadataBoundary = selected?.localPath ?? managedRoot ?? existing?.repositoryRoot;
     managedRoot ??= existing?.dataRoot;
     const existingRepositoryRoot = !!existing && path.relative(existing.repositoryRoot, path.resolve(cwd)) === '';
-    const owned = !!managedRoot && !existingRepositoryRoot
+    const owned = !!managedRoot && !existingRepositoryRoot && !selected
       && isOwnedWorkbenchRepository(managedRoot, cwd);
     const preserveExistingTrust = existingRepositoryRoot && existing?.trustedRepositoryRoot === true;
     const sourceTrust: string[] = [];
@@ -136,11 +137,16 @@ async function git(cwd: string, args: string[], localCloneSource?: string): Prom
       // fetch/push commands. The lookup rechecks saved mapping/configuration
       // and user trust fingerprints immediately before starting the clone.
       const source = path.resolve(localCloneSource);
+      const explicitSource = selectedRepositoryForPath(source);
       const selectedSource = existingWorkspaceForPath(source);
       const ownedSourceRoot = containingWorkbench(source);
       const ownedSource = !!ownedSourceRoot && isOwnedWorkbenchRepository(ownedSourceRoot, source);
       if (operation !== 'clone') throw new Error('Local repository trust is only valid for its clone operation.');
-      if (selectedSource && path.relative(selectedSource.repositoryRoot, source) === '' && selectedSource.trustedRepositoryRoot) {
+      if (explicitSource) {
+        assertSelectedRepository(explicitSource.root, source, explicitSource.repository);
+        assertWorkbenchGitMetadata(source, source, false, true);
+        sourceTrust.push('-c', `safe.directory=${source.replace(/\\/g, '/')}`, '-c', `safe.directory=${path.join(source, '.git').replace(/\\/g, '/')}`);
+      } else if (selectedSource && path.relative(selectedSource.repositoryRoot, source) === '' && selectedSource.trustedRepositoryRoot) {
         assertWorkspaceRepository(selectedSource, selectedSource.repository, source);
         sourceTrust.push('-c', `safe.directory=${source.replace(/\\/g, '/')}`, '-c', `safe.directory=${path.join(source, '.git').replace(/\\/g, '/')}`);
       } else if (ownedSource && ownedSourceRoot) {
@@ -150,10 +156,10 @@ async function git(cwd: string, args: string[], localCloneSource?: string): Prom
       }
     }
     if (managedRoot && metadataBoundary) {
-      assertWorkbenchGitMetadata(metadataBoundary, cwd);
+      assertWorkbenchGitMetadata(metadataBoundary, cwd, false, !!selected);
       if (['ls-remote', 'fetch', 'push', 'clone'].includes(operation)) authentication = workbenchGitAskpass(managedRoot);
     }
-    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...((owned || preserveExistingTrust) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...sourceTrust, ...args], {
+    const result = await runPublisherProcess('git', ['-c', 'protocol.ext.allow=never', '-c', 'core.fsmonitor=false', '-c', 'core.longpaths=true', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', '-c', 'core.logAllRefUpdates=false', ...(managedRoot ? [...((owned || preserveExistingTrust || selected) ? ['-c', `safe.directory=${path.resolve(cwd).replace(/\\/g, '/')}`] : []), '-c', 'credential.helper=', '-c', 'credential.username=x-access-token', '-c', 'user.name=SkillJetty', '-c', 'user.email=skilljetty@users.noreply.github.com', '-c', 'core.hooksPath=' + path.join(managedRoot, 'scratch', 'disabled-hooks')] : []), ...sourceTrust, ...args], {
       cwd, env: managedRoot ? { ...workbenchGitEnvironment(managedRoot), GIT_CEILING_DIRECTORIES: metadataBoundary, ...authentication?.environment } : { ...process.env, GIT_TERMINAL_PROMPT: '0' }
     });
     outcome = 'ok'; exitCode = 0; return result.stdout;

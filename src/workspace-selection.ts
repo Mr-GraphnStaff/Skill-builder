@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { homedir } from 'node:os';
-import { assertRemoteDestination, assertWorkbenchPath } from './workbench-boundary.js';
+import { assertRemoteDestination, assertWorkbenchPath, assertSelectedRepository } from './workbench-boundary.js';
 import { requireWorkbench } from './workbench-setup.js';
 
 export type WorkspaceSelection =
@@ -61,11 +61,14 @@ function recordedRepository(dataRoot: string, repositoryRoot: string): { reposit
   const control = assertWorkbenchPath(dataRoot, path.join(dataRoot, '.skill-workbench', 'connection.json'));
   const saved = JSON.parse(fs.readFileSync(control, 'utf8'));
   if (saved.format !== 1 || typeof saved.repository !== 'string' || typeof saved.localPath !== 'string' || !path.isAbsolute(saved.localPath)
-    || !samePath(saved.localPath, repositoryRoot) || typeof saved.baseBranch !== 'string' || !saved.baseBranch
+    || (saved.separateRepository !== true && !samePath(saved.localPath, repositoryRoot)) || typeof saved.baseBranch !== 'string' || !saved.baseBranch
     || /[\s~^:?*\[\\\0]/.test(saved.baseBranch) || saved.baseBranch.startsWith('-') || saved.baseBranch.includes('..') || saved.baseBranch.includes('@{')) {
     throw new Error('The saved workspace connection does not identify this repository root. Existing work was not changed.');
   }
   assertRemoteDestination(saved.repository);
+  // The data anchor remains available for local editing and guided repair even
+  // when the separately selected Git checkout is missing or needs reconnecting.
+  // Repository operations validate the exact saved pair and config pin below.
   const git = assertWorkbenchPath(repositoryRoot, path.join(repositoryRoot, '.git'));
   if (!fs.lstatSync(git).isDirectory()) throw new Error('The existing workspace needs its own Git repository root; linked worktrees are not adopted.');
   for (const name of ['commondir', 'gitdir', 'objects/info/alternates', 'objects/info/http-alternates', 'config.worktree']) {
@@ -100,7 +103,8 @@ export async function resolveExistingRepositoryWorkspace(projectRoot: string): P
   const top = await git(['rev-parse', '--show-toplevel']);
   if (!samePath(top, repositoryRoot)) throw new Error('Select the actual repository root before continuing the saved workspace.');
   const origin = await git(['remote', 'get-url', 'origin']);
-  if (identity(origin) !== identity(recorded.repository)) throw new Error('The repository origin differs from the saved workspace connection. Existing work was preserved.');
+  const saved = JSON.parse(fs.readFileSync(path.join(dataRoot, '.skill-workbench', 'connection.json'), 'utf8'));
+  if (saved.separateRepository !== true && identity(origin) !== identity(recorded.repository)) throw new Error('The repository origin differs from the saved workspace connection. Existing work was preserved.');
   const selection: Extract<WorkspaceSelection, { kind: 'existing-repository' }> = { kind: 'existing-repository', dataRoot, repositoryRoot, ...recorded, ...trust };
   assertWorkspaceSelection(selection);
   existingSelections.set(dataRoot, selection);
@@ -115,7 +119,8 @@ export function assertWorkspaceSelection(selection: WorkspaceSelection): string 
     throw new Error('Your existing Git trust settings changed. Reopen SkillJetty to verify the repository again. No trust settings were changed.');
   }
   const current = recordedRepository(selection.dataRoot, selection.repositoryRoot);
-  if (identity(current.repository) !== identity(selection.repository) || current.gitConfigDigest !== selection.gitConfigDigest) {
+  const saved = JSON.parse(fs.readFileSync(path.join(selection.dataRoot, '.skill-workbench', 'connection.json'), 'utf8'));
+  if ((saved.separateRepository !== true && identity(current.repository) !== identity(selection.repository)) || current.gitConfigDigest !== selection.gitConfigDigest) {
     throw new Error('The existing repository configuration changed. Reopen SkillJetty to verify its saved connection before continuing.');
   }
   return selection.dataRoot;
@@ -136,6 +141,8 @@ export function assertWorkspaceRepository(selection: WorkspaceSelection, reposit
   assertWorkspaceSelection(selection);
   assertRemoteDestination(repository);
   if (selection.kind !== 'existing-repository') return;
+  const saved = JSON.parse(fs.readFileSync(path.join(selection.dataRoot, '.skill-workbench', 'connection.json'), 'utf8'));
+  if (saved.separateRepository === true) { assertSelectedRepository(selection.dataRoot, localPath ?? saved.localPath, repository); return; }
   if (identity(repository) !== identity(selection.repository) || (localPath && !samePath(localPath, selection.repositoryRoot))) {
     throw new Error('This existing workspace uses its saved repository root and remote. Correct the repository settings before sharing; local drafts remain available.');
   }

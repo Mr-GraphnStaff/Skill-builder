@@ -1,5 +1,26 @@
 # SkillJetty pre-release hardening — October 30, 2026
 
+## Current assignment — November 9: guided repository connection, candidate 0.15.6
+
+Owner authorized fixing Connect/Change opening generic Settings, with three clear
+locations: workbench background work; separate local Git repository holding skills
+and ZIPs; paired GitHub remote. Work PC screenshot identifies a different host and
+repository from the agent-accessible home settings; do not infer work-PC state
+from the accessible machine. No work-PC settings have been modified here.
+
+Avery coordinates on Codex; Ishan implements backend pairing/clone persistence;
+Lena independently verifies QA/accessibility; Morgan independently reviews trust
+boundaries. Root owns native wizard, UI, documentation and candidate packaging.
+Source checkout was clean on codex/public-prerelease at assignment start.
+New guided pair persists together in workbench connection records and overrides
+stale legacy preferences without rewriting VS Code settings. Existing drafts,
+files and receipt identities are preserved. Verification and candidate packaging
+are in progress; no new release or installed-work-PC claim is made.
+
+The shared Y: coordination drive is unavailable in this runtime; Claude has not
+been notified through that file. There are no observed concurrent SkillJetty edits
+at assignment start. Preserve prior November 3 delivery evidence below.
+
 ## Current assignment — November 3: merged-upload retry repaired, preview 0.15.5
 
 Public preview **0.15.5 is validated/latest and installed from the official

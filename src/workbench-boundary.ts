@@ -1,9 +1,84 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 
 export const WORKBENCH_MARKER = '.skilljetty-workbench.json';
 const recognized = new Set<string>();
 const ownedRepositories = new Set<string>();
+type SelectedRepository = { root: string; repository: string; localPath: string; gitConfigDigest?: string };
+const selectedRepositoryRoots = new Map<string, string>();
+const knownSelectedPaths = new Map<string, string>();
+const pendingRepositories = new Map<string, SelectedRepository>();
+const repositoryIdentity = (value: string) => value.replace(/\.git$/i, '').replace(/\/$/, '').toLowerCase();
+const selectedPathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+
+export function selectedRepositoryConfigDigest(localPath: string): string | undefined {
+  const config = assertWorkbenchPath(localPath, path.join(localPath, '.git', 'config'));
+  return fs.existsSync(config) ? createHash('sha256').update(fs.readFileSync(config)).digest('hex') : undefined;
+}
+
+/** An external checkout is an explicit, exact pair, never another workbench. */
+export function validateSeparateRepositoryPath(root: string, localPath: string): string {
+  if (!path.isAbsolute(localPath)) throw new Error('Choose an absolute local repository folder.');
+  const selected = assertWorkbenchPath(localPath, localPath), workbench = path.resolve(root);
+  const inside = (base: string, target: string) => { const rel = path.relative(base, target); return !rel || rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel); };
+  if (inside(selected, workbench) || inside(workbench, selected)) throw new Error('Choose a local repository separate from the workbench folder. Your workbench is for drafts and background files.');
+  if (selected.split(/[\\/]/).some(part => ['.git', '.codex', '.skill-workbench', '.skilljetty-prerelease', '.skilljetty-beta'].includes(part.toLowerCase()))) throw new Error('Choose a visible local repository outside private application storage.');
+  return selected;
+}
+
+function selectedRepository(root: string): SelectedRepository | undefined {
+  const absolute = path.resolve(root), pending = pendingRepositories.get(absolute);
+  if (pending) {
+    validateSeparateRepositoryPath(absolute, pending.localPath);
+    const digest = selectedRepositoryConfigDigest(pending.localPath);
+    if (pending.gitConfigDigest && digest !== pending.gitConfigDigest) throw new Error('The selected repository configuration changed during connection. No further Git operation ran.');
+    // A new clone acquires its immutable configuration pin once promoted.
+    if (!pending.gitConfigDigest && digest) pending.gitConfigDigest = digest;
+    return pending;
+  }
+  const file = assertWorkbenchPath(absolute, path.join(absolute, '.skill-workbench', 'connection.json'));
+  if (!fs.existsSync(file)) return undefined;
+  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (value.format !== 1 || value.separateRepository !== true) return undefined;
+  assertRemoteDestination(value.repository);
+  const localPath = validateSeparateRepositoryPath(absolute, value.localPath);
+  if (typeof value.gitConfigDigest !== 'string' || selectedRepositoryConfigDigest(localPath) !== value.gitConfigDigest) throw new Error('The connected repository configuration changed. Connect it again before syncing or sharing.');
+  return { root: absolute, repository: value.repository, localPath, gitConfigDigest: value.gitConfigDigest };
+}
+
+/** Register only a validated saved record; the record is re-read for every use. */
+export function recognizeSelectedRepository(root: string): void {
+  const selected = selectedRepository(root);
+  if (selected) { selectedRepositoryRoots.set(path.resolve(root), selected.localPath); knownSelectedPaths.set(selectedPathKey(selected.localPath), path.resolve(root)); }
+}
+
+export function selectedRepositoryForPath(target: string): SelectedRepository | undefined {
+  const absolute = path.resolve(target);
+  const candidates = new Map([...selectedRepositoryRoots, ...[...pendingRepositories].map(([root, value]) => [root, value.localPath] as const)]);
+  for (const [root, localPath] of candidates) {
+    if (path.relative(localPath, absolute)) continue;
+    const selected = selectedRepository(root);
+    if (selected && !path.relative(selected.localPath, absolute)) return selected;
+  }
+  if (knownSelectedPaths.has(selectedPathKey(absolute))) throw new Error('This local repository is no longer the connected destination. Review the current connection before continuing.');
+  return undefined;
+}
+
+export function assertSelectedRepository(root: string, localPath: string, repository?: string): string {
+  const selected = selectedRepository(root);
+  if (!selected || path.relative(selected.localPath, path.resolve(localPath)) || repository && repositoryIdentity(selected.repository) !== repositoryIdentity(repository)) throw new Error('The workbench selected local and remote repository pair changed. Connect the repository again before continuing.');
+  return selected.localPath;
+}
+
+/** Native connection preparation only. Grant expires if validation/clone fails. */
+export async function withSelectedRepository<T>(root: string, repository: string, localPath: string, perform: () => Promise<T>): Promise<T> {
+  assertRemoteDestination(repository);
+  const absolute = path.resolve(root), selected = validateSeparateRepositoryPath(root, localPath);
+  if (pendingRepositories.has(absolute)) throw new Error('A repository connection is already being prepared.');
+  pendingRepositories.set(absolute, { root: absolute, repository, localPath: selected, gitConfigDigest: selectedRepositoryConfigDigest(selected) });
+  try { return await perform(); } finally { pendingRepositories.delete(absolute); }
+}
 
 /** Validate every existing ancestor, including ancestors above the selected root. */
 export function assertWorkbenchPath(root: string, target: string): string {
@@ -62,6 +137,8 @@ export function workbenchScratch(root: string, prefix?: string): string {
 }
 
 export function assertWorkbenchRepository(root: string, localPath: string): string {
+  const relative = path.relative(path.resolve(root), path.resolve(localPath));
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return assertSelectedRepository(root, localPath);
   const selected = assertWorkbenchPath(root, localPath);
   const repositories = path.join(path.resolve(root), 'repositories');
   if (isManagedWorkbench(root)) {
@@ -95,7 +172,7 @@ export function workbenchRecovery(root: string): string {
 }
 
 /** Git can redirect metadata independently of its working directory. */
-export function assertWorkbenchGitMetadata(root: string, checkout: string, bare = false): void {
+export function assertWorkbenchGitMetadata(root: string, checkout: string, bare = false, selectedTransport = false): void {
   assertWorkbenchPath(root, checkout);
   const metadata = bare ? checkout : path.join(checkout, '.git');
   if (!fs.existsSync(metadata)) return;
@@ -116,7 +193,8 @@ export function assertWorkbenchGitMetadata(root: string, checkout: string, bare 
   const config = path.join(metadata, 'config');
   if (fs.existsSync(config)) {
     const text = fs.readFileSync(config, 'utf8');
-    if (/^\s*\[\s*(?:include(?:if)?|url|extensions|credential|filter|diff|merge)\b/im.test(text)
+    if ((selectedTransport && /^\s*\[\s*(?:http|protocol)\b/im.test(text))
+        || /^\s*\[\s*(?:include(?:if)?|url|extensions|credential|filter|diff|merge)\b/im.test(text)
         || /^\s*(?:worktree|pushurl|fsmonitor|sshcommand|gitproxy|credentialhelper|alternaterefscommand|gpgsign|signingkey)\s*=/im.test(text)) {
       throw new Error('Git configuration redirects paths or transport. Use a fresh clone inside this workbench.');
     }

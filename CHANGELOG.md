@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.6 — guided repository connection (pre-release candidate)
+
+- Connect repository and Change connection now guide you through the GitHub
+  address, an existing local copy or a confirmed new clone, and the exact pair
+  to connect. They no longer open the generic Settings page.
+- Keep the workbench for drafts, builds and recovery, with a separate local Git
+  repository for shared skills and ZIPs. Save the verified pair together so older
+  settings cannot split the connection after reopening.
+- Preserve the previous connection when setup is canceled or fails. Keep existing
+  local files, drafts and earlier upload receipts; never silently change origin,
+  pull into an existing copy, or upload during connection setup.
+
 ## 0.15.5 — resume exports after a completed merge (pre-release candidate)
 
 - Recognize an already merged upload using a fresh GitHub check of its exact

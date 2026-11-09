@@ -43,11 +43,15 @@ or folder. Imported originals stay unchanged. Earlier edits and saved versions
 remain recoverable. Failed checks, canceled selections and failed uploads keep
 your work; the result identifies any incomplete action.
 
-The header shows the build space, local repository and remote repository. **Connect repository** or
-**Change connection** opens settings. Use the Git repository root as the local
-repository and its HTTPS GitHub address as the destination. **Sync repository**
-downloads remote changes with Git's preservation checks; editing settings never
-runs a sync automatically. Uploading opens a review branch and pull request.
+The header shows the **Workbench folder**, **Local repository** and **Remote repository**.
+Choose **Connect repository** or **Change connection**, enter the GitHub address,
+then choose an existing local Git copy or **Create a local copy**. Review the exact
+folders and remote before connecting. Your workbench holds drafts, builds and
+recovery; the separate local repository holds your shared skills and ZIPs.
+Canceling or failing setup keeps the previous connection. Connecting an existing
+copy does not pull or change its files. **Sync repository** explicitly downloads
+updates with Git's preservation checks. Uploading is a separate action that opens
+a review branch and pull request.
 
 SkillJetty preserves nested files, binary assets and application-specific metadata.
 It checks structure and file identity; it does not run imported scripts or models,
@@ -56,7 +60,7 @@ your intended application.
 
 ## Release and help
 
-This redesigned interface is prepared for preview **0.15.4**. Check the
+The guided repository connection fix is prepared for preview **0.15.6**. Check the
 [public channel status](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels)
 for verified availability. Stable keeps its established interface. Both channels
 use the same listing and command; switching versions does not migrate your data.
