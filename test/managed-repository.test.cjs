@@ -21,12 +21,12 @@ function fixture(t) {
   git(remote, 'add', '.'); git(remote, 'commit', '-m', 'Initial skill');
   return { base, root, remote };
 }
-test('Git pull is available for a registered repository before a skill is opened', () => {
-  const state = { step: 'start', hasWorkspace: true, repositories: [], drafts: [], library: [], files: [], target: 'portable', connection: { repository: 'https://github.com/example/skills.git', baseBranch: 'trunk' } };
+test('repository sync and opening a repository skill are available for a connected pair before a skill is opened', () => {
+  const state = { step: 'start', hasWorkspace: true, workFolder: 'P:/fixture/workbench', repositories: [], drafts: [], library: [], files: [], target: 'portable', connection: { repository: 'https://github.com/example/skills.git', localPath: 'P:/fixture/repository', baseBranch: 'trunk' } };
   const html = renderGuidedWorkbench(state, 'managedRepositoryNonce123');
-  assert.match(html, /data-action="pullRepository"[^>]*>Git pull<\/button>/);
+  assert.match(html, /data-action="pullRepository"[^>]*>Sync repository<\/button>/);
   assert.match(html, /data-action="openRepositorySkill"/);
-  assert.match(html, /repository actions are optional before starting skill work/i);
+  assert.match(html, /No repository connection is needed to create, open, or edit a skill/i);
   assert.match(html, /id="pull-repository"/);
   assert.match(html, /id="open-repository-skill"/);
   assert.doesNotMatch(renderGuidedWorkbench({ ...state, connection: undefined }, 'managedRepositoryNonce123'), /data-action="pullRepository"/);

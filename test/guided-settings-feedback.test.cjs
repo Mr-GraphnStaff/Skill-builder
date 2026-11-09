@@ -41,8 +41,11 @@ test('background repository results stay discoverable in collapsed settings with
 });
 
 test('a saved collapsed choice cannot mask an initial setup error', () => {
-  const f = fixture({ status: 'error', message: 'Connection needs attention.' }, false);
-  assert.equal(f.nodes.get('repository-settings').open, true);
-  assert.match(f.html, /id="repository-settings-state"[^>]*>Check failed<\/span>/);
-  assert.match(f.html, /id="repository-settings"[^>]* open/);
+  const f = fixture({ status: 'error', message: 'Connection <img src=x onerror=hostile()> needs attention.' }, false);
+  const summary = /<section class="card setup-tools"[\s\S]*?<\/section>/.exec(f.html)?.[0];
+  assert(summary, 'the repository error must be in the visible project summary');
+  assert.match(summary, /id="repository-verification"[^>]*role="status"[^>]*aria-live="polite"[^>]*data-status="error"/);
+  assert.match(summary, /Connection &lt;img src=x onerror=hostile\(\)&gt; needs attention\./);
+  assert.doesNotMatch(summary, /<img|<details/);
+  assert.match(summary, /data-action="configureRepository"[^>]*>Change connection/);
 });
