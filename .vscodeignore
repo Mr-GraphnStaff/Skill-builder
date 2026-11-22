@@ -11,6 +11,8 @@ workbench/**
 .skilljetty-prerelease/**
 releases/**
 plugin-releases/**
+plugin-drafts/**
+plugin-exports/**
 gemini-releases/**
 docs/software-team/**
 AGENTS.md

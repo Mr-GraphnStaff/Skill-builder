@@ -6,7 +6,7 @@ const AdmZip = require('adm-zip');
 const { createHash } = require('node:crypto');
 const { workingFixture } = require('./working-fixture.cjs');
 const { registerSkillFolder, prepareSkillRelease, verifySkillRelease } = require('../out/skill-workbench.js');
-const { preparePluginRelease, verifyPluginRelease, verifyExportRelease, exportRelativePath, listPluginReleaseMetadata, assessGeminiCompatibility, prepareGeminiRelease, assessPluginDirectoryReadiness } = require('../out/plugin-release.js');
+const { preparePluginRelease, preparePluginFolderRelease, importPluginFolder, exportPluginFolder, verifyPluginRelease, verifyExportRelease, exportRelativePath, listPluginReleaseMetadata, assessGeminiCompatibility, prepareGeminiRelease, assessPluginDirectoryReadiness } = require('../out/plugin-release.js');
 
 function fixture() {
   const base = workingFixture('plugin-release'); fs.mkdirSync(base, { recursive: true });
@@ -20,6 +20,44 @@ function fixture() {
   return { root, add, clean: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 const options = (members, extra = {}) => ({ name: 'team-bundle', description: 'Team workflows', version: '2.1.0', author: 'DAF-TECH', license: 'MIT', members: members.map(release => ({ directory: release.directory })), changelog: 'Bundle existing skills.', ...extra });
+
+test('selected plugin folder keeps manifest bytes and non-skill components in the draft and both archives', () => {
+  const f = fixture();
+  try {
+    const folder = path.join(f.root, 'local-plugin');
+    const files = {
+      '.claude-plugin/plugin.json': Buffer.from('{ "name": "local-tools", "version": "1.2.0", "agents": ["./agents/review.md"] }\r\n'),
+      'agents/review.md': Buffer.from('# Review agent\r\n'),
+      'assets/image.bin': Buffer.from([0, 255, 18, 27]),
+      '.mcp.json': Buffer.from('{ "mcpServers": {} }')
+    };
+    for (const [relative, bytes] of Object.entries({ ...files, '.git/config': 'Private repository metadata' })) {
+      fs.mkdirSync(path.dirname(path.join(folder, relative)), { recursive: true });
+      fs.writeFileSync(path.join(folder, relative), bytes);
+    }
+    const draft = importPluginFolder(f.root, folder);
+    assert.equal(importPluginFolder(f.root, draft.directory).directory, draft.directory);
+    const release = preparePluginFolderRelease(f.root, folder);
+    assert.equal(verifyPluginRelease(release.directory).manifest.format, 2);
+    assert.equal(preparePluginFolderRelease(f.root, folder).directory, release.directory);
+    for (const extension of ['zip', 'plugin']) {
+      const exported = exportPluginFolder(f.root, folder, extension);
+      assert.equal(path.basename(exported.packagePath), `local-tools.${extension}`);
+      const zip = new AdmZip(fs.readFileSync(exported.packagePath));
+      assert.equal(zip.getEntry('.git/config'), null);
+      for (const [relative, bytes] of Object.entries(files)) {
+        assert.deepEqual(zip.readFile(relative), bytes);
+        assert.deepEqual(fs.readFileSync(path.join(draft.directory, relative)), bytes);
+        assert.deepEqual(fs.readFileSync(path.join(release.directory, 'source', relative)), bytes);
+      }
+    }
+    fs.appendFileSync(path.join(draft.directory, 'agents/review.md'), 'Edited draft');
+    assert.deepEqual(fs.readFileSync(path.join(folder, 'agents/review.md')), files['agents/review.md']);
+    assert.throws(() => preparePluginFolderRelease(f.root, draft.directory), /already exists.*different content/);
+    fs.writeFileSync(path.join(folder, '.env.local'), 'PRIVATE=example');
+    assert.throws(() => exportPluginFolder(f.root, folder, 'zip'), /Remove private.*environment data/);
+  } finally { f.clean(); }
+});
 
 test('plugin bundles preserve each snapshot byte-for-byte, independent versions and root ZIP layout', () => {
   const f = fixture();

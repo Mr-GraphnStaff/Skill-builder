@@ -6,7 +6,7 @@ import { listLibraryReleases, summarizeFileChanges, restoreLibraryRelease } from
 import { connectedReviewReleases } from './guided-workspace.js';
 import type { WorkbenchJob, WorkbenchSnapshot } from './workbench-jobs.js';
 import { emitWorkbenchMetric, measureWorkbenchPhase, type WorkbenchMetric } from './workbench-metrics.js';
-import { preparePluginRelease, prepareGeminiRelease, verifyExportRelease, assessPluginDirectoryReadiness } from './plugin-release.js';
+import { preparePluginRelease, preparePluginFolderRelease, importPluginFolder, exportPluginFolder, prepareGeminiRelease, verifyExportRelease, assessPluginDirectoryReadiness } from './plugin-release.js';
 import { previewReleaseArchive, archiveReviewedReleases, restoreReleaseArchive, listReleaseArchives } from './release-archive.js';
 
 const onMetric = (metric: WorkbenchMetric) => emitWorkbenchMetric(value => parentPort?.postMessage({ type: 'metric', metric: value }), metric);
@@ -25,6 +25,9 @@ function perform(job: WorkbenchJob): unknown {
     case 'restoreArchive': return restoreReleaseArchive(job.root, job.id);
     case 'listArchives': return listReleaseArchives(job.root);
     case 'preparePlugin': return preparePluginRelease(job.root, job.options);
+    case 'preparePluginFolder': return preparePluginFolderRelease(job.root, job.folder);
+    case 'importPluginFolder': return importPluginFolder(job.root, job.folder);
+    case 'exportPluginFolder': return exportPluginFolder(job.root, job.folder, job.extension);
     case 'prepareGemini': return prepareGeminiRelease(job.root, job.directory);
     case 'verifyExport': return verifyExportRelease(job.directory);
     case 'pluginReadiness': return assessPluginDirectoryReadiness(job.directory);

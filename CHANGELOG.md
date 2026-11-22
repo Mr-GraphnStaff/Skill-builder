@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.7 — open and share existing Claude plugin folders
+
+- Choose **Open a plugin folder** to import an editable copy, save a ZIP for Claude or a `.plugin` archive for Cowork, or submit the folder to the connected GitHub repository for pull request review.
+- Preserve the original plugin manifest and component files, including commands, agents, hooks and binary assets.
+
+- Connect an existing repository containing its private SkillJetty workbench without moving drafts or repository files.
+- Confirm any local Git ignore rule needed to keep workbench files private. Refuse already-tracked workbench content and preserve the previous connection on cancellation or failure.
+- Keep the workbench itself and repositories inside the workbench unavailable as repository roots.
+- Apply workbench path boundaries and safe file capture to legacy skill packaging, installation and analysis.
+
 ## 0.15.6 — guided repository connection (public pre-release, 2026-11-09)
 
 - Connect repository and Change connection now guide you through the GitHub

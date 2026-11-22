@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { promisify } from 'node:util';
 import AdmZip from 'adm-zip';
 import * as vscode from 'vscode';
 import { prereleaseWorkspaceRoot, prereleaseDataDirectory } from './prerelease-workspace.js';
@@ -10,6 +8,10 @@ import { analyzeSkill, parseEvalSuite, runEvalPreflight, type SkillFile } from '
 import { activateWorkbench } from './workbench-view.js';
 import { activateGuidedWorkbench } from './guided-workbench.js';
 import { isManagedWorkbench } from './workbench-boundary.js';
+import { assertWorkbenchPath } from './workbench-boundary.js';
+import { captureSkillFiles, replaceSkillDirectory, readSkillAnalysisFiles } from './legacy-skill-files.js';
+import { SECRET_PATTERNS } from './secret-patterns.js';
+import { repositoryGit } from './repository-publisher.js';
 import { resolveExistingRepositoryWorkspace, type WorkspaceSelection } from './workspace-selection.js';
 
 const yaml = require('js-yaml') as {
@@ -17,7 +19,6 @@ const yaml = require('js-yaml') as {
   dump(value: unknown, options?: Record<string, unknown>): string;
 };
 
-const execFileAsync = promisify(execFile);
 
 type SkillSummary = {
   directoryName: string;
@@ -1446,7 +1447,9 @@ async function packageSkill(skill: SkillSummary): Promise<string | undefined> {
   await fs.mkdir(distDirectory, { recursive: true });
 
   const zip = new AdmZip();
-  zip.addLocalFolder(skill.skillPath, skill.directoryName);
+  for (const file of await captureSkillFiles(skill.skillPath)) {
+    zip.addFile(`${skill.directoryName}/${file.relativePath}`, file.bytes, '', file.mode);
+  }
   zip.writeZip(zipPath);
 
   return zipPath;
@@ -1573,6 +1576,11 @@ async function syncToClaudeCode(skill: SkillSummary): Promise<string | undefined
 
   const claudeCodeSkillsDirectory = getClaudeCodeSkillsDirectory(root);
   const targetPath = path.join(claudeCodeSkillsDirectory, skill.directoryName);
+  try { assertWorkbenchPath(root, targetPath); }
+  catch {
+    vscode.window.showErrorMessage('Outside-folder installation is unavailable. Choose a Claude Code skills directory inside your SkillJetty workbench.');
+    return undefined;
+  }
   const targetExists = await pathExists(targetPath);
 
   if (targetExists) {
@@ -1586,11 +1594,9 @@ async function syncToClaudeCode(skill: SkillSummary): Promise<string | undefined
       return undefined;
     }
 
-    await fs.rm(targetPath, { recursive: true, force: true });
   }
 
-  await fs.mkdir(claudeCodeSkillsDirectory, { recursive: true });
-  await fs.cp(skill.skillPath, targetPath, { recursive: true, force: true });
+  await replaceSkillDirectory(root, skill.skillPath, targetPath);
 
   return targetPath;
 }
@@ -2333,26 +2339,8 @@ async function analyzeSkillOnDisk(skill: SkillSummary) {
   return analyzeSkill(manifest, files, skill.directoryName);
 }
 
-async function collectAnalysisFiles(root: string, current = root): Promise<SkillFile[]> {
-  const collected: SkillFile[] = [];
-  const entries = await fs.readdir(current, { withFileTypes: true });
-  for (const entry of entries) {
-    const absolute = path.join(current, entry.name);
-    const relativePath = path.relative(root, absolute).replace(/\\/g, '/');
-    if (entry.isDirectory()) {
-      collected.push(...await collectAnalysisFiles(root, absolute));
-      continue;
-    }
-    if (!entry.isFile()) continue;
-    const stat = await fs.stat(absolute);
-    const extension = path.extname(entry.name).toLowerCase();
-    const textExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.toml', '.ini', '.env', '.js', '.mjs', '.cjs', '.ts', '.py', '.sh', '.ps1', '.csv', '.tsv']);
-    const content = stat.size <= 1024 * 1024 && textExtensions.has(extension)
-      ? await fs.readFile(absolute, 'utf8')
-      : undefined;
-    collected.push({ relativePath, size: stat.size, content });
-  }
-  return collected;
+async function collectAnalysisFiles(root: string): Promise<SkillFile[]> {
+  return readSkillAnalysisFiles(root);
 }
 
 async function collectSkillHealthFindings(skill: SkillSummary): Promise<SkillHealthFinding[]> {
@@ -2738,7 +2726,8 @@ function resolveSkillRelativePath(skill: SkillSummary, relativePath: string | un
     return undefined;
   }
 
-  return resolved;
+  try { return assertWorkbenchPath(root, resolved); }
+  catch { return undefined; }
 }
 
 function upsertWorkflowModuleCallouts(markdown: string, modules: WorkflowModuleSpec[]): string {
@@ -2794,21 +2783,12 @@ function extractRelativeSkillReferences(markdown: string): string[] {
 }
 
 async function findPotentialSecrets(skillPath: string): Promise<string[]> {
-  const files = await listTextFilesRecursively(skillPath);
   const hits: string[] = [];
-  const secretPatterns = [
-    /\b(?:api[_-]?key|token|password|secret)\s*[:=]\s*["']?[A-Za-z0-9_\-.]{8,}/i,
-    /\bsk-[A-Za-z0-9]{20,}\b/
-  ];
-
-  for (const file of files) {
-    const content = await readTextFileIfSmall(file);
-    if (!content) {
-      continue;
-    }
-
-    if (secretPatterns.some((pattern) => pattern.test(content))) {
-      hits.push(path.relative(skillPath, file).replace(/\\/g, '/'));
+  for (const file of await readSkillAnalysisFiles(skillPath)) {
+    const content = file.content;
+    if (content === undefined) continue;
+    if (SECRET_PATTERNS.some(([pattern]) => pattern.test(content))) {
+      hits.push(file.relativePath);
     }
   }
 
@@ -3101,7 +3081,7 @@ async function readConfiguredGitRemote(root: string): Promise<string | undefined
 
 async function listGitRemotes(root: string): Promise<GitRemoteSummary[]> {
   try {
-    const { stdout } = await execFileAsync('git', ['remote', '-v'], { cwd: root, encoding: 'utf8' });
+    const stdout = await repositoryGit(root, ['remote', '-v']);
     const remotes = new Map<string, GitRemoteSummary>();
     for (const line of String(stdout).split(/\r?\n/)) {
       const match = /^(\S+)\s+(.+?)\s+\((fetch|push)\)$/.exec(line.trim());

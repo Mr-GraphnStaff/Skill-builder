@@ -149,10 +149,10 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     selected ??= vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     return selected && !selected.split(/[\\/]/).some(part => part.toLowerCase() === '.codex') ? selected : homedir();
   };
-  const pick = async (kind: 'package' | 'folder' | 'file', initialPath?: string) => (await vscode.window.showOpenDialog({
-    title: kind === 'package' ? 'Open a .skill package' : kind === 'folder' ? 'Open a skill folder' : 'Add a supporting file',
+  const pick = async (kind: 'package' | 'folder' | 'pluginFolder' | 'file', initialPath?: string) => (await vscode.window.showOpenDialog({
+    title: kind === 'pluginFolder' ? 'Open a Claude plugin folder' : kind === 'package' ? 'Open a .skill package' : kind === 'folder' ? 'Open a skill folder' : 'Add a supporting file',
     defaultUri: vscode.Uri.file(await pickerRoot(initialPath)),
-    canSelectMany: false, canSelectFiles: kind !== 'folder', canSelectFolders: kind === 'folder',
+    canSelectMany: false, canSelectFiles: kind === 'package' || kind === 'file', canSelectFolders: kind === 'folder' || kind === 'pluginFolder',
     ...(kind === 'package' ? { filters: { 'Skill packages': ['skill'] } } : {})
   }))?.[0]?.fsPath;
 
@@ -170,7 +170,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
       }
       catch { localRepository = undefined; /* Never autosave an outside document. */ }
     }
-    const managedRoots = [path.join(root, 'skills'), ...(localRepository ? [localRepository] : [])];
+    const managedRoots = [path.join(root, 'skills'), path.join(root, 'plugin-drafts'), ...(localRepository ? [localRepository] : [])];
     for (const document of vscode.workspace.textDocuments) {
       const documentRoot = managedRoots.find(folder => {
         const relative = path.relative(folder, document.uri.fsPath);
@@ -217,7 +217,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         // Deliver feedback before synchronous local work can occupy this host.
         await new Promise<void>(resolve => setImmediate(resolve));
       }
-      if (['configureRepository', 'pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPackage', 'openPackagePath', 'openPlugin'].includes(message.action)) await saveExternalEdits();
+      if (['configureRepository', 'pullRepository', 'check', 'preparePublish', 'publish', 'savePackage', 'openRepositorySkill', 'openFolder', 'openPluginFolder', 'openPackage', 'openPackagePath', 'openPlugin'].includes(message.action)) await saveExternalEdits();
       if (panel !== activePanel || controller !== activeController) return;
       if (['publish', 'verifyRepository', 'pullRepository', 'openRepositorySkill', 'createRepository', 'connectRepository', 'connectGitHub', 'mergePullRequest', 'createPullRequest', 'requestReviewer'].includes(message.action) && entryGeneration !== configurationGeneration) {
         throw new Error('Settings changed while preparing this repository action. Your draft is preserved; review the current configuration before trying again.');
@@ -327,7 +327,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         await progress('Review the connection in the VS Code confirmation dialog.', true);
         const action = choice.clone ? 'Create local copy and connect' : 'Connect repository';
         return await vscode.window.showInformationMessage('Connect this repository?', { modal: true,
-          detail: `Workbench folder (drafts, builds and recovery):\n${choice.workbenchFolder}\n\nLocal repository (skills and ZIPs):\n${choice.localPath}\n\nRemote repository:\n${choice.repository}\n\n${choice.clone ? 'A new local copy will be downloaded into the displayed folder.' : 'The existing local repository will be connected without pulling or changing its files.'}\nYour existing drafts and earlier uploads stay where they are. Nothing is uploaded.` }, action) === action;
+          detail: `Workbench folder (drafts, builds and recovery):\n${choice.workbenchFolder}\n\nLocal repository (skills and ZIPs):\n${choice.localPath}\n\nRemote repository:\n${choice.repository}\n\n${choice.clone ? 'A new local copy will be downloaded into the displayed folder.' : 'The existing local repository will be connected without pulling or changing tracked files. If your private workbench is inside this repository, SkillJetty will check that it is untracked and add a local Git ignore rule if needed.'}\nYour existing drafts and earlier uploads stay where they are. Nothing is uploaded.` }, action) === action;
       },
       clone: async (repository, localPath) => {
         await progress('Creating your local repository copy…', false);
@@ -544,6 +544,30 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
           if (panel === createdPanel && controller === createdController) void createdPanel.webview.postMessage({ type: 'repositoryVerification', verification }).then(() => undefined, () => undefined);
         },
         pickPackage: () => pick('package'), pickFolder: initialPath => pick('folder', initialPath), pickFile: () => pick('file'),
+        pickPluginFolder: initialPath => pick('pluginFolder', initialPath),
+        choosePluginFolderAction: async () => (await vscode.window.showQuickPick([
+          { label: 'Import and edit', description: 'Open an editable copy in VS Code', action: 'edit' as const },
+          { label: 'Save ZIP for Claude', description: 'For manual upload in Claude', action: 'zip' as const },
+          { label: 'Save Cowork .plugin file', description: 'ZIP with the extension used by Cowork’s in-chat install preview', action: 'plugin' as const },
+          { label: 'Submit to GitHub for review', description: 'Upload to the connected repository and create or find a pull request', action: 'github' as const }
+        ], { title: 'What would you like to do with this plugin folder?' }))?.action,
+        confirmPluginSubmission: async (release, repository) => {
+          const confirm = 'Submit for review';
+          const files = release.manifest.files.filter(file => !file.path.endsWith('/')).length;
+          return await vscode.window.showWarningMessage(`Submit ${release.skillName} ${release.version} to GitHub?`, {
+            modal: true,
+            detail: `${repository}\nBranch: plugins/${release.skillName}/${release.version}\n${files} source files. Review the prepared source at ${path.join(release.directory, 'source')}.`
+          }, confirm) === confirm;
+        },
+        withPluginGitSession: submit => withGitSession(submit, true),
+        openPluginDraft: async folder => {
+          const manifest = assertWorkbenchPath(folder, path.join(folder, '.claude-plugin', 'plugin.json'));
+          await vscode.window.showTextDocument(vscode.Uri.file(manifest), { preview: false });
+          const reveal = 'Show plugin folder';
+          void vscode.window.showInformationMessage('Your editable plugin copy is ready.', reveal).then(choice => {
+            if (choice === reveal) return vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(folder));
+          });
+        },
         openLink: async url => { await vscode.env.openExternal(vscode.Uri.parse(url)); },
         revealFile: async file => { await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(file)); },
         onState: state => {
@@ -627,7 +651,7 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     handling = operation.then(() => undefined, () => undefined);
     return operation;
   };
-  for (const action of ['configureRepository', 'connectGitHub', 'verifyRepository', 'pullRepository', 'openRepositorySkill'] as const) {
+  for (const action of ['configureRepository', 'connectGitHub', 'verifyRepository', 'pullRepository', 'openRepositorySkill', 'openPluginFolder'] as const) {
     context.subscriptions.push(vscode.commands.registerCommand(`skillBuilder.${action}`, () => nativeAction(action)));
   }
   context.subscriptions.push(vscode.commands.registerCommand('skillBuilder.createRepository', async () => {

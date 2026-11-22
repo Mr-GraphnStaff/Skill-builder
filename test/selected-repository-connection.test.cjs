@@ -14,6 +14,87 @@ const remoteA = 'https://github.com/example/first.git';
 const remoteB = 'https://github.com/example/second.git';
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/i.test(key)));
 Object.assign(env, { GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' });
+function ancestorFixture(t) {
+  const base = fs.mkdtempSync(path.join(scratch, 'ancestor-pair-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const local = path.join(base, 'repository'); fs.mkdirSync(local);
+  git(local, 'init', '-b', 'main');
+  git(local, 'config', 'user.name', 'Connection Fixture');
+  git(local, 'config', 'user.email', 'connection@example.invalid');
+  git(local, 'remote', 'add', 'origin', remoteA);
+  fs.writeFileSync(path.join(local, 'README.md'), 'Existing repository content.\n');
+  git(local, 'add', 'README.md'); git(local, 'commit', '-m', 'Initial ancestor fixture');
+  const root = createWorkbench(path.join(local, '.skilljetty-prerelease'));
+  const sourceIgnore = path.join(local, '.gitignore');
+  fs.writeFileSync(sourceIgnore, '# Existing owner rules\nowner-cache/\n');
+  const exclude = path.join(local, '.git', 'info', 'exclude');
+  const original = publisher.resolveRepositoryDefaultBranch;
+  publisher.resolveRepositoryDefaultBranch = async () => 'main';
+  t.after(() => { publisher.resolveRepositoryDefaultBranch = original; });
+  return { base, root, local, sourceIgnore, exclude, file: path.join(root, '.skill-workbench', 'connection.json') };
+}
+
+test('an existing repository containing its private workbench connects without moving the active draft or tracking private files', async t => {
+  const f = ancestorFixture(t);
+  const controller = new GuidedWorkbenchController(f.root);
+  await controller.dispatch({ action: 'createSkill', payload: {
+    name: 'ancestor-preserved', description: 'Preserve local notes when connecting a repository.',
+    instructions: '# Preserve\nKeep all original instructions.'
+  } });
+  assert.equal(controller.state.error, undefined);
+  const skill = require('../out/skill-workbench.js').listWorkbenchSkills(f.root).find(item => item.id === controller.state.active.id);
+  assert(skill);
+  const draft = path.join(skill.sourcePath, 'SKILL.md'), draftBytes = fs.readFileSync(draft);
+  const unchangedFiles = [path.join(f.local, '.git', 'config'), path.join(f.local, '.git', 'HEAD'), path.join(f.local, 'README.md'), f.sourceIgnore];
+  const originals = unchangedFiles.map(file => fs.readFileSync(file));
+  const excludeBefore = fs.readFileSync(f.exclude);
+  await validateSelectedRepository(f.root, remoteA, f.local);
+  assert.deepEqual(fs.readFileSync(f.exclude), excludeBefore, 'validation must not add an ignore rule before confirmation');
+  assert.equal(fs.existsSync(f.file), false);
+  await controller.acceptRepositoryConnection(remoteA, f.local);
+  assert.equal(controller.state.error, undefined);
+  assert.equal(controller.state.connection.localPath, f.local);
+  assert.equal(controller.state.connection.repository, remoteA);
+  assert.equal(controller.state.active.id, skill.id);
+  assert.deepEqual(fs.readFileSync(draft), draftBytes);
+  unchangedFiles.forEach((file, index) => assert.deepEqual(fs.readFileSync(file), originals[index]));
+  const exclusion = fs.readFileSync(f.exclude);
+  assert.deepEqual(exclusion.subarray(0, excludeBefore.length), excludeBefore, 'existing local ignore rules must be retained');
+  assert.match(git(f.local, 'check-ignore', '-v', '--no-index', '--', path.relative(f.local, draft)), /info[\\/]exclude/);
+  assert.equal(git(f.local, 'ls-files', '--', path.relative(f.local, f.root)), '', 'no private workbench file may become tracked');
+  assert.equal(workspace.getWorkspaceConnection(f.root).localPath, f.local);
+});
+
+test('canceling confirmation for an ancestor repository changes neither local ignore rules nor the previous connection', async t => {
+  const f = ancestorFixture(t), excludeBefore = fs.readFileSync(f.exclude);
+  let confirmations = 0, activations = 0;
+  const before = fs.existsSync(f.file) ? fs.readFileSync(f.file) : undefined;
+  const connected = await require('../out/repository-connection-flow.js').connectRepositoryFlow({
+    workbenchFolder: f.root, assertCurrent() {},
+    inputRepository: async () => remoteA, chooseLocalMode: async () => 'existing', chooseFolder: async () => f.local,
+    validateExisting: (repository, localPath) => validateSelectedRepository(f.root, repository, localPath),
+    confirm: async choice => { confirmations++; assert.equal(choice.localPath, f.local); assert.equal(choice.clone, false); return false; },
+    clone: async () => { throw new Error('unexpected clone'); },
+    activate: async () => { activations++; throw new Error('unexpected activation'); }
+  });
+  assert.equal(connected, false); assert.equal(confirmations, 1); assert.equal(activations, 0);
+  assert.deepEqual(fs.readFileSync(f.exclude), excludeBefore);
+  assert.equal(fs.existsSync(f.file), !!before);
+  if (before) assert.deepEqual(fs.readFileSync(f.file), before);
+});
+
+test('tracked private workbench files block ancestor connection without untracking or rewriting user files', async t => {
+  const f = ancestorFixture(t), privateFile = path.join(f.root, 'private-record.txt');
+  fs.writeFileSync(privateFile, 'Private fixture content.\n');
+  git(f.local, 'add', '--', path.relative(f.local, privateFile));
+  const index = fs.readFileSync(path.join(f.local, '.git', 'index')), excludeBefore = fs.readFileSync(f.exclude);
+  await assert.rejects(validateSelectedRepository(f.root, remoteA, f.local), /tracked|private|workbench/i);
+  await assert.rejects(workspace.connectWorkspaceRepository(f.root, remoteA, { localPath: f.local, separateRepository: true }), /tracked|private|workbench/i);
+  assert.deepEqual(fs.readFileSync(path.join(f.local, '.git', 'index')), index);
+  assert.deepEqual(fs.readFileSync(f.exclude), excludeBefore);
+  assert.equal(fs.readFileSync(privateFile, 'utf8'), 'Private fixture content.\n');
+  assert.equal(fs.existsSync(f.file), false);
+});
 
 function git(root, ...args) {
   return cp.execFileSync('git', ['--no-optional-locks', '-c', `safe.directory=${root.replaceAll('\\', '/')}`, ...args],

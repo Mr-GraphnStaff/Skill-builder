@@ -43,13 +43,22 @@ or folder. Imported originals stay unchanged. Earlier edits and saved versions
 remain recoverable. Failed checks, canceled selections and failed uploads keep
 your work; the result identifies any incomplete action.
 
+Use **Open a plugin folder** and select the folder containing
+`.claude-plugin/plugin.json`. You can open an editable copy, save a ZIP for
+manual Claude upload, save a Cowork `.plugin` archive, or submit the complete
+plugin to the connected GitHub repository for review.
+
 The header shows the **Workbench folder**, **Local repository** and **Remote repository**.
 Choose **Connect repository** or **Change connection**, enter the GitHub address,
 then choose an existing local Git copy or **Create a local copy**. Review the exact
 folders and remote before connecting. Your workbench holds drafts, builds and
 recovery; the separate local repository holds your shared skills and ZIPs.
-Canceling or failing setup keeps the previous connection. Connecting an existing
-copy does not pull or change its files. **Sync repository** explicitly downloads
+Canceling or failing setup keeps the previous connection.
+An existing repository may contain its private workbench as a child folder.
+SkillJetty checks that those private files are untracked and confirms any local
+Git ignore rule needed before connecting. Your files stay where they are.
+The workbench itself cannot be the repository root.
+Connecting an existing copy does not pull or change its tracked files. **Sync repository** explicitly downloads
 updates with Git's preservation checks. Uploading is a separate action that opens
 a review branch and pull request.
 
@@ -60,7 +69,8 @@ your intended application.
 
 ## Release and help
 
-The guided repository connection fix is published in preview **0.15.6** and stable **0.12.3**. Check the
+Plugin folder import and export are included in preview **0.15.7**.
+Check the
 [public channel status](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels)
 for verified availability. Stable keeps its established interface. Both channels
 use the same listing and command; switching versions does not migrate your data.

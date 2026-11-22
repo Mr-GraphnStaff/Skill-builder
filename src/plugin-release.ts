@@ -6,6 +6,7 @@ import { isUtf8 } from 'node:buffer';
 import AdmZip from 'adm-zip';
 import { assertWorkbenchPath } from './workbench-boundary.js';
 import { verifySkillRelease, readSkillReleaseMetadata, validateWorkbenchSkill, type FileDigest, type WorkbenchRelease, type ReleaseManifest } from './skill-workbench.js';
+import { SECRET_PATTERNS } from './secret-patterns.js';
 
 const MAX_FILES = 5000, MAX_TOTAL = 128 * 1024 * 1024, MAX_ARCHIVE = 64 * 1024 * 1024;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -13,7 +14,7 @@ type CapturedFile = { path: string; bytes: Buffer };
 export type PluginMember = { name: string; version: string; files: FileDigest[]; sourceSha256: string; packageSha256: string };
 type DirectoryMetadata = { icon?: string; privacyPolicyUrl?: string; documentationUrl?: string; supportUrl?: string; termsOfServiceUrl?: string };
 export type PluginDescriptor = DirectoryMetadata & { name: string; description: string; version: string; author?: { name: string }; repository?: string; license?: string };
-export type PluginManifest = ReleaseManifest & { kind: 'plugin'; format: 1; plugin: PluginDescriptor; members: PluginMember[]; marketplaceSha256: string };
+export type PluginManifest = ReleaseManifest & { kind: 'plugin'; format: 1 | 2; plugin: PluginDescriptor; members: PluginMember[]; marketplaceSha256: string };
 export type PluginRelease = WorkbenchRelease & { manifest: PluginManifest };
 export type PluginReleaseOptions = DirectoryMetadata & { name: string; description: string; version: string; author?: string; repository?: string; license?: string; members: Array<{ directory: string }>; changelog: string };
 export type DirectoryReadinessCheck = { code: string; result: 'block' | 'hold' | 'warning' | 'unknown' | 'pass'; message: string; paths?: string[] };
@@ -52,24 +53,49 @@ function safeRelative(value: string): void {
   const parts = value.replace(/\/$/, '').split('/');
   if (parts.length > 64 || parts.some(part => !part || part === '.' || part === '..' || /[. ]$/.test(part) || /[<>"|?*]/.test(part) || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part))) throw new Error('Unsafe export path.');
 }
-function inventory(root: string): CapturedFile[] {
+function inventory(root: string, folderMode?: 'selected' | 'saved'): CapturedFile[] {
   const files: CapturedFile[] = []; let total = 0;
   const visit = (folder: string) => {
     assertWorkbenchPath(root, folder);
     for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      if (folderMode === 'selected' && folder === root && entry.name.toLowerCase() === '.git') continue;
       const target = assertWorkbenchPath(root, path.join(folder, entry.name));
       const relative = path.relative(root, target).split(path.sep).join('/'); safeRelative(relative);
+      if (folderMode && /(?:^|\/)(?:\.git|\.skilljetty-workbench\.json|\.skill-workbench|\.skilljetty-prerelease|\.skilljetty-beta|\.env(?:\.(?!example(?:\/|$)|sample(?:\/|$)|template(?:\/|$))[^/]+)?)(?:\/|$)/i.test(relative)) {
+        throw new Error(`Remove private workbench, Git or environment data before opening this plugin: ${relative}`);
+      }
       const stat = fs.lstatSync(target);
-      if (files.length >= MAX_FILES || stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) throw new Error('Export contains too many entries, links or special files.');
+      if (files.length >= MAX_FILES || stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory()) || (folderMode && stat.isFile() && stat.nlink > 1)) throw new Error('Export contains too many entries, links or special files.');
       if (stat.isDirectory()) { files.push({ path: relative + '/', bytes: Buffer.alloc(0) }); visit(target); }
       else {
         total += stat.size; if (total > MAX_TOTAL) throw new Error('Export exceeds SkillJetty packaging size limits.');
-        const bytes = fs.readFileSync(target); if (bytes.length !== stat.size) throw new Error('Export changed during capture.');
+        const bytes = folderMode ? readSelectedFile(root, target, stat) : fs.readFileSync(target);
+        if (bytes.length !== stat.size) throw new Error('Export changed during capture.');
         files.push({ path: relative, bytes });
       }
     }
   };
   visit(root); return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+function readSelectedFile(root: string, file: string, expected: fs.Stats): Buffer {
+  if (expected.size > 16 * 1024 * 1024) throw new Error('A plugin file exceeds the 16 MiB packaging limit.');
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+  try {
+    const current = fs.fstatSync(fd);
+    assertWorkbenchPath(root, file);
+    if (!current.isFile() || current.nlink > 1 || current.ino !== expected.ino || current.dev !== expected.dev
+      || current.size !== expected.size || current.mtimeMs !== expected.mtimeMs) throw new Error('Plugin file changed during capture.');
+    const bytes = Buffer.alloc(current.size);
+    let read = 0;
+    while (read < bytes.length) {
+      const count = fs.readSync(fd, bytes, read, bytes.length - read, null);
+      if (!count) throw new Error('Plugin file changed during capture.');
+      read += count;
+    }
+    const after = fs.fstatSync(fd);
+    if (after.size !== current.size || after.mtimeMs !== current.mtimeMs) throw new Error('Plugin file changed during capture.');
+    return bytes;
+  } finally { fs.closeSync(fd); }
 }
 const digests = (files: CapturedFile[]): FileDigest[] => files.map(file => ({ path: file.path, size: file.bytes.length, sha256: hash(file.bytes) }));
 function same(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b); }
@@ -166,8 +192,12 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
     if (!iconFile || !/\.(?:png|jpe?g|gif|webp|svg)$/i.test(iconFile.path) || !recognizedMedia(iconFile)) throw new Error('Plugin icon must refer to an existing bundled PNG, JPEG, GIF, WebP or SVG image with a recognized file signature. The selected files were preserved.');
   }
   if (files.length > MAX_FILES || files.reduce((sum, file) => sum + file.bytes.length, 0) > MAX_TOTAL) throw new Error('Plugin bundle exceeds SkillJetty packaging limits.');
+  return savePluginRelease(workspaceRoot, directory, plugin, members, files, changelog, marketplace, 1);
+}
+
+function savePluginRelease(workspaceRoot: string, directory: string, plugin: PluginDescriptor, members: PluginMember[], files: CapturedFile[], changelog: Buffer, marketplace: Buffer, format: PluginManifest['format']): PluginRelease {
   const packed = zipBytes(files);
-  const manifest: PluginManifest = { kind: 'plugin', format: 1, plugin, members, skillName: plugin.name, version: plugin.version, createdAt: new Date().toISOString(), files: digests(files), packageSha256: hash(packed), changelogSha256: hash(changelog), marketplaceSha256: hash(marketplace) };
+  const manifest: PluginManifest = { kind: 'plugin', format, plugin, members, skillName: plugin.name, version: plugin.version, createdAt: new Date().toISOString(), files: digests(files), packageSha256: hash(packed), changelogSha256: hash(changelog), marketplaceSha256: hash(marketplace) };
   const parent = assertWorkbenchPath(workspaceRoot, path.dirname(directory)); fs.mkdirSync(parent, { recursive: true });
   const staging = assertWorkbenchPath(workspaceRoot, path.join(parent, `.preparing-${randomUUID()}`)); fs.mkdirSync(staging);
   try {
@@ -179,6 +209,85 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
     assertWorkbenchPath(workspaceRoot, directory); finalize(staging, directory);
   } finally { if (fs.existsSync(staging)) { assertWorkbenchPath(workspaceRoot, staging); fs.rmSync(staging, { recursive: true }); } }
   return verifyPluginRelease(directory);
+}
+
+function folderPlugin(files: CapturedFile[]): PluginDescriptor {
+  const manifest = files.find(file => file.path === '.claude-plugin/plugin.json');
+  if (!manifest || !isUtf8(manifest.bytes)) throw new Error('Select the plugin folder containing .claude-plugin/plugin.json.');
+  let metadata: Record<string, unknown>;
+  try {
+    const raw = JSON.parse(manifest.bytes.toString('utf8').replace(/^\uFEFF/, ''));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error();
+    metadata = raw;
+  } catch { throw new Error('Plugin manifest must be a valid JSON object.'); }
+  const name = identifier(metadata.name);
+  return descriptor({ name, description: typeof metadata.description === 'string' && metadata.description.trim() ? metadata.description : name,
+    version: version(metadata.version ?? '1.0.0'), members: [], changelog: 'verification' });
+}
+
+function capturePluginFolder(folder: string): { plugin: PluginDescriptor; files: CapturedFile[] } {
+  if (!path.isAbsolute(folder)) throw new Error('Choose a local plugin folder.');
+  const files = inventory(path.resolve(folder), 'selected');
+  const distinctPaths = new Set(files.map(file => file.path.replace(/\/$/, '').toLowerCase()));
+  if (distinctPaths.size !== files.length) throw new Error('Plugin folder contains paths that differ only by case.');
+  return { plugin: folderPlugin(files), files };
+}
+
+export function importPluginFolder(workspaceRoot: string, folder: string): { directory: string; name: string } {
+  const { plugin, files } = capturePluginFolder(folder);
+  const parent = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-drafts', plugin.name));
+  const selected = path.resolve(folder);
+  if (path.dirname(selected) === parent) return { directory: selected, name: plugin.name };
+  fs.mkdirSync(parent, { recursive: true });
+  const directory = path.join(parent, randomUUID());
+  const staging = assertWorkbenchPath(workspaceRoot, path.join(parent, `.importing-${randomUUID()}`));
+  fs.mkdirSync(staging);
+  try {
+    writeFiles(staging, files);
+    finalize(staging, assertWorkbenchPath(workspaceRoot, directory));
+  } finally { if (fs.existsSync(staging)) fs.rmSync(assertWorkbenchPath(workspaceRoot, staging), { recursive: true }); }
+  return { directory, name: plugin.name };
+}
+
+export function preparePluginFolderRelease(workspaceRoot: string, folder: string): PluginRelease {
+  const { plugin, files } = capturePluginFolder(folder);
+  assertShareablePluginFiles(files);
+  const directory = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-releases', plugin.name, plugin.version));
+  if (fs.existsSync(directory)) {
+    const existing = verifyPluginRelease(directory);
+    if (!same(existing.manifest.files, digests(files))) throw new Error('Plugin version already exists with different content. Update the version in plugin.json and try again.');
+    return existing;
+  }
+  const changelog = Buffer.from(`Imported ${plugin.name} ${plugin.version} from a local plugin folder.\n`);
+  const marketplace = json({ name: plugin.name, source: `./Plugins/${plugin.name}/source`, description: plugin.description });
+  return savePluginRelease(workspaceRoot, directory, plugin, [], files, changelog, marketplace, 2);
+}
+
+function assertShareablePluginFiles(files: CapturedFile[]): void {
+  for (const file of files) {
+    if (!file.bytes.length || !isUtf8(file.bytes)) continue;
+    const content = file.bytes.toString('utf8');
+    if (SECRET_PATTERNS.some(([pattern, code]) => code !== 'possible-secret' && pattern.test(content))
+      || /https?:\/\/[^\s"'<>/@]+:[^\s"'<>/@]+@/i.test(content)) {
+      throw new Error(`Possible credential in ${file.path}. Remove it before packaging this plugin for sharing.`);
+    }
+  }
+}
+
+export function exportPluginFolder(workspaceRoot: string, folder: string, extension: 'zip' | 'plugin'): { name: string; version: string; packagePath: string } {
+  if (extension !== 'zip' && extension !== 'plugin') throw new Error('Choose ZIP or Cowork .plugin format.');
+  const { plugin, files } = capturePluginFolder(folder);
+  assertShareablePluginFiles(files);
+  const packed = zipBytes(files);
+  const directory = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-exports', randomUUID()));
+  const packagePath = assertWorkbenchPath(workspaceRoot, path.join(directory, `${plugin.name}.${extension}`));
+  fs.mkdirSync(directory, { recursive: true });
+  try { fs.writeFileSync(packagePath, packed, { flag: 'wx' }); }
+  catch (error) {
+    fs.rmSync(assertWorkbenchPath(workspaceRoot, directory), { recursive: true });
+    throw error;
+  }
+  return { name: plugin.name, version: plugin.version, packagePath };
 }
 export function readPluginReleaseMetadata(directory: string, activeDirectory = false, maxMetadataBytes?: number): PluginRelease {
   directory = path.resolve(directory); assertWorkbenchPath(directory, directory);
@@ -204,7 +313,8 @@ export function readPluginReleaseMetadata(directory: string, activeDirectory = f
     } finally { fs.closeSync(fd); }
   }
   const manifest = JSON.parse(metadata) as PluginManifest;
-  if (manifest.kind !== 'plugin' || manifest.format !== 1 || !manifest.plugin || !Array.isArray(manifest.members) || !manifest.members.length || !Array.isArray(manifest.files)) throw new Error('Invalid plugin release receipt.');
+  if (manifest.kind !== 'plugin' || ![1, 2].includes(manifest.format) || !manifest.plugin || !Array.isArray(manifest.members) || !Array.isArray(manifest.files)
+    || (manifest.format === 1 ? !manifest.members.length : manifest.members.length !== 0)) throw new Error('Invalid plugin release receipt.');
   identifier(manifest.skillName); version(manifest.version);
   const matchesDirectory = activeDirectory
     ? path.basename(directory) === manifest.skillName && path.basename(path.dirname(directory)) === 'Plugins'
@@ -216,7 +326,23 @@ export function readPluginReleaseMetadata(directory: string, activeDirectory = f
 export function verifyPluginRelease(directory: string, activeDirectory = false): PluginRelease {
   const release = readPluginReleaseMetadata(directory, activeDirectory), manifest = release.manifest;
   const source = assertWorkbenchPath(directory, path.join(directory, 'source'));
-  const actual = inventory(source); if (!same(digests(actual), manifest.files)) throw new Error('Plugin source inventory does not match its receipt.');
+  const actual = inventory(source, manifest.format === 2 ? 'saved' : undefined);
+  let expected = manifest.files;
+  if (activeDirectory && manifest.format === 2) {
+    // Git stores files only. Empty directories remain in the verified ZIP.
+    const actualPaths = new Set(actual.map(file => file.path));
+    expected = expected.filter(file => !file.path.endsWith('/') || actualPaths.has(file.path)
+      || manifest.files.some(child => !child.path.endsWith('/') && child.path.startsWith(file.path)));
+  }
+  if (!same(digests(actual), expected)) throw new Error('Plugin source inventory does not match its receipt.');
+  if (manifest.format === 2) {
+    if (!same(folderPlugin(actual), manifest.plugin)) throw new Error('Plugin manifest does not match its receipt.');
+    assertShareablePluginFiles(actual);
+    const marketplace = json({ name: manifest.skillName, source: `./Plugins/${manifest.skillName}/source`, description: manifest.plugin.description });
+    if (manifest.marketplaceSha256 !== hash(marketplace)) throw new Error('Plugin marketplace entry does not match its receipt.');
+    verifyPluginArtifacts(release);
+    return release;
+  }
   const plugin = descriptor({ ...manifest.plugin, author: manifest.plugin.author?.name, members: [], changelog: 'verification' });
   if (!same(plugin, manifest.plugin) || !same(JSON.parse(fs.readFileSync(path.join(source, '.claude-plugin', 'plugin.json'), 'utf8')), plugin)) throw new Error('Plugin manifest does not match its receipt.');
   if (plugin.icon) {
@@ -232,6 +358,11 @@ export function verifyPluginRelease(directory: string, activeDirectory = false):
   }
   const allowedRoot = new Set(['.claude-plugin', 'skills', 'README.md', 'README', 'LICENSE']);
   if (!same(fs.readdirSync(path.join(source, 'skills')).sort(), [...memberNames].sort()) || fs.readdirSync(source).some(name => !allowedRoot.has(name))) throw new Error('Unexpected plugin component.');
+  verifyPluginArtifacts(release);
+  return release;
+}
+function verifyPluginArtifacts(release: PluginRelease): void {
+  const { directory, manifest } = release;
   if (fs.statSync(release.packagePath).size > MAX_ARCHIVE) throw new Error('Plugin archive exceeds size limits.');
   const packed = fs.readFileSync(release.packagePath);
   if (hash(packed) !== manifest.packageSha256) throw new Error('Plugin package hash mismatch.'); verifyZip(packed, manifest.files);
@@ -240,7 +371,6 @@ export function verifyPluginRelease(directory: string, activeDirectory = false):
   }
   const expected = ['source', 'release.json', 'CHANGELOG.md', 'marketplace-entry.json', path.basename(release.packagePath)].sort();
   if (!same(fs.readdirSync(directory).sort(), expected)) throw new Error('Unexpected file in plugin release.');
-  return release;
 }
 export function readExportReleaseMetadata(directory: string): WorkbenchRelease {
   const file = assertWorkbenchPath(directory, path.join(directory, 'release.json'));

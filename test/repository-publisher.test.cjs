@@ -6,7 +6,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { prepareRepositoryPublish, pushPreparedRelease, disposePublishPreview, createGitHubRepository, runPublisherProcess } = require('../out/repository-publisher.js');
 const { registerSkillFolder, prepareSkillRelease } = require('../out/skill-workbench.js');
-const { preparePluginRelease } = require('../out/plugin-release.js');
+const { preparePluginRelease, preparePluginFolderRelease, verifyPluginRelease } = require('../out/plugin-release.js');
 
 function git(root, ...args) {
   return execFileSync('git', ['-c', 'protocol.ext.allow=never', ...args], { cwd: root, encoding: 'utf8', windowsHide: true });
@@ -54,6 +54,33 @@ test('publishes a plugin as a complete versioned plugin tree without changing po
     assert.match(tree, /Plugins\/team-bundle\/source\/skills\/sample\/SKILL\.md/);
     assert.match(tree, /team-bundle-2\.0\.0\.zip/);
     assert.doesNotMatch(tree, /PRIVATE|STAGED/);
+  } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('publishes an existing plugin folder including its commands and reopens the active Git snapshot', async () => {
+  const f = fixture(); let preview;
+  try {
+    const folder = path.join(f.root, 'source-plugin');
+    fs.mkdirSync(path.join(folder, '.claude-plugin'), { recursive: true });
+    fs.mkdirSync(path.join(folder, 'commands'));
+    fs.mkdirSync(path.join(folder, 'empty'));
+    const manifest = '{ "name": "source-plugin", "version": "1.0.0", "commands": "./commands/" }\n';
+    fs.writeFileSync(path.join(folder, '.claude-plugin', 'plugin.json'), manifest);
+    fs.writeFileSync(path.join(folder, 'commands', 'status.md'), '# Report status\n');
+    const release = preparePluginFolderRelease(f.caller, folder);
+    preview = await prepareRepositoryPublish(release.directory, f.remote, 'main', undefined, false, { workspaceRoot: f.caller });
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const uploaded = await pushPreparedRelease(preview);
+    const tree = 'Plugins/source-plugin/source';
+    assert.equal(git(f.remote, 'show', `${uploaded.commit}:${tree}/.claude-plugin/plugin.json`), manifest);
+    assert.equal(git(f.remote, 'show', `${uploaded.commit}:${tree}/commands/status.md`), '# Report status\n');
+    // Match the publisher checkout's byte-preserving settings on Windows.
+    git(f.target, 'config', 'core.autocrlf', 'false');
+    git(f.target, 'fetch', f.remote, uploaded.branch);
+    git(f.target, 'checkout', '--detach', uploaded.commit);
+    const active = path.join(f.target, 'Plugins', 'source-plugin');
+    assert.equal(verifyPluginRelease(active, true).manifest.format, 2);
+    assert.equal(fs.existsSync(path.join(active, 'source', 'empty')), false);
   } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

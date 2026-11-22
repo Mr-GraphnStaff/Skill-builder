@@ -142,7 +142,7 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
     hint: plugin ? 'A plugin brings skills together. Choose your first skill below; add more when you build.' : 'Create something new, continue your work, or open a skill you already have.',
     html: `<div class="home-actions">${plugin ? secondary('showCreate', 'Write a new skill', 'data-intent="plugin"') : `${secondary('showCreate', 'New skill', 'aria-describedby="create-choice-help"')}${secondary('showPlugin', 'New plugin', 'aria-describedby="plugin-choice-help"')}`}<span id="create-choice-help" class="visually-hidden">Write instructions for an AI assistant.</span><span id="plugin-choice-help" class="visually-hidden">Bundle skills into a Claude plugin.</span>${state.connection && !state.configurationError ? secondary('checkPullRequests', 'GitHub uploads & reviews') : ''}</div>
       ${savedWork(state)}
-      <section class="card import-card"><h2>Open existing work</h2><div class="button-row">${repositorySource ? secondary('openRepositorySkill', 'Open from your project', 'id="open-repository-skill"') : ''}${secondary('openPackage', 'Open a skill file')}${secondary('openFolder', 'Open a folder')}</div><p class="hint">SkillJetty opens an editable copy. Your originals stay unchanged.</p>
+      <section class="card import-card"><h2>Open existing work</h2><div class="button-row">${repositorySource ? secondary('openRepositorySkill', 'Open from your project', 'id="open-repository-skill"') : ''}${secondary('openPackage', 'Open a skill file')}${secondary('openFolder', 'Open a folder')}${secondary('openPluginFolder', 'Open a plugin folder')}</div><p class="hint">SkillJetty opens an editable copy. Your originals stay unchanged.</p>
       <form id="package-path-form" action="#" method="post" data-form-action="openPackagePath" class="path-form"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Open a file by path</legend>${field('packagePath', 'Or paste a skill file path', state.form?.path ?? '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"')}<button type="submit" class="secondary">Open path</button></fieldset></form></section>
       ${plugin ? `<div class="button-row">${secondary('showSkillStart', 'Return to your project')}</div>` : archiveManagement(state)}`,
     primary: undefined
@@ -511,7 +511,7 @@ const script = `
   }
   function actionMessage(action) {
     return ({ ready: 'Opening your workbench…', createWorkbench: 'Requesting a folder for a new workbench…', openWorkbenchFolder: 'Requesting the existing-workbench folder chooser…', refresh: 'Refreshing your saved work…', loadSkills: 'Loading and checking saved skills…', unloadSkills: 'Clearing the loaded skills list…', openPackagePath: 'Opening and checking the selected skill package…', chooseWorkspace: 'Choose a folder for your beta work…',
-      openPackage: 'Choose a skill package to open…', openFolder: 'Choose a skill folder to open…', createSkill: 'Creating your draft…',
+      openPackage: 'Choose a skill package to open…', openFolder: 'Choose a skill folder to open…', openPluginFolder: 'Choose a Claude plugin folder to open…', createSkill: 'Creating your draft…',
       resume: 'Opening your draft…', restoreVersion: 'Preparing a draft from the saved release…', openFile: 'Opening the selected file…',
       addFile: 'Choose a supporting file to add…', createFile: 'Creating the new file…', reloadFile: 'Loading the saved file…',
       refreshHistory: 'Loading earlier edits…', restoreEdit: 'Restoring the selected edit…', check: 'Running a structural sanity check…',
@@ -587,7 +587,7 @@ const script = `
       document.getElementById('save-status').textContent = 'Saving locally…';
     } else {
       lockActions(true);
-      beginActivity(actionMessage(action), ['setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'addFile', 'connectGitHub'].includes(action));
+      beginActivity(actionMessage(action), ['setRepositoryFolder', 'openRepositorySkill', 'chooseWorkspace', 'openPackage', 'openFolder', 'openPluginFolder', 'addFile', 'connectGitHub'].includes(action));
       if (moveToStatus) focusActivity();
       if (action === 'startAnother') { saved = {}; vscode.setState(saved); }
     }

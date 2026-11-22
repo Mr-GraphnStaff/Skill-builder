@@ -22,6 +22,9 @@ The folder shown as **Workbench folder — local write boundary** is the root fo
 | `skills/` | Editable skill drafts, including instructions and supporting files | Create and edit skills in the workbench. Imports become copies here. |
 | `repositories/` | Preserved local copies from older workbench setups | Earlier connections stay intact. New connections let you choose a separate local repository. |
 | `releases/` | Saved version packages, source snapshots and release notes | Use these packages for manual sharing or continue from a saved version. Preparing one does not upload it. |
+| `plugin-drafts/` | Editable copies of Claude plugin folders | Open the copied manifest and edit the files in VS Code. |
+| `plugin-exports/` | Claude ZIP and Cowork `.plugin` archives | Use ZIP for manual upload in Claude. |
+| `plugin-releases/` | Versioned plugin snapshots and GitHub submission receipts | Review the saved source and track its pull request. |
 | `scratch/` | Temporary import and isolated Git preparation files | Leave this for SkillJetty; do not put your only copy of a file here. |
 | `recovery/` | Earlier edits, completed draft archives and recovery copies | Keep it with your workbench. Inspect recovery evidence before deleting files. |
 | `logs/` | Local performance diagnostics | Use these when investigating a problem. These records are separate from skill packages. |
@@ -33,7 +36,7 @@ The root also contains `README.md` and the `.skilljetty-workbench.json` setup ma
 
 **Workbench → local repository → remote repository** is an explicit connection. It is independent of whichever project happens to be open in VS Code.
 
-Choose **Connect repository** or **Change connection**. Enter a GitHub HTTPS URL such as `https://github.com/your-org/skills.git` or `your-org/skills`. Then select an existing local Git repository, or choose **Create a local copy** and its parent folder. Review the exact destination before SkillJetty downloads anything. The new local repository is separate from the workbench. VS Code handles GitHub sign-in; no credentials belong in repository addresses.
+Choose **Connect repository** or **Change connection**. Enter a GitHub HTTPS URL such as `https://github.com/your-org/skills.git` or `your-org/skills`. Then select an existing local Git repository, or choose **Create a local copy** and its parent folder. Review the exact destination before SkillJetty downloads anything. The repository and workbench have distinct roots. An existing repository may contain its private workbench as a child folder. SkillJetty checks that no workbench files are tracked and confirms any needed local Git ignore rule before connecting; existing files stay in place. The workbench itself, or a folder inside it, cannot be selected as the local repository. VS Code handles GitHub sign-in; no credentials belong in repository addresses.
 
 Configuration shows four distinct things:
 
@@ -45,6 +48,8 @@ Configuration shows four distinct things:
 The guided flow saves the complete verified pair together; older URL/path settings do not override it. Connecting an existing copy does not pull or modify its files. Canceling or failing setup preserves the previous connection. Use **Sync repository** when you want to pull updates. Before uploading, review the sharing summary. Existing drafts, packages and historical upload receipts stay in their original workbench when you change repositories.
 
 ## Work elsewhere without redirecting writes
+
+Choose **Open a plugin folder** and select the folder containing `.claude-plugin/plugin.json`. Choose **Import and edit** to open a local copy, **Save ZIP for Claude** to prepare a manual upload, or **Submit to GitHub for review** to send the folder to the connected repository. **Save Cowork .plugin file** writes the same archive format with Cowork’s in-chat install extension.
 
 You can choose a skill folder or package elsewhere to import it. SkillJetty reads that source and creates a local draft copy; subsequent editing uses the workbench copy. Opening another VS Code project does not authorize SkillJetty to modify its repository.
 

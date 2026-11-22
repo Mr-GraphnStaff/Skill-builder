@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 export const WORKBENCH_MARKER = '.skilljetty-workbench.json';
 const recognized = new Set<string>();
@@ -22,9 +23,41 @@ export function validateSeparateRepositoryPath(root: string, localPath: string):
   if (!path.isAbsolute(localPath)) throw new Error('Choose an absolute local repository folder.');
   const selected = assertWorkbenchPath(localPath, localPath), workbench = path.resolve(root);
   const inside = (base: string, target: string) => { const rel = path.relative(base, target); return !rel || rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel); };
-  if (inside(selected, workbench) || inside(workbench, selected)) throw new Error('Choose a local repository separate from the workbench folder. Your workbench is for drafts and background files.');
+  if (inside(workbench, selected)) throw new Error('Choose a local repository separate from the workbench folder. Your workbench is for drafts and background files.');
   if (selected.split(/[\\/]/).some(part => ['.git', '.codex', '.skill-workbench', '.skilljetty-prerelease', '.skilljetty-beta'].includes(part.toLowerCase()))) throw new Error('Choose a visible local repository outside private application storage.');
   return selected;
+}
+
+/** A repository may contain its private workbench, but must never track it. */
+export function protectNestedWorkbench(root: string, localPath: string, mode: 'inspect' | 'confirm' | 'connected' = 'inspect'): void {
+  const selected = validateSeparateRepositoryPath(root, localPath);
+  const relative = path.relative(selected, path.resolve(root));
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return;
+  assertWorkbenchPath(selected, root);
+  assertWorkbenchGitMetadata(selected, selected, false, true);
+  const run = (args: string[]): string => execFileSync('git', ['--no-optional-locks', ...(args[0] === 'ls-files' ? ['--literal-pathspecs'] : []), '-c', 'core.fsmonitor=false', '-c', `safe.directory=${selected.replace(/\\/g, '/')}`, ...args],
+    { cwd: selected, env: workbenchGitEnvironment(root), windowsHide: true, encoding: 'utf8', timeout: 30_000, maxBuffer: 2 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+  const untracked = () => {
+    if (run(['ls-files', '-z', '--', relative])) throw new Error('Private workbench files are tracked by the selected repository. Preserve and remove them from tracking yourself before connecting; SkillJetty did not change the index.');
+  };
+  const ignored = () => {
+    try { run(['check-ignore', '--quiet', '--no-index', '--', relative.split(path.sep).join('/') + '/']); return true; }
+    catch (error) { if ((error as { status?: number }).status === 1) return false; throw error; }
+  };
+  untracked();
+  if (mode === 'inspect' || ignored()) return;
+  if (mode === 'connected') throw new Error('The private workbench is no longer Git-ignored. Connect the repository again before syncing or sharing.');
+  // Connection confirmation authorizes this local-only rule, never .gitignore,
+  // configuration or the index. Escape each Git-pattern metacharacter literally.
+  const pattern = '/' + relative.split(path.sep).map(part => part.replace(/[\\*?\[\]#! ]/g, '\\$&')).join('/') + '/';
+  const exclusion = assertWorkbenchPath(selected, path.join(selected, '.git', 'info', 'exclude'));
+  const before = fs.existsSync(exclusion) ? fs.readFileSync(exclusion) : Buffer.alloc(0);
+  untracked();
+  assertWorkbenchPath(selected, exclusion);
+  fs.mkdirSync(path.dirname(exclusion), { recursive: true });
+  fs.appendFileSync(exclusion, (before.length && before[before.length - 1] !== 10 ? '\n' : '') + pattern + '\n');
+  if (!ignored()) throw new Error('The local Git ignore rule could not protect the private workbench. The connection was not activated.');
+  untracked();
 }
 
 function selectedRepository(root: string): SelectedRepository | undefined {
@@ -44,6 +77,7 @@ function selectedRepository(root: string): SelectedRepository | undefined {
   assertRemoteDestination(value.repository);
   const localPath = validateSeparateRepositoryPath(absolute, value.localPath);
   if (typeof value.gitConfigDigest !== 'string' || selectedRepositoryConfigDigest(localPath) !== value.gitConfigDigest) throw new Error('The connected repository configuration changed. Connect it again before syncing or sharing.');
+  protectNestedWorkbench(absolute, localPath, 'connected');
   return { root: absolute, repository: value.repository, localPath, gitConfigDigest: value.gitConfigDigest };
 }
 
@@ -77,7 +111,7 @@ export async function withSelectedRepository<T>(root: string, repository: string
   const absolute = path.resolve(root), selected = validateSeparateRepositoryPath(root, localPath);
   if (pendingRepositories.has(absolute)) throw new Error('A repository connection is already being prepared.');
   pendingRepositories.set(absolute, { root: absolute, repository, localPath: selected, gitConfigDigest: selectedRepositoryConfigDigest(selected) });
-  try { return await perform(); } finally { pendingRepositories.delete(absolute); }
+  try { protectNestedWorkbench(absolute, selected); return await perform(); } finally { pendingRepositories.delete(absolute); }
 }
 
 /** Validate every existing ancestor, including ancestors above the selected root. */

@@ -1,3 +1,4 @@
+import { SECRET_PATTERNS } from './secret-patterns.js';
 const yaml: { load(value: string): unknown } = require('js-yaml');
 
 export type FindingSeverity = 'error' | 'warning' | 'info';
@@ -189,9 +190,10 @@ function triggerCheck(description: string, prompt: string, expectation: 'should-
 }
 
 function scanTextFile(file: string, content: string, findings: SkillFinding[]): void {
+  for (const [pattern, code, message] of SECRET_PATTERNS) {
+    if (pattern.test(content)) findings.push(finding('error', 'security', code, message, file));
+  }
   const patterns: Array<[RegExp, FindingSeverity, string, string]> = [
-    [/AKIA[0-9A-Z]{16}/, 'error', 'aws-access-key', 'Possible AWS access key detected.'],
-    [/(?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password)\s*[:=]\s*["']?[A-Za-z0-9_./+=-]{16,}/i, 'error', 'possible-secret', 'Possible hardcoded credential detected.'],
     [/\b(?:Invoke-WebRequest|curl|wget|fetch\s*\(|axios\.|requests\.(?:get|post)|https?\.request)\b/i, 'warning', 'network-call', 'Network-capable code requires explicit trust and runtime documentation.'],
     [/\b(?:child_process|execSync|spawnSync|subprocess\.|os\.system|Start-Process)\b/i, 'warning', 'process-execution', 'Process execution requires explicit documentation and review.'],
     [/\b(?:rm\s+-rf|Remove-Item\s+.*-Recurse|rmtree\s*\(|fs\.rmSync?\s*\().*/i, 'warning', 'destructive-operation', 'Potentially destructive filesystem operation detected.'],

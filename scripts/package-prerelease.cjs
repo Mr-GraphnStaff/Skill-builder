@@ -1,0 +1,10 @@
+'use strict';
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
+const manifest = require('../package.json');
+const root = path.resolve(__dirname, '..');
+const output = path.join('dist', `${manifest.name}-${manifest.version}.vsix`);
+const cli = require.resolve('@vscode/vsce/vsce');
+const result = spawnSync(process.execPath, [cli, 'package', '--pre-release', '--out', output], { cwd: root, stdio: 'inherit', shell: false });
+if (result.error) throw result.error;
+process.exitCode = result.status ?? 1;

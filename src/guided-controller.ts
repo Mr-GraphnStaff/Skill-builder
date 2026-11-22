@@ -10,7 +10,7 @@ import { listWorkbenchSkills, WorkbenchSkill } from './skill-workbench.js';
 import { assertWorkbenchPath } from './workbench-boundary.js';
 import { initialExportOptions, suggestPluginVersion, readExportOptions, captureExportPreview, exportCompatibility, prepareExportPlan, type ExportPreview } from './guided-exports.js';
 import { exportRelativePath } from './plugin-release.js';
-import type { PluginManifest } from './plugin-release.js';
+import type { PluginManifest, PluginRelease } from './plugin-release.js';
 import type { ReleaseArchivePlan } from './release-archive.js';
 import { suggestReleaseVersion } from './workbench-library.js';
 import { listLibraryReleases } from './workbench-library.js';
@@ -36,6 +36,11 @@ export type GuidedHooks = {
   onRepositoryVerification?(state: RepositoryCheckState): void;
   pickPackage?(): Promise<string | undefined>;
   pickFolder?(initialPath?: string): Promise<string | undefined>;
+  pickPluginFolder?(initialPath?: string): Promise<string | undefined>;
+  choosePluginFolderAction?(): Promise<'edit' | 'zip' | 'plugin' | 'github' | undefined>;
+  confirmPluginSubmission?(release: PluginRelease, repository: string): Promise<boolean>;
+  openPluginDraft?(directory: string): Promise<void>;
+  withPluginGitSession?<T>(submit: () => Promise<T>): Promise<T>;
   pickFile?(): Promise<string | undefined>;
   chooseWorkspace?(): Promise<string | undefined>;
   openLink?(url: string): Promise<void>;
@@ -617,6 +622,74 @@ export class GuidedWorkbenchController {
           else this.state.notice = 'Opening canceled. No folder was imported.';
           break;
         }
+        case 'openPluginFolder': {
+          const root = this.workspace();
+          const draftRoot = assertWorkbenchPath(root, path.join(root, 'plugin-drafts'));
+          const folder = await this.hooks.pickPluginFolder?.(fs.existsSync(draftRoot) ? draftRoot : undefined);
+          const action = folder ? await this.hooks.choosePluginFolderAction?.() : undefined;
+          if (!folder || !action) { this.state.notice = 'Plugin folder selection canceled.'; break; }
+          beforeWrite();
+          if (action === 'edit') {
+            this.progress('Copying the plugin into your workbench…');
+            const draft = await this.runJob({ kind: 'importPluginFolder', root, folder });
+            beforeWrite();
+            this.state.notice = `Opened editable plugin ${draft.name}. Its files are in ${draft.directory}.`;
+            await this.hooks.openPluginDraft?.(draft.directory);
+            break;
+          }
+          if (action === 'zip' || action === 'plugin') {
+            this.progress('Saving the Claude plugin archive…');
+            const saved = await this.runJob({ kind: 'exportPluginFolder', root, folder, extension: action });
+            beforeWrite();
+            const directory = path.dirname(saved.packagePath);
+            this.state.receipt = { name: saved.name, version: saved.version, directory, packagePath: saved.packagePath,
+              local: true, artifacts: [{ label: `${saved.name}.${action}`, kind: 'plugin', version: saved.version, directory, path: saved.packagePath, status: 'prepared' }],
+              note: action === 'zip' ? 'Archive saved. Select it when uploading a plugin in Claude.' : 'Cowork .plugin archive saved. Manual organization uploads in Claude use ZIP.' };
+            this.state.step = 'done';
+            break;
+          }
+          this.refreshConnection();
+          const selected = this.state.connection;
+          if (!selected || !githubRepository(selected.repository)) throw new Error('Connect a GitHub repository before submitting the plugin.');
+          const destination = this.destinationFingerprint();
+          this.progress('Preparing and verifying the selected plugin folder…');
+          const release = await this.runJob({ kind: 'preparePluginFolder', root, folder });
+          beforeWrite();
+          this.progress('Review the plugin and GitHub destination in VS Code…', true);
+          if (!await this.hooks.confirmPluginSubmission?.(release, selected.repository)) {
+            this.state.notice = 'Submission canceled. The verified plugin package is saved locally.';
+            break;
+          }
+          const guard = () => {
+            beforeWrite();
+            if (destination !== this.destinationFingerprint()) throw new RepositoryConfigurationChangedError();
+          };
+          const submit = async () => {
+            guard();
+            const current = await this.runJob({ kind: 'verifyExport', directory: release.directory });
+            if (JSON.stringify(current.manifest) !== JSON.stringify(release.manifest)) throw new Error('The prepared plugin changed. Review and submit the folder again.');
+            guard();
+            const connection = this.hooks.getRepositorySettings ? await this.resolveRepositoryConnection(guard, false, true) : selected;
+            if (!connection || repositoryIdentity(connection.repository) !== repositoryIdentity(selected.repository)) throw new Error('The connected GitHub repository changed. Review it and submit again.');
+            this.progress('Checking GitHub access and submitting your plugin for review…');
+            await new GitHubReviewService(root, this.hooks.github).preflight(connection.repository);
+            const progress = (message: string, status?: GuidedActivityStatus) => this.progress(message, false, status);
+            const result = await publishPreparedGuidedRelease(root, release.directory, connection, progress, guard, this.hooks.github);
+            this.state.receipt = { ...receiptFor(result), note: 'Plugin uploaded to a review branch. Follow its pull request to review and merge it.' };
+            this.state.step = 'done';
+            try {
+              const reviewed = await reviewLibraryRelease(root, release.directory, 'create', undefined, this.hooks.github, progress, guard, { preserveDrafts: true });
+              this.state.receipt.pr = reviewed.pr;
+              if (reviewed.pr.error || !reviewed.pr.identityVerified) this.state.receipt.note = 'Plugin upload verified. Use Check PRs to confirm or create its pull request.';
+            } catch (error) {
+              this.state.receipt.note = 'Plugin upload verified. Use Check PRs to confirm or create its pull request.';
+              throw error;
+            }
+          };
+          if (this.hooks.withPluginGitSession) await this.hooks.withPluginGitSession(submit);
+          else await submit();
+          break;
+        }
         case 'resume': {
           const skill = listWorkbenchSkills(this.workspace()).find(item => item.id === string('id'));
           if (!skill) throw new Error('That draft is no longer active. Refresh to see saved drafts.');
@@ -637,7 +710,14 @@ export class GuidedWorkbenchController {
           const release = await this.runJob({ kind: 'verifyExport', directory });
           assertLocalCurrent();
           const manifest = release.manifest as PluginManifest;
-          if (manifest.kind !== 'plugin' || release.skillName !== known.skillName || release.version !== known.version || !manifest.members.length) throw new Error('The saved plugin identity changed. Your editable work is preserved.');
+          if (manifest.kind !== 'plugin' || release.skillName !== known.skillName || release.version !== known.version) throw new Error('The saved plugin identity changed. Your editable work is preserved.');
+          if (manifest.format === 2) {
+            const draft = await this.runJob({ kind: 'importPluginFolder', root, folder: path.join(directory, 'source') });
+            assertLocalCurrent();
+            this.state.notice = `Opened editable plugin ${draft.name}. Its files are in ${draft.directory}.`;
+            await this.hooks.openPluginDraft?.(draft.directory);
+            break;
+          }
           const members = [];
           for (const member of manifest.members) {
             assertLocalCurrent();
@@ -1001,7 +1081,7 @@ export class GuidedWorkbenchController {
         if (!this.state.error) this.activity(nextActivityMessage(this.state), 'info');
         this.operationActivity = undefined;
       }
-      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'restoreVersion', 'openPlugin', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest'].includes(message.action)) this.state.skillsStale = true;
+      if (this.state.skillsLoaded && ['openRepositorySkill', 'createSkill', 'openPackage', 'openPackagePath', 'openFolder', 'openPluginFolder', 'restoreVersion', 'openPlugin', 'savePackage', 'publish', 'checkPullRequests', 'checkPullRequest', 'createPullRequest', 'requestReviewer', 'mergePullRequest'].includes(message.action)) this.state.skillsStale = true;
     }
     return this.state;
   }

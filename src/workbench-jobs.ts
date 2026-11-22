@@ -12,6 +12,9 @@ import type { ReleaseArchivePlan } from './release-archive.js';
 
 export type WorkbenchJob =
   | { kind: 'preparePlugin'; root: string; options: PluginReleaseOptions }
+  | { kind: 'preparePluginFolder'; root: string; folder: string }
+  | { kind: 'importPluginFolder'; root: string; folder: string }
+  | { kind: 'exportPluginFolder'; root: string; folder: string; extension: 'zip' | 'plugin' }
   | { kind: 'prepareGemini'; root: string; directory: string }
   | { kind: 'verifyExport'; directory: string }
   | { kind: 'pluginReadiness'; directory: string }
@@ -32,7 +35,9 @@ export type WorkbenchJob =
 
 export type WorkbenchSnapshot = { validation: ValidationReport; releases: LibraryRelease[]; summary: SkillChangeSummary };
 export type WorkbenchJobResult<J extends WorkbenchJob> =
-  J extends { kind: 'preparePlugin' } ? PluginRelease :
+  J extends { kind: 'preparePlugin' | 'preparePluginFolder' } ? PluginRelease :
+  J extends { kind: 'importPluginFolder' } ? { directory: string; name: string } :
+  J extends { kind: 'exportPluginFolder' } ? { name: string; version: string; packagePath: string } :
   J extends { kind: 'prepareGemini' } ? GeminiRelease :
   J extends { kind: 'verifyExport' } ? WorkbenchRelease :
   J extends { kind: 'pluginReadiness' } ? PluginDirectoryReadiness :
@@ -47,7 +52,7 @@ export type WorkbenchJobResult<J extends WorkbenchJob> =
   J extends { kind: 'prepareRelease' | 'verifyRelease' } ? WorkbenchRelease :
   J extends { kind: 'snapshot' } ? WorkbenchSnapshot : WorkbenchSkill;
 
-const WRITING_JOBS = new Set(['openPackage', 'importPackage', 'registerFolder', 'prepareRelease', 'restoreRelease', 'preparePlugin', 'prepareGemini', 'archiveReleases', 'restoreArchive']);
+const WRITING_JOBS = new Set(['openPackage', 'importPackage', 'registerFolder', 'prepareRelease', 'restoreRelease', 'preparePlugin', 'preparePluginFolder', 'importPluginFolder', 'exportPluginFolder', 'prepareGemini', 'archiveReleases', 'restoreArchive']);
 const DEFAULT_TIMEOUT = 120_000;
 
 /** Execute only our installed, fixed job module. A skill never selects code to run.

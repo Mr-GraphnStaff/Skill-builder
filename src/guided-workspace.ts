@@ -1,4 +1,4 @@
-import { assertWorkbenchPath, assertWorkbenchRepository, assertRemoteDestination, isManagedWorkbench, workbenchScratch, workbenchRecovery, recognizeSelectedRepository, withSelectedRepository, assertSelectedRepository, selectedRepositoryConfigDigest } from './workbench-boundary.js';
+import { assertWorkbenchPath, assertWorkbenchRepository, assertRemoteDestination, isManagedWorkbench, workbenchScratch, workbenchRecovery, recognizeSelectedRepository, withSelectedRepository, assertSelectedRepository, selectedRepositoryConfigDigest, protectNestedWorkbench } from './workbench-boundary.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -160,6 +160,7 @@ export async function connectWorkspaceRepository(root: string, repository: strin
       const connection: WorkspaceConnection = { repository: validateRepository(repository), baseBranch, localPath: path.resolve(options.localPath!), separateRepository: true, gitConfigDigest: selectedRepositoryConfigDigest(options.localPath!) };
       options.beforeSave?.();
       if ((fs.existsSync(record) ? fs.readFileSync(record, 'utf8') : undefined) !== priorRecord) throw new Error('The saved connection changed while setup was open. It was preserved; review it before trying again.');
+      protectNestedWorkbench(root, options.localPath!, 'confirm');
       saveWorkspaceConnection(root, connection);
       recognizeSelectedRepository(root);
       return connection;
