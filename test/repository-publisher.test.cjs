@@ -124,7 +124,7 @@ test('stable plugin publication refuses to adopt or remove legacy version folder
   } finally { fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('stable plugin cannot downgrade or replace same-version bytes from a fresh workbench', async () => {
+test('plugin replacement and downgrade from a fresh workbench require explicit override and preserve Git history', async () => {
   const f = fixture(); let preview;
   try {
     const first = preparePluginRelease(f.caller, { name: 'team-bundle', description: 'Team workflows', version: '2.0.0', members: [{ directory: f.release }], changelog: 'First bundle.' });
@@ -136,11 +136,23 @@ test('stable plugin cannot downgrade or replace same-version bytes from a fresh 
     fs.writeFileSync(path.join(changedSource, 'SKILL.md'), '---\nname: sample\ndescription: Different content on another workstation.\n---\nChanged instructions.\n');
     const changedSkill = registerSkillFolder(fresh, changedSource), changed = prepareSkillRelease(fresh, changedSkill.id, '1.0.0', 'Changed snapshot.');
     const variant = version => preparePluginRelease(fresh, { name: 'team-bundle', description: 'Team workflows', version, members: [{ directory: changed.directory }], changelog: 'Fresh workstation bundle.' });
-    await assert.rejects(prepareRepositoryPublish(variant('2.0.0').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh }), /different content.*strictly newer/s);
-    await assert.rejects(prepareRepositoryPublish(variant('1.9.9').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh }), /downgrade.*strictly newer/s);
+    await assert.rejects(prepareRepositoryPublish(variant('2.0.0').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh }), /different content.*Replace this version/s);
+    await assert.rejects(prepareRepositoryPublish(variant('1.9.9').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh }), /downgrade.*Replace this version/s);
     await assert.rejects(prepareRepositoryPublish(first.directory, f.remote, 'main', undefined, true, { workspaceRoot: f.caller }), /identical content.*no upload/s);
     assert.equal(git(f.remote, 'rev-parse', 'main').trim(), uploaded.commit);
     assert.equal(JSON.parse(git(f.remote, 'show', 'main:Plugins/team-bundle/release.json')).version, '2.0.0');
+    const replacement = variant('2.0.0');
+    preview = await prepareRepositoryPublish(replacement.directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh, replacePluginVersion: true });
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const replaced = await pushPreparedRelease(preview); await disposePublishPreview(preview); preview = undefined;
+    assert.notEqual(replaced.commit, uploaded.commit);
+    assert.match(git(f.remote, 'show', `${replaced.commit}:Plugins/team-bundle/source/skills/sample/SKILL.md`), /Changed instructions/);
+    assert.doesNotMatch(git(f.remote, 'show', `${uploaded.commit}:Plugins/team-bundle/source/skills/sample/SKILL.md`), /Changed instructions/);
+    git(f.remote, 'merge-base', '--is-ancestor', uploaded.commit, replaced.commit);
+    preview = await prepareRepositoryPublish(variant('1.9.9').directory, f.remote, 'main', undefined, true, { workspaceRoot: fresh, replacePluginVersion: true });
+    git(preview.checkoutPath, 'config', 'user.name', 'Workbench Test'); git(preview.checkoutPath, 'config', 'user.email', 'test@example.invalid');
+    const downgraded = await pushPreparedRelease(preview);
+    assert.equal(JSON.parse(git(f.remote, 'show', `${downgraded.commit}:Plugins/team-bundle/release.json`)).version, '1.9.9');
   } finally { if (preview) await disposePublishPreview(preview); fs.rmSync(f.root, { recursive: true, force: true }); }
 });
 

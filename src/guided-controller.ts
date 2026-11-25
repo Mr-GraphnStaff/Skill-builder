@@ -37,7 +37,7 @@ export type GuidedHooks = {
   pickPackage?(): Promise<string | undefined>;
   pickFolder?(initialPath?: string): Promise<string | undefined>;
   pickPluginFolder?(initialPath?: string): Promise<string | undefined>;
-  choosePluginFolderAction?(): Promise<'edit' | 'zip' | 'plugin' | 'github' | undefined>;
+  choosePluginFolderAction?(): Promise<'edit' | 'zip' | 'plugin' | 'github' | 'githubReplace' | undefined>;
   confirmPluginSubmission?(release: PluginRelease, repository: string): Promise<boolean>;
   openPluginDraft?(directory: string): Promise<void>;
   withPluginGitSession?<T>(submit: () => Promise<T>): Promise<T>;
@@ -607,13 +607,29 @@ export class GuidedWorkbenchController {
         }
         case 'openPackage': {
           const file = await this.hooks.pickPackage?.();
-          if (file) { this.progress('Opening and checking the selected skill package…'); const opening = await this.runJob({ kind: 'openPackage', root: this.workspace(), file, replaceExisting: true }); this.select(opening.skill, opening); }
+          if (file && /\.(?:plugin|zip)$/i.test(file)) {
+            beforeWrite();
+            const draft = await this.runJob({ kind: 'importPluginArchive', root: this.workspace(), file });
+            beforeWrite();
+            this.state.pluginDraft = draft;
+            this.state.notice = `Opened editable plugin ${draft.name}. Edit its files in VS Code, then choose Export or upload this plugin. Your original archive is preserved.`;
+            await this.hooks.openPluginDraft?.(draft.directory);
+          } else if (file) { this.progress('Opening and checking the selected skill package…'); const opening = await this.runJob({ kind: 'openPackage', root: this.workspace(), file, replaceExisting: true }); this.select(opening.skill, opening); }
           else this.state.notice = 'Opening canceled. No package was imported.';
           break;
         }
         case 'openPackagePath': {
           const file = string('path').trim();
-          if (!file || !path.isAbsolute(file) || path.extname(file).toLowerCase() !== '.skill') throw new Error('Enter the full path to a .skill package.');
+          if (!file || !path.isAbsolute(file) || !/\.(?:skill|plugin|zip)$/i.test(file)) throw new Error('Enter the full path to a .skill, .plugin or plugin ZIP package.');
+          if (/\.(?:plugin|zip)$/i.test(file)) {
+            beforeWrite();
+            const draft = await this.runJob({ kind: 'importPluginArchive', root: this.workspace(), file });
+            beforeWrite();
+            this.state.pluginDraft = draft;
+            this.state.notice = `Opened editable plugin ${draft.name}. Edit its files in VS Code, then choose Export or upload this plugin. Your original archive is preserved.`;
+            await this.hooks.openPluginDraft?.(draft.directory);
+            break;
+          }
           const opening = await this.runJob({ kind: 'openPackage', root: this.workspace(), file, replaceExisting: true }); this.select(opening.skill, opening); break;
         }
         case 'openFolder': {
@@ -625,7 +641,9 @@ export class GuidedWorkbenchController {
         case 'openPluginFolder': {
           const root = this.workspace();
           const draftRoot = assertWorkbenchPath(root, path.join(root, 'plugin-drafts'));
-          const folder = await this.hooks.pickPluginFolder?.(fs.existsSync(draftRoot) ? draftRoot : undefined);
+          const folder = payload.opened === true && this.state.pluginDraft
+            ? assertWorkbenchPath(draftRoot, this.state.pluginDraft.directory)
+            : await this.hooks.pickPluginFolder?.(fs.existsSync(draftRoot) ? draftRoot : undefined);
           const action = folder ? await this.hooks.choosePluginFolderAction?.() : undefined;
           if (!folder || !action) { this.state.notice = 'Plugin folder selection canceled.'; break; }
           beforeWrite();
@@ -633,6 +651,7 @@ export class GuidedWorkbenchController {
             this.progress('Copying the plugin into your workbench…');
             const draft = await this.runJob({ kind: 'importPluginFolder', root, folder });
             beforeWrite();
+            this.state.pluginDraft = draft;
             this.state.notice = `Opened editable plugin ${draft.name}. Its files are in ${draft.directory}.`;
             await this.hooks.openPluginDraft?.(draft.directory);
             break;
@@ -644,7 +663,7 @@ export class GuidedWorkbenchController {
             const directory = path.dirname(saved.packagePath);
             this.state.receipt = { name: saved.name, version: saved.version, directory, packagePath: saved.packagePath,
               local: true, artifacts: [{ label: `${saved.name}.${action}`, kind: 'plugin', version: saved.version, directory, path: saved.packagePath, status: 'prepared' }],
-              note: action === 'zip' ? 'Archive saved. Select it when uploading a plugin in Claude.' : 'Cowork .plugin archive saved. Manual organization uploads in Claude use ZIP.' };
+              note: 'Archive saved. Claude accepts ZIP and .plugin archives for manual plugin upload.' };
             this.state.step = 'done';
             break;
           }
@@ -653,7 +672,8 @@ export class GuidedWorkbenchController {
           if (!selected || !githubRepository(selected.repository)) throw new Error('Connect a GitHub repository before submitting the plugin.');
           const destination = this.destinationFingerprint();
           this.progress('Preparing and verifying the selected plugin folder…');
-          const release = await this.runJob({ kind: 'preparePluginFolder', root, folder });
+          const replacePluginVersion = action === 'githubReplace';
+          const release = await this.runJob({ kind: 'preparePluginFolder', root, folder, replaceExisting: replacePluginVersion });
           beforeWrite();
           this.progress('Review the plugin and GitHub destination in VS Code…', true);
           if (!await this.hooks.confirmPluginSubmission?.(release, selected.repository)) {
@@ -674,7 +694,7 @@ export class GuidedWorkbenchController {
             this.progress('Checking GitHub access and submitting your plugin for review…');
             await new GitHubReviewService(root, this.hooks.github).preflight(connection.repository);
             const progress = (message: string, status?: GuidedActivityStatus) => this.progress(message, false, status);
-            const result = await publishPreparedGuidedRelease(root, release.directory, connection, progress, guard, this.hooks.github);
+            const result = await publishPreparedGuidedRelease(root, release.directory, connection, progress, guard, this.hooks.github, replacePluginVersion);
             this.state.receipt = { ...receiptFor(result), note: 'Plugin uploaded to a review branch. Follow its pull request to review and merge it.' };
             this.state.step = 'done';
             try {
@@ -714,6 +734,8 @@ export class GuidedWorkbenchController {
           if (manifest.format === 2) {
             const draft = await this.runJob({ kind: 'importPluginFolder', root, folder: path.join(directory, 'source') });
             assertLocalCurrent();
+            this.state.pluginDraft = draft;
+            this.state.step = 'start';
             this.state.notice = `Opened editable plugin ${draft.name}. Its files are in ${draft.directory}.`;
             await this.hooks.openPluginDraft?.(draft.directory);
             break;
@@ -904,7 +926,7 @@ export class GuidedWorkbenchController {
               }
               try {
                 const result = await publishPreparedGuidedRelease(this.workspace(), release.directory, connection,
-                  (message, status) => this.progress(message, false, status), remoteGuard, this.hooks.github);
+                  (message, status) => this.progress(message, false, status), remoteGuard, this.hooks.github, current.options.replacePluginVersion === true);
                 artifact.status = 'uploaded';
                 const receipt = receiptFor(result);
                 const plugin = artifact.kind === 'plugin';

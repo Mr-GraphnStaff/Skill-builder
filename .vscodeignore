@@ -12,6 +12,7 @@ workbench/**
 releases/**
 plugin-releases/**
 plugin-drafts/**
+plugin-imports/**
 plugin-exports/**
 gemini-releases/**
 docs/software-team/**

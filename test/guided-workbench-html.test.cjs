@@ -121,11 +121,11 @@ const connected = { workflowIntent: 'plugin', connection: { repository: 'https:/
   const html = renderGuidedWorkbench(state(connected), nonce);
   assert.match(html, /data-action="openRepositorySkill" id="open-repository-skill">Open from your project/);
   assert.match(html, /data-action="resume" data-id="a">Use existing-skill/);
-  assert.match(html, /data-action="openPackage"[^>]*>Open a skill file/);
+  assert.match(html, /data-action="openPackage"[^>]*>Open a skill or plugin file/);
   assert.match(html, /Your originals stay unchanged/);
   const rejected = renderGuidedWorkbench(state({ ...connected, configurationError: 'The inherited destination is outside this work location.' }), nonce);
   assert.doesNotMatch(rejected, /data-action="openRepositorySkill"/);
-  assert.match(rejected, /data-action="openPackage"[^>]*>Open a skill file/);
+  assert.match(rejected, /data-action="openPackage"[^>]*>Open a skill or plugin file/);
 });
 
 test('package checks and actual build errors stay visible without disclosure controls', () => {
@@ -331,7 +331,7 @@ const html = renderGuidedWorkbench(state({ skillsLoaded: true, drafts: [{ id: 'a
 test('a visible path form provides an alternative to the native file chooser', () => {
 const html = renderGuidedWorkbench(state({ form: { path: 'C:\\Downloads\\sample.skill' } }), nonce);
   assert.match(html, /data-form-action="openPackagePath"/);
-  assert.match(html, /<label for="packagePath">Or paste a skill file path<\/label>/);
+  assert.match(html, /<label for="packagePath">Or paste a skill or plugin file path<\/label>/);
   assert.match(html, /id="packagePath"[^>]*value="C:\\Downloads\\sample.skill"[^>]*required/);
   assert.doesNotMatch(html, /<details/);
   assert.match(html, /if \(action === 'openPackagePath'\) payload = \{ path: fieldValue\('packagePath'\) \}/);

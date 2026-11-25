@@ -23,7 +23,8 @@ The folder shown as **Workbench folder — local write boundary** is the root fo
 | `repositories/` | Preserved local copies from older workbench setups | Earlier connections stay intact. New connections let you choose a separate local repository. |
 | `releases/` | Saved version packages, source snapshots and release notes | Use these packages for manual sharing or continue from a saved version. Preparing one does not upload it. |
 | `plugin-drafts/` | Editable copies of Claude plugin folders | Open the copied manifest and edit the files in VS Code. |
-| `plugin-exports/` | Claude ZIP and Cowork `.plugin` archives | Use ZIP for manual upload in Claude. |
+| `plugin-imports/` | Original `.plugin` and plugin ZIP bytes, hashes and captured source | Keep these for recovery; edit the copy in `plugin-drafts/`. |
+| `plugin-exports/` | Claude ZIP and `.plugin` archives | Either format can be uploaded manually in Claude. |
 | `plugin-releases/` | Versioned plugin snapshots and GitHub submission receipts | Review the saved source and track its pull request. |
 | `scratch/` | Temporary import and isolated Git preparation files | Leave this for SkillJetty; do not put your only copy of a file here. |
 | `recovery/` | Earlier edits, completed draft archives and recovery copies | Keep it with your workbench. Inspect recovery evidence before deleting files. |
@@ -49,7 +50,9 @@ The guided flow saves the complete verified pair together; older URL/path settin
 
 ## Work elsewhere without redirecting writes
 
-Choose **Open a plugin folder** and select the folder containing `.claude-plugin/plugin.json`. Choose **Import and edit** to open a local copy, **Save ZIP for Claude** to prepare a manual upload, or **Submit to GitHub for review** to send the folder to the connected repository. **Save Cowork .plugin file** writes the same archive format with Cowork’s in-chat install extension.
+Choose **Open a skill or plugin file** to import a Claude-format `.plugin` or plugin ZIP archive. SkillJetty preserves the original archive bytes and opens a complete editable copy, including third-party metadata and non-skill components. After editing, choose **Export or upload this plugin** to use the same copy. **Open a plugin folder** also accepts unpacked folders containing `.claude-plugin/plugin.json`.
+
+Choose **Save ZIP for Claude**, **Save .plugin file for Claude**, or **Submit to GitHub for review**. If a version is already present, choose **Replace this version on GitHub**; bundle builds have a **Replace this version** checkbox. This also permits an explicitly chosen older version. Earlier packages and their receipts remain under `.skill-workbench/replaced/`, and Git history preserves earlier repository content. Review branches still require a pull request merge.
 
 You can choose a skill folder or package elsewhere to import it. SkillJetty reads that source and creates a local draft copy; subsequent editing uses the workbench copy. Opening another VS Code project does not authorize SkillJetty to modify its repository.
 

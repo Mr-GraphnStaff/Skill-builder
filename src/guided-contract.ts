@@ -10,6 +10,7 @@ export type ExportOptions = {
   mode: ExportMode; pluginName: string; pluginVersion: string; pluginDescription: string;
   pluginAuthor?: string; pluginLicense?: string; geminiZip: boolean;
   pluginVersionSource?: 'suggested' | 'explicit';
+  replacePluginVersion?: boolean;
   pluginIcon?: string; pluginPrivacyPolicyUrl?: string; pluginDocumentationUrl?: string; pluginSupportUrl?: string;
   members: { id: string; name: string; version?: string; selected: boolean }[];
 };
@@ -64,6 +65,7 @@ export type GuidedState = {
   archivePreview?: { entries: { label: string; directory: string; bytes: number; fileCount: number }[]; skipped: string[] };
   archives?: { id: string; label: string }[];
   active?: { id: string; name: string; version?: string; versionNote?: string };
+  pluginDraft?: { name: string; directory: string };
   history?: { id: string; path: string; at: string }[];
   files: { path: string; size: number; text: boolean }[];
   editor?: { path: string; content: string; readOnly?: boolean };

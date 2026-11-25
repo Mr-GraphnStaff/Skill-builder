@@ -150,10 +150,10 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
     return selected && !selected.split(/[\\/]/).some(part => part.toLowerCase() === '.codex') ? selected : homedir();
   };
   const pick = async (kind: 'package' | 'folder' | 'pluginFolder' | 'file', initialPath?: string) => (await vscode.window.showOpenDialog({
-    title: kind === 'pluginFolder' ? 'Open a Claude plugin folder' : kind === 'package' ? 'Open a .skill package' : kind === 'folder' ? 'Open a skill folder' : 'Add a supporting file',
+    title: kind === 'pluginFolder' ? 'Open a Claude plugin folder' : kind === 'package' ? 'Open a skill or plugin package' : kind === 'folder' ? 'Open a skill folder' : 'Add a supporting file',
     defaultUri: vscode.Uri.file(await pickerRoot(initialPath)),
     canSelectMany: false, canSelectFiles: kind === 'package' || kind === 'file', canSelectFolders: kind === 'folder' || kind === 'pluginFolder',
-    ...(kind === 'package' ? { filters: { 'Skill packages': ['skill'] } } : {})
+    ...(kind === 'package' ? { filters: { 'Skills and plugins': ['skill', 'plugin', 'zip'] } } : {})
   }))?.[0]?.fsPath;
 
   const saveExternalEdits = async () => {
@@ -548,8 +548,9 @@ export function activateGuidedWorkbench(context: vscode.ExtensionContext, hooks:
         choosePluginFolderAction: async () => (await vscode.window.showQuickPick([
           { label: 'Import and edit', description: 'Open an editable copy in VS Code', action: 'edit' as const },
           { label: 'Save ZIP for Claude', description: 'For manual upload in Claude', action: 'zip' as const },
-          { label: 'Save Cowork .plugin file', description: 'ZIP with the extension used by Cowork’s in-chat install preview', action: 'plugin' as const },
-          { label: 'Submit to GitHub for review', description: 'Upload to the connected repository and create or find a pull request', action: 'github' as const }
+          { label: 'Save .plugin file for Claude', description: 'Preserve the complete plugin in an uploadable archive', action: 'plugin' as const },
+          { label: 'Submit to GitHub for review', description: 'Upload to the connected repository and create or find a pull request', action: 'github' as const },
+          { label: 'Replace this version on GitHub', description: 'Keep the version in plugin.json; preserve earlier packages and receipts for recovery and update the review branch', action: 'githubReplace' as const }
         ], { title: 'What would you like to do with this plugin folder?' }))?.action,
         confirmPluginSubmission: async (release, repository) => {
           const confirm = 'Submit for review';

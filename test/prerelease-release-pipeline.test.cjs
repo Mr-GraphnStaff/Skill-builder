@@ -40,7 +40,7 @@ test('public pre-release receipt binds exact artifact to source, branch and curr
   assert.throws(() => verifyArtifact(directory), /SHA-256 mismatch/);
 });
 test('public pre-release rejects owner scratch and exported user bundles independently of packaging ignores', () => {
-  for (const directory of ['working', 'plugin-releases', 'gemini-releases']) {
+  for (const directory of ['working', 'plugin-releases', 'plugin-drafts', 'plugin-exports', 'plugin-imports', 'gemini-releases']) {
     assert.throws(() => inspectPrerelease(archive({ extra: { [`extension/${directory}/private-skill/SKILL.md`]: 'private user content' } })), /user state/);
     assert.throws(() => inspectPrerelease(archive({ extra: { [`extension/${directory.toUpperCase()}/private.json`]: '{}' } })), /user state/);
   }

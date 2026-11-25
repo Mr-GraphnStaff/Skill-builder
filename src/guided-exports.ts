@@ -58,11 +58,13 @@ export function readExportOptions(root: string, activeId: string, previous: Expo
   if (!ids.includes(activeId) || ids.some(id => !skills.some(skill => skill.id === id))) throw new Error('Keep the current skill selected and choose other existing drafts in this workbench.');
   const geminiZip = input.geminiZip ?? previous.geminiZip;
   if (typeof geminiZip !== 'boolean') throw new Error('Choose whether to export a Gemini ZIP.');
+  const replacePluginVersion = input.replacePluginVersion ?? previous.replacePluginVersion ?? false;
+  if (typeof replacePluginVersion !== 'boolean') throw new Error('Choose whether to replace the plugin version.');
   const pluginName = text('pluginName', previous.pluginName), requestedVersion = text('pluginVersion', previous.pluginVersion);
   const suggested = previous.pluginVersionSource === 'suggested' && requestedVersion === previous.pluginVersion;
   const pluginVersion = suggested && (pluginName !== previous.pluginName || (previous.mode === 'portable' && mode !== 'portable')) ? suggestPluginVersion(root, pluginName) : requestedVersion;
   const options: ExportOptions = { mode: mode as ExportOptions['mode'], pluginName,
-    pluginDescription: text('pluginDescription', previous.pluginDescription), pluginVersion, pluginVersionSource: suggested ? 'suggested' : 'explicit',
+    pluginDescription: text('pluginDescription', previous.pluginDescription), pluginVersion, pluginVersionSource: suggested ? 'suggested' : 'explicit', replacePluginVersion,
     pluginAuthor: text('pluginAuthor', previous.pluginAuthor), pluginLicense: text('pluginLicense', previous.pluginLicense), geminiZip,
     pluginIcon: text('pluginIcon', previous.pluginIcon), pluginPrivacyPolicyUrl: text('pluginPrivacyPolicyUrl', previous.pluginPrivacyPolicyUrl),
     pluginDocumentationUrl: text('pluginDocumentationUrl', previous.pluginDocumentationUrl), pluginSupportUrl: text('pluginSupportUrl', previous.pluginSupportUrl),
@@ -136,7 +138,7 @@ export async function prepareExportPlan(root: string, activeId: string, reviewed
       version: options.pluginVersion, author: options.pluginAuthor || undefined, license: options.pluginLicense || undefined, repository,
       icon: options.pluginIcon || undefined, privacyPolicyUrl: options.pluginPrivacyPolicyUrl || undefined,
       documentationUrl: options.pluginDocumentationUrl || undefined, supportUrl: options.pluginSupportUrl || undefined,
-      members: portable.map(release => ({ directory: release.directory })), changelog } }, exportJobBoundary(root));
+      members: portable.map(release => ({ directory: release.directory })), changelog, replaceExisting: options.replacePluginVersion } }, exportJobBoundary(root));
     submissions.push(plugin);
     artifacts.push({ label: `Claude plugin: ${plugin.skillName} ${plugin.version}`, kind: 'plugin', version: plugin.version, path: plugin.packagePath, directory: plugin.directory, status: 'prepared' });
     const readiness = await runWorkbenchJob({ kind: 'pluginReadiness', directory: plugin.directory }, exportJobBoundary(root));

@@ -16,7 +16,7 @@ type DirectoryMetadata = { icon?: string; privacyPolicyUrl?: string; documentati
 export type PluginDescriptor = DirectoryMetadata & { name: string; description: string; version: string; author?: { name: string }; repository?: string; license?: string };
 export type PluginManifest = ReleaseManifest & { kind: 'plugin'; format: 1 | 2; plugin: PluginDescriptor; members: PluginMember[]; marketplaceSha256: string };
 export type PluginRelease = WorkbenchRelease & { manifest: PluginManifest };
-export type PluginReleaseOptions = DirectoryMetadata & { name: string; description: string; version: string; author?: string; repository?: string; license?: string; members: Array<{ directory: string }>; changelog: string };
+export type PluginReleaseOptions = DirectoryMetadata & { name: string; description: string; version: string; author?: string; repository?: string; license?: string; members: Array<{ directory: string }>; changelog: string; replaceExisting?: boolean };
 export type DirectoryReadinessCheck = { code: string; result: 'block' | 'hold' | 'warning' | 'unknown' | 'pass'; message: string; paths?: string[] };
 export type PluginDirectoryReadiness = { checkedAgainst: string; portalRequired: true; checks: DirectoryReadinessCheck[] };
 export type CompatibilityReport = { target: 'gemini-app'; valid: boolean; errors: string[]; warnings: string[]; fileCount: number; byteCount: number; checkedAgainst: string };
@@ -77,8 +77,8 @@ function inventory(root: string, folderMode?: 'selected' | 'saved'): CapturedFil
   };
   visit(root); return files.sort((a, b) => a.path.localeCompare(b.path));
 }
-function readSelectedFile(root: string, file: string, expected: fs.Stats): Buffer {
-  if (expected.size > 16 * 1024 * 1024) throw new Error('A plugin file exceeds the 16 MiB packaging limit.');
+function readSelectedFile(root: string, file: string, expected: fs.Stats, limit = 16 * 1024 * 1024): Buffer {
+  if (expected.size > limit) throw new Error('A plugin file exceeds the packaging limit.');
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
     const current = fs.fstatSync(fd);
@@ -111,11 +111,11 @@ function zipBytes(files: CapturedFile[]): Buffer {
   const bytes = zip.toBuffer(); if (bytes.length > MAX_ARCHIVE) throw new Error('Export exceeds SkillJetty archive size limits.');
   verifyZip(bytes, digests(files)); return bytes;
 }
-function verifyZip(bytes: Buffer, expected: FileDigest[]): void {
+function readPluginZip(bytes: Buffer): CapturedFile[] {
   if (bytes.length > MAX_ARCHIVE) throw new Error('Export archive exceeds size limits.');
   const entries = new AdmZip(bytes).getEntries(); const seen = new Set<string>(); let total = 0;
   if (entries.length > MAX_FILES) throw new Error('Export archive has too many entries.');
-  const actual: FileDigest[] = entries.map(entry => {
+  return entries.map(entry => {
     safeRelative(entry.entryName); const key = entry.entryName.replace(/\/$/, '').toLowerCase();
     if (seen.has(key)) throw new Error('Export archive contains duplicate paths.'); seen.add(key);
     const unixType = (entry.attr >>> 16) & 0xf000;
@@ -128,8 +128,11 @@ function verifyZip(bytes: Buffer, expected: FileDigest[]): void {
     const compressed = entry.getCompressedData();
     const content = entry.header.method === 0 ? compressed : inflateRawSync(compressed, { maxOutputLength: 16 * 1024 * 1024 });
     if (content.length !== entry.header.size || crc32(content) !== (entry.header.crc >>> 0)) throw new Error('Export archive entry length or integrity changed.');
-    return { path: entry.entryName, size: content.length, sha256: hash(content) };
+    return { path: entry.entryName, bytes: content };
   }).sort((a, b) => a.path.localeCompare(b.path));
+}
+function verifyZip(bytes: Buffer, expected: FileDigest[]): void {
+  const actual = digests(readPluginZip(bytes));
   if (!same(actual, expected)) throw new Error('Export archive differs from the captured source inventory.');
 }
 function descriptor(options: PluginReleaseOptions): PluginDescriptor {
@@ -178,7 +181,10 @@ export function preparePluginRelease(workspaceRoot: string, options: PluginRelea
   const marketplace = json({ name: plugin.name, source: `./Plugins/${plugin.name}/source`, description: plugin.description });
   if (fs.existsSync(directory)) {
     const existing = verifyPluginRelease(directory);
-    if (!same(existing.manifest.plugin, plugin) || !same(existing.manifest.members, members) || existing.manifest.changelogSha256 !== hash(changelog) || existing.manifest.marketplaceSha256 !== hash(marketplace) || existing.manifest.files.find(file => file.path === 'README.md')?.sha256 !== hash(readme)) throw new Error('Plugin version already exists with different content. Choose a new bundle version.');
+    if (options.replaceExisting) return replacePluginRelease(workspaceRoot, directory, () => preparePluginRelease(workspaceRoot, { ...options, replaceExisting: false }));
+    if (!same(existing.manifest.plugin, plugin) || !same(existing.manifest.members, members) || existing.manifest.changelogSha256 !== hash(changelog) || existing.manifest.marketplaceSha256 !== hash(marketplace) || existing.manifest.files.find(file => file.path === 'README.md')?.sha256 !== hash(readme)) {
+      throw new Error('Plugin version already exists with different content. Choose Replace this version or a new bundle version.');
+    }
     return existing;
   }
   const files: CapturedFile[] = [{ path: '.claude-plugin/', bytes: Buffer.alloc(0) }, { path: '.claude-plugin/plugin.json', bytes: json(plugin) }, { path: 'README.md', bytes: readme }, { path: 'skills/', bytes: Buffer.alloc(0) }];
@@ -221,8 +227,8 @@ function folderPlugin(files: CapturedFile[]): PluginDescriptor {
     metadata = raw;
   } catch { throw new Error('Plugin manifest must be a valid JSON object.'); }
   const name = identifier(metadata.name);
-  return descriptor({ name, description: typeof metadata.description === 'string' && metadata.description.trim() ? metadata.description : name,
-    version: version(metadata.version ?? '1.0.0'), members: [], changelog: 'verification' });
+  return { name, description: typeof metadata.description === 'string' && metadata.description.trim() ? text(metadata.description, 'plugin description') : name,
+    version: version(metadata.version ?? '1.0.0') };
 }
 
 function capturePluginFolder(folder: string): { plugin: PluginDescriptor; files: CapturedFile[] } {
@@ -249,13 +255,60 @@ export function importPluginFolder(workspaceRoot: string, folder: string): { dir
   return { directory, name: plugin.name };
 }
 
-export function preparePluginFolderRelease(workspaceRoot: string, folder: string): PluginRelease {
+/** Keep the earlier package and its upload/review receipts together for recovery. */
+function replacePluginRelease(root: string, directory: string, prepare: () => PluginRelease): PluginRelease {
+  const release = verifyPluginRelease(directory);
+  const backup = assertWorkbenchPath(root, path.join(root, '.skill-workbench', 'replaced', randomUUID(), 'plugins', release.skillName));
+  fs.mkdirSync(backup, { recursive: true });
+  const moved: Array<[string, string]> = [];
+  try {
+    for (const [source, target] of [
+      [directory, path.join(backup, release.version)],
+      ...['publications', 'pull-requests'].map(kind => [path.join(root, '.skill-workbench', kind, 'plugins', release.skillName, `${release.version}.json`), path.join(backup, `${release.version}-${kind}.json`)])
+    ]) {
+      assertWorkbenchPath(root, source); assertWorkbenchPath(root, target);
+      if (fs.existsSync(source)) { finalize(source, target); moved.push([source, target]); }
+    }
+    return prepare();
+  } catch (error) {
+    // A completed replacement may exist if final verification failed. Preserve
+    // it too before restoring the original package and receipts.
+    if (fs.existsSync(directory) && moved.some(([source]) => source === directory)) finalize(directory, path.join(backup, `${release.version}-failed-${randomUUID()}`));
+    for (const [source, target] of moved.reverse()) finalize(target, source);
+    throw error;
+  }
+}
+
+export function importPluginArchive(workspaceRoot: string, file: string): { directory: string; name: string } {
+  if (!path.isAbsolute(file) || !/\.(?:plugin|zip)$/i.test(file)) throw new Error('Choose a .plugin or plugin ZIP archive.');
+  const stat = fs.lstatSync(file);
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink > 1 || stat.size > MAX_ARCHIVE) throw new Error('Plugin archive is too large or is not a regular file.');
+  const bytes = readSelectedFile(path.dirname(file), file, stat, MAX_ARCHIVE);
+  const files = readPluginZip(bytes);
+  for (const entry of files) {
+    if (/(?:^|\/)(?:\.git|\.skilljetty-workbench\.json|\.skill-workbench|\.skilljetty-prerelease|\.skilljetty-beta|\.env(?:\.(?!example(?:\/|$)|sample(?:\/|$)|template(?:\/|$))[^/]+)?)(?:\/|$)/i.test(entry.path)) throw new Error(`Remove private workbench, Git or environment data before opening this plugin: ${entry.path}`);
+  }
+  const plugin = folderPlugin(files);
+  const imports = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-imports', randomUUID()));
+  fs.mkdirSync(imports, { recursive: true });
+  // Original bytes are separate from the editable/plugin-exported contents.
+  fs.writeFileSync(path.join(imports, `original${path.extname(file).toLowerCase()}`), bytes, { flag: 'wx' });
+  fs.writeFileSync(path.join(imports, 'import.json'), json({ name: plugin.name, sha256: hash(bytes), fileName: path.basename(file) }), { flag: 'wx' });
+  const unpacked = assertWorkbenchPath(workspaceRoot, path.join(imports, 'source'));
+  writeFiles(unpacked, files);
+  return importPluginFolder(workspaceRoot, unpacked);
+}
+
+export function preparePluginFolderRelease(workspaceRoot: string, folder: string, replaceExisting = false): PluginRelease {
   const { plugin, files } = capturePluginFolder(folder);
   assertShareablePluginFiles(files);
   const directory = assertWorkbenchPath(workspaceRoot, path.join(workspaceRoot, 'plugin-releases', plugin.name, plugin.version));
   if (fs.existsSync(directory)) {
     const existing = verifyPluginRelease(directory);
-    if (!same(existing.manifest.files, digests(files))) throw new Error('Plugin version already exists with different content. Update the version in plugin.json and try again.');
+    if (replaceExisting) return replacePluginRelease(workspaceRoot, directory, () => preparePluginFolderRelease(workspaceRoot, folder));
+    if (!same(existing.manifest.files, digests(files))) {
+      throw new Error('Plugin version already exists with different content. Choose Replace this version or update the version in plugin.json.');
+    }
     return existing;
   }
   const changelog = Buffer.from(`Imported ${plugin.name} ${plugin.version} from a local plugin folder.\n`);

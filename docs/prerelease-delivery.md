@@ -1,5 +1,20 @@
 # Public Marketplace pre-release delivery
 
+## November 25, 2026 — 0.15.8 in progress
+
+The owner authorized publication of the plugin-archive and version-replacement
+fixes. Azure DevOps [task 420](https://dev.azure.com/DAF-TECH/SkillJetty/_workitems/edit/420)
+tracks the source, tests, exact VSIX, protected approval, public verification and
+wiki updates. Pipeline 12 is named **SkillJetty Pre-release Build and Publish**.
+Publication is pending; local packaging alone does not establish Marketplace
+availability, native acceptance or user installations. Human UAT remains item 355.
+The verified prior pipeline record is 1195 with successful read-only reconciliation
+1196, source `b1258c9b876c00f17176d5cb64cb1a94dc47b27e` (0.15.7, November 22).
+
+The artifact inspector explicitly rejects `plugin-imports/`, `plugin-drafts/` and
+`plugin-exports/` as well as releases and `working/`, independently of VSIX ignore
+rules. Original third-party archives and replacement recovery records are user data.
+
 The dedicated `codex/public-prerelease` branch builds the established public
 identity `DavidFarris.skill-builder` with the Marketplace pre-release flag. It is
 different from the co-installable local UAT identity `DavidFarris.skill-builder-beta`.

@@ -615,8 +615,8 @@ for (const outcome of ['selected', 'canceled', 'failed']) {
         new Promise(resolve => { timer = setTimeout(() => resolve(undefined), 1500); })
       ]);
       assert(options, 'the project must be ready for opening content');
-      assert.equal(options.title, 'Open a .skill package');
-      assert.deepEqual(options.filters, { 'Skill packages': ['skill'] });
+      assert.equal(options.title, 'Open a skill or plugin package');
+      assert.deepEqual(options.filters, { 'Skills and plugins': ['skill', 'plugin', 'zip'] });
       assert.equal(options.canSelectFiles, true);
       assert.equal(options.canSelectFolders, false);
       await opening;

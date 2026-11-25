@@ -292,7 +292,7 @@ async function verifyGitBlobs(preview: PublishPreview, committed = false): Promi
 /** Prepare a reviewable commit in the destination repository's own history. */
 export async function prepareRepositoryPublish(
   releaseDirectory: string, repository: string, baseBranch = 'main', onProgress?: Progress, replaceExisting = false,
-  options: { localPath?: string; workspaceRoot?: string } = {}
+  options: { localPath?: string; workspaceRoot?: string; replacePluginVersion?: boolean } = {}
 ): Promise<PublishPreview> {
   report(onProgress, 'Validating the prepared release.');
   validateRepository(repository);
@@ -395,12 +395,12 @@ export async function prepareRepositoryPublish(
         try { active = verifyPluginRelease(destination, true); }
         catch { throw new Error(`Existing plugin folder ${relativePath} is not a verified active release. Review a separate cleanup or migration plan; no plugin files were changed.`); }
         const precedence = compareReleaseVersions(manifest.version, active.version);
-        if (precedence < 0) throw new Error(`Plugin ${manifest.skillName} already has active version ${active.version}. Publishing ${manifest.version} would downgrade it. Choose a strictly newer bundle version.`);
-        if (precedence === 0) {
+        if (precedence < 0 && !options.replacePluginVersion) throw new Error(`Plugin ${manifest.skillName} already has active version ${active.version}. Publishing ${manifest.version} would downgrade it. Choose Replace this version to override it or a newer bundle version.`);
+        if (precedence === 0 && !options.replacePluginVersion) {
           const identical = equalInventory(sourceInventory, await inventory(destination));
           throw new Error(identical
-            ? `Plugin version ${manifest.version} already exists with identical content; no upload is needed. Use the recorded submission or choose a strictly newer bundle version.`
-            : `Plugin version ${active.version} already exists with different content. Choose a strictly newer bundle version; generic replacement cannot overwrite a published plugin version.`);
+            ? `Plugin version ${manifest.version} already exists with identical content; no upload is needed. Use the recorded submission, or choose Replace this version to upload it again.`
+            : `Plugin version ${active.version} already exists with different content. Choose Replace this version to overwrite it, or a newer bundle version.`);
         }
         replacingActivePlugin = true;
       } else if (!replaceExisting) throw new Error(`Version ${manifest.version} already exists in this repository.`);

@@ -356,7 +356,7 @@ function connectedRepository(root: string, repository: string): boolean {
 /** Submit an already captured export. Never re-read or remove its draft while
  * a multi-artifact submission is in progress. Retries reuse recorded uploads. */
 export async function publishPreparedGuidedRelease(root: string, directory: string, connection: WorkspaceConnection,
-  onProgress?: import('./guided-contract.js').GuidedProgress, beforeWrite?: () => void, runner?: GitHubRunner): Promise<GuidedPublication> {
+  onProgress?: import('./guided-contract.js').GuidedProgress, beforeWrite?: () => void, runner?: GitHubRunner, replacePluginVersion = false): Promise<GuidedPublication> {
   ensureSafe(root, directory);
   const release = verifyExportRelease(directory);
   const prior = listLibraryReleases(root, undefined, { verifyPayload: false }).find(item => item.directory === release.directory && item.status === 'uploaded');
@@ -393,7 +393,7 @@ export async function publishPreparedGuidedRelease(root: string, directory: stri
     }
     throw new Error('This export has a recorded upload, but its branch changed or was removed. Check its PR before submitting another version; no upload was repeated.');
   }
-  const preview = await prepareRepositoryPublish(directory, connection.repository, connection.baseBranch, onProgress, true, { localPath: connection.localPath, workspaceRoot: root });
+  const preview = await prepareRepositoryPublish(directory, connection.repository, connection.baseBranch, onProgress, true, { localPath: connection.localPath, workspaceRoot: root, replacePluginVersion });
   try {
     const publication = await pushPreparedRelease(preview, onProgress, beforeWrite);
     recordLibraryPublication(root, directory, { ...publication, baseBranch: connection.baseBranch });

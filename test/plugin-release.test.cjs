@@ -21,6 +21,67 @@ function fixture() {
 }
 const options = (members, extra = {}) => ({ name: 'team-bundle', description: 'Team workflows', version: '2.1.0', author: 'DAF-TECH', license: 'MIT', members: members.map(release => ({ directory: release.directory })), changelog: 'Bundle existing skills.', ...extra });
 
+test('imports third-party .plugin and ZIP archives with exact original bytes and complete editable components', () => {
+  const { importPluginArchive } = require('../out/plugin-release.js');
+  const f = fixture();
+  try {
+    const zip = new AdmZip();
+    const manifest = Buffer.from('{ "name": "anthropic-tools", "version": "1.0.0", "author": { "name": "Anthropic" }, "custom": true }\r\n');
+    zip.addFile('.claude-plugin/plugin.json', manifest);
+    zip.addFile('hooks/hooks.json', Buffer.from('{"hooks":{}}'));
+    zip.addFile('commands/status.md', Buffer.from('# Status\r\n'));
+    zip.addFile('assets/input.bin', Buffer.from([0, 255, 31]));
+    const bytes = zip.toBuffer();
+    for (const extension of ['plugin', 'zip']) {
+      const file = path.join(f.root, `input.${extension}`); fs.writeFileSync(file, bytes);
+      const draft = importPluginArchive(f.root, file);
+      assert.equal(draft.name, 'anthropic-tools');
+      assert.deepEqual(fs.readFileSync(path.join(draft.directory, '.claude-plugin/plugin.json')), manifest);
+      const exported = exportPluginFolder(f.root, draft.directory, 'plugin');
+      const reopened = new AdmZip(fs.readFileSync(exported.packagePath));
+      for (const entry of zip.getEntries()) assert.deepEqual(reopened.readFile(entry.entryName), entry.getData());
+      assert.equal(preparePluginFolderRelease(f.root, draft.directory).manifest.plugin.name, 'anthropic-tools');
+    }
+    const originals = fs.readdirSync(path.join(f.root, 'plugin-imports')).map(id => path.join(f.root, 'plugin-imports', id));
+    assert.equal(originals.length, 2);
+    for (const directory of originals) {
+      const original = fs.readdirSync(directory).find(name => name.startsWith('original.'));
+      assert.deepEqual(fs.readFileSync(path.join(directory, original)), bytes);
+    }
+    for (const bad of ['.git/config', '.env.local', 'CON.txt']) {
+      const unsafe = new AdmZip(bytes); unsafe.addFile(bad, Buffer.from('Do not extract'));
+      const file = path.join(f.root, 'unsafe.plugin'); fs.writeFileSync(file, unsafe.toBuffer());
+      assert.throws(() => importPluginArchive(f.root, file), /private|Unsafe|manifest/i);
+    }
+  } finally { f.clean(); }
+});
+
+test('explicit plugin replacement preserves the prior package and its publication and review receipts', () => {
+  const f = fixture();
+  try {
+    const skill = f.add('alpha');
+    const first = preparePluginRelease(f.root, options([skill]));
+    const packed = fs.readFileSync(first.packagePath);
+    const paths = ['publications', 'pull-requests'].map(kind => path.join(f.root, '.skill-workbench', kind, 'plugins', first.skillName, `${first.version}.json`));
+    for (const file of paths) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, 'prior receipt'); }
+    assert.throws(() => preparePluginRelease(f.root, options([skill], { changelog: 'Updated' })), /already exists/);
+    const next = preparePluginRelease(f.root, options([skill], { changelog: 'Updated', replaceExisting: true }));
+    assert.equal(next.version, first.version);
+    assert.equal(fs.readFileSync(path.join(next.directory, 'CHANGELOG.md'), 'utf8'), 'Updated\n');
+    for (const file of paths) assert.equal(fs.existsSync(file), false, 'old receipts cannot mark replacement bytes as uploaded');
+    const backups = path.join(f.root, '.skill-workbench', 'replaced');
+    const backup = path.join(backups, fs.readdirSync(backups)[0], 'plugins', first.skillName);
+    assert.deepEqual(fs.readFileSync(path.join(backup, first.version, path.basename(first.packagePath))), packed);
+    assert.equal(fs.readFileSync(path.join(backup, `${first.version}-publications.json`), 'utf8'), 'prior receipt');
+    assert.equal(fs.readFileSync(path.join(backup, `${first.version}-pull-requests.json`), 'utf8'), 'prior receipt');
+    verifyPluginRelease(path.join(backup, first.version));
+    const currentPackage = fs.readFileSync(next.packagePath);
+    assert.throws(() => preparePluginRelease(f.root, options([skill], { replaceExisting: true, icon: './skills/alpha/assets/missing.png' })), /icon must refer/);
+    assert.deepEqual(fs.readFileSync(next.packagePath), currentPackage, 'failed replacement restores the previous verified package');
+    verifyPluginRelease(next.directory);
+  } finally { f.clean(); }
+});
+
 test('selected plugin folder keeps manifest bytes and non-skill components in the draft and both archives', () => {
   const f = fixture();
   try {

@@ -16,6 +16,34 @@ function fixture(t) {
 }
 const input = { name: 'acceptance-notes', description: 'Create evidence-backed notes. Use when asked to turn supplied notes into an action record.', instructions: '# Action notes\nPreserve supplied facts, distinguish proposals from decisions, and mark missing owners as unknown.' };
 
+test('opening a .plugin file by picker or path exposes a direct export action for that editable copy', async t => {
+  const f = fixture(t), AdmZip = require('adm-zip');
+  const file = path.join(f.temporary, 'tools.plugin'), zip = new AdmZip();
+  zip.addFile('.claude-plugin/plugin.json', Buffer.from('{"name":"tools","version":"1.0.0"}'));
+  zip.addFile('commands/test.md', Buffer.from('# Test'));
+  zip.writeZip(file);
+  for (const action of ['openPackage', 'openPackagePath']) {
+    let opened;
+    const controller = new GuidedWorkbenchController(f.root, { pickPackage: async () => file,
+      openPluginDraft: async directory => { opened = directory; }, choosePluginFolderAction: async () => 'plugin',
+      pickPluginFolder: async () => { throw new Error('The opened copy must not need another folder selection.'); } });
+    await controller.dispatch({ action, payload: { path: file } });
+    assert.equal(controller.state.error, undefined);
+    assert.equal(controller.state.pluginDraft.directory, opened);
+    assert.equal(fs.readFileSync(path.join(opened, 'commands/test.md'), 'utf8'), '# Test');
+    await controller.dispatch({ action: 'openPluginFolder', payload: { opened: true } });
+    assert.equal(controller.state.error, undefined);
+    assert.match(controller.state.receipt.packagePath, /tools\.plugin$/);
+    assert.equal(controller.state.step, 'done');
+    const release = require('../out/plugin-release.js').preparePluginFolderRelease(f.root, opened);
+    await controller.dispatch({ action: 'loadSkills' });
+    await controller.dispatch({ action: 'openPlugin', payload: { directory: release.directory } });
+    assert.equal(controller.state.error, undefined);
+    assert.equal(controller.state.step, 'start');
+    assert.equal(controller.state.pluginDraft.directory, opened, 'library reopening also exposes the current editable copy');
+  }
+});
+
 test('guided controller preserves create errors and rejects publication before check/review without changing source', async t => {
   const f = fixture(t);
   await f.controller.dispatch({ action: 'showCreate' });

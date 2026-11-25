@@ -56,11 +56,11 @@ test('publish sends an override only when the person actually supplies one', () 
   const start = source.indexOf("document.querySelectorAll('form[data-form-action]')");
   const end = source.indexOf("document.addEventListener('click'", start);
   assert(start >= 0 && end > start);
-  for (const [override, expected] of [['', undefined], [' 3.0.0 ', '3.0.0']]) {
+  for (const [override, expected, replace] of [['', undefined, false], [' 3.0.0 ', '3.0.0', true]]) {
     let submit;
     let posted;
     const form = { dataset: { formAction: 'publish' }, reportValidity: () => true, addEventListener: (_name, handler) => { submit = handler; } };
-    const context = { document: { querySelectorAll: selector => selector === 'form[data-form-action]' ? [form] : [], getElementById: () => undefined }, actionPending: false,
+    const context = { document: { querySelectorAll: selector => selector === 'form[data-form-action]' ? [form] : [], getElementById: id => id === 'replacePluginVersion' ? { checked: replace } : undefined }, actionPending: false,
       clientError: () => {}, fieldValue: id => id === 'releaseVersion' ? override : '', post: (action, payload) => { posted = { action, payload }; } };
     new vm.Script(submissionSource(source, start, end)).runInNewContext(context);
     submit({ preventDefault() {}, isComposing: false });
@@ -69,6 +69,7 @@ test('publish sends an override only when the person actually supplies one', () 
     assert.equal(Object.hasOwn(posted.payload, 'version'), expected !== undefined);
     assert.equal(posted.payload.changelog, '');
     assert.equal(posted.payload.confirmed, false);
+    assert.equal(posted.payload.replacePluginVersion, replace);
   }
 });
 

@@ -43,10 +43,22 @@ or folder. Imported originals stay unchanged. Earlier edits and saved versions
 remain recoverable. Failed checks, canceled selections and failed uploads keep
 your work; the result identifies any incomplete action.
 
-Use **Open a plugin folder** and select the folder containing
-`.claude-plugin/plugin.json`. You can open an editable copy, save a ZIP for
-manual Claude upload, save a Cowork `.plugin` archive, or submit the complete
-plugin to the connected GitHub repository for review.
+Use **Open a skill or plugin file** for a `.plugin` or plugin ZIP archive,
+including plugins from Anthropic and other authors. The archive must contain
+`.claude-plugin/plugin.json` at its root. SkillJetty preserves the original
+archive bytes in `plugin-imports/` and opens a complete editable copy, including
+commands, agents, hooks, connectors and binary assets. Imported scripts are not run.
+Choose **Export or upload this plugin** to use that copy without choosing its folder
+again. **Open a plugin folder** also opens existing unpacked plugins.
+
+Save ZIP or `.plugin` archives for manual Claude upload, or submit the complete
+plugin to the connected GitHub repository for review. To keep a version you have
+already used, choose **Replace this version on GitHub**. Bundle builds offer a
+**Replace this version** checkbox beside the editable version field. Replacement
+also allows an explicitly selected older version. Previous local packages and
+their upload/review receipts are kept under `.skill-workbench/replaced/`; Git
+history keeps earlier repository content. Uploads update a review branch and still
+require a pull request merge. Replacement does not force-push or merge for you.
 
 The header shows the **Workbench folder**, **Local repository** and **Remote repository**.
 Choose **Connect repository** or **Change connection**, enter the GitHub address,
@@ -69,7 +81,8 @@ your intended application.
 
 ## Release and help
 
-Plugin folder import and export are included in preview **0.15.7**.
+Plugin archive import and explicit version replacement are included in preview
+**0.15.8**, building on the plugin-folder workflow in **0.15.7**.
 Check the
 [public channel status](https://github.com/Mr-GraphnStaff/Skill-builder/wiki/Release-Channels)
 for verified availability. Stable keeps its established interface. Both channels

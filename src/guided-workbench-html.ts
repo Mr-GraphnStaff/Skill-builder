@@ -142,8 +142,9 @@ function start(state: GuidedState): { title: string; hint: string; html: string;
     hint: plugin ? 'A plugin brings skills together. Choose your first skill below; add more when you build.' : 'Create something new, continue your work, or open a skill you already have.',
     html: `<div class="home-actions">${plugin ? secondary('showCreate', 'Write a new skill', 'data-intent="plugin"') : `${secondary('showCreate', 'New skill', 'aria-describedby="create-choice-help"')}${secondary('showPlugin', 'New plugin', 'aria-describedby="plugin-choice-help"')}`}<span id="create-choice-help" class="visually-hidden">Write instructions for an AI assistant.</span><span id="plugin-choice-help" class="visually-hidden">Bundle skills into a Claude plugin.</span>${state.connection && !state.configurationError ? secondary('checkPullRequests', 'GitHub uploads & reviews') : ''}</div>
       ${savedWork(state)}
-      <section class="card import-card"><h2>Open existing work</h2><div class="button-row">${repositorySource ? secondary('openRepositorySkill', 'Open from your project', 'id="open-repository-skill"') : ''}${secondary('openPackage', 'Open a skill file')}${secondary('openFolder', 'Open a folder')}${secondary('openPluginFolder', 'Open a plugin folder')}</div><p class="hint">SkillJetty opens an editable copy. Your originals stay unchanged.</p>
-      <form id="package-path-form" action="#" method="post" data-form-action="openPackagePath" class="path-form"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Open a file by path</legend>${field('packagePath', 'Or paste a skill file path', state.form?.path ?? '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"')}<button type="submit" class="secondary">Open path</button></fieldset></form></section>
+      ${state.pluginDraft ? `<section class="card"><h2>Opened plugin: ${escape(state.pluginDraft.name)}</h2><p>Edit its files in VS Code, then export or submit the same copy.</p>${secondary('openPluginFolder', 'Export or upload this plugin', 'data-opened="true"')}</section>` : ''}
+      <section class="card import-card"><h2>Open existing work</h2><div class="button-row">${repositorySource ? secondary('openRepositorySkill', 'Open from your project', 'id="open-repository-skill"') : ''}${secondary('openPackage', 'Open a skill or plugin file')}${secondary('openFolder', 'Open a folder')}${secondary('openPluginFolder', 'Open a plugin folder')}</div><p class="hint">Open .skill, .plugin or plugin ZIP files. SkillJetty opens an editable copy and preserves your originals.</p>
+      <form id="package-path-form" action="#" method="post" data-form-action="openPackagePath" class="path-form"><fieldset ${state.busy ? 'disabled' : ''}><legend class="visually-hidden">Open a file by path</legend>${field('packagePath', 'Or paste a skill or plugin file path', state.form?.path ?? '', 'required autocomplete="off" autocapitalize="off" spellcheck="false"')}<button type="submit" class="secondary">Open path</button></fieldset></form></section>
       ${plugin ? `<div class="button-row">${secondary('showSkillStart', 'Return to your project')}</div>` : archiveManagement(state)}`,
     primary: undefined
   };
@@ -244,6 +245,7 @@ function exportChoices(state: GuidedState): string {
     <fieldset id="plugin-options" ${!plugin ? 'hidden' : ''}><legend>Your plugin</legend>
       <div class="metadata-grid">${pluginField('pluginName', 'Plugin name (required)', options?.pluginName ?? state.active?.name ?? '', true, 'Use lowercase words joined by hyphens, for example team-tools.')}
       ${pluginField('pluginVersion', 'Version (required)', pluginVersion, true, 'A version is filled in for you. Keep it unless you need a specific version.')} </div>${pluginField('pluginDescription', 'What does the plugin do? (required)', options?.pluginDescription ?? '', true)}
+      <label class="export-choice" for="replacePluginVersion"><input id="replacePluginVersion" name="replacePluginVersion" type="checkbox" data-persist data-export-option aria-describedby="replace-plugin-help" ${options?.replacePluginVersion ? 'checked' : ''} ${!plugin ? 'disabled' : ''}> <span>Replace this version</span></label><p class="hint" id="replace-plugin-help">Keep your chosen version, even if it was already uploaded or is older. Earlier local packages and upload receipts are kept for recovery; Git history preserves earlier repository content. This updates a review branch and still needs a pull request merge.</p>
       <fieldset aria-describedby="plugin-members-help"><legend>Skills to include</legend><p id="plugin-members-help" class="hint">Select the skills for this plugin. Their supporting files are included.</p>
       ${candidates.map((member, index) => `<label class="export-choice" for="plugin-member-${index}"><input id="plugin-member-${index}" type="checkbox" name="pluginMembers" value="${escape(member.id)}" data-persist data-export-option ${member.selected || member.id === state.active?.id ? 'checked' : ''} ${member.id === state.active?.id ? 'data-current-member disabled' : !plugin ? 'disabled' : ''}> <span>${escape(member.name)}${member.version ? ` — ${escape(member.version)}` : ''}${member.id === state.active?.id ? ' (current skill)' : ''}</span></label>`).join('')}
       </fieldset><div class="publisher-section"><button type="button" class="secondary" data-open-dialog="publisher-dialog">Edit publisher details (optional)</button><dialog id="publisher-dialog" aria-labelledby="publisher-dialog-heading"><h2 id="publisher-dialog-heading">Publisher details</h2><p class="hint">These details are optional. Your plugin can be built without them.</p><div id="plugin-publisher-details" class="metadata-grid">
@@ -625,7 +627,8 @@ const script = `
       pluginDescription: fieldValue('pluginDescription'), pluginAuthor: fieldValue('pluginAuthor'), pluginLicense: fieldValue('pluginLicense'),
       pluginMembers: Array.from(document.querySelectorAll('input[name="pluginMembers"]:checked')).map(element => element.value),
       pluginIcon: fieldValue('pluginIcon'), pluginPrivacyPolicyUrl: fieldValue('pluginPrivacyPolicyUrl'), pluginDocumentationUrl: fieldValue('pluginDocumentationUrl'), pluginSupportUrl: fieldValue('pluginSupportUrl'),
-      geminiZip: document.getElementById('geminiZip')?.checked === true
+      geminiZip: document.getElementById('geminiZip')?.checked === true,
+      replacePluginVersion: document.getElementById('replacePluginVersion')?.checked === true
     };
   }
   function submissionPayload(action) {
@@ -688,6 +691,7 @@ const script = `
     const payload = {};
     for (const key of ['id', 'directory', 'path', 'url', 'reviewer', 'intent']) if (element.dataset[key] !== undefined) payload[key] = element.dataset[key];
     if (element.dataset.confirmed === 'true') payload.confirmed = true;
+    if (element.dataset.opened === 'true') payload.opened = true;
     post(element.dataset.action, payload, element.id === 'primary-action');
   });
   document.addEventListener('input', event => {

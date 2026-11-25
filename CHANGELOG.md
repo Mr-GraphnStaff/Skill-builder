@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.8 — plugin archives and version replacement (2026-11-25)
+
+- Open `.plugin` and plugin ZIP archives directly, retain their original bytes, and edit or re-export the full plugin without stripping third-party metadata or components.
+- Export or upload an opened plugin copy without selecting its folder again.
+- Explicitly replace a previously used plugin version, including an older version, from bundle builds or plugin-folder submissions. Preserve prior packages and receipts for recovery and preserve Git history.
+- Accept existing third-party plugin names without applying generated-plugin branding restrictions. Claude manual uploads support ZIP and `.plugin` archives.
+- GitHub replacement updates a review branch and still requires a pull request merge. Check the public Release Channels wiki for Marketplace availability.
+
 ## 0.15.7 — open and share existing Claude plugin folders
 
 - Choose **Open a plugin folder** to import an editable copy, save a ZIP for Claude or a `.plugin` archive for Cowork, or submit the folder to the connected GitHub repository for pull request review.

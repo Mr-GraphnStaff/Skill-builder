@@ -8,6 +8,7 @@ export const WORKBENCH_FOLDERS = {
   releases: 'Saved version packages and upload receipts. A saved package is not proof of a remote upload.',
   'plugin-releases': 'Claude plugin bundles with their own versions, member hashes and marketplace handoff files.',
   'plugin-drafts': 'Editable copies of imported Claude plugin folders.',
+  'plugin-imports': 'Original .plugin and ZIP archive bytes, hashes and captured source. Keep these for recovery.',
   'plugin-exports': 'ZIP and .plugin archives for use in Claude.',
   'gemini-releases': 'Gemini App ZIP exports and compatibility reports for manual import.',
   scratch: 'Temporary work used during creation and sharing. Never use this folder for your only copy.',
