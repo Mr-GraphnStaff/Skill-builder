@@ -16,12 +16,26 @@ normal Git history; third-party plugin names accepted without applying the
 generated-plugin branding restriction. Release inspection also rejects all plugin
 draft/import/export state independently of packaging exclusions.
 
-The local Windows full suite and focused regressions are running. Compilation and
-production dependency audit passed. Exact committed CI tests/audits, protected
-approval, Marketplace upload and anonymous payload/catalog/channel verification
-remain pending. No new version is claimed delivered before those checks finish.
+Public pre-release **0.15.8 is delivered and independently verified**. Runtime
+source: `076f8ed0af3264a2ff22e223df845dbc63b65afc`. CI1206 passed 576 tests with
+zero failures and one Windows-only platform skip; production audit found zero
+vulnerabilities. The high-severity packaging-tool gate passed with six moderate
+findings tracked in task 421. Ten scripted exact-artifact native checks passed,
+and separate Lena QA/accessibility and Morgan Hale security reviews found no
+blocking issue. Normal protected approval was recorded with actual evidence.
 
-Current Azure evidence shows 0.15.7 publication build 1195 followed by successful
+Build 1206 uploaded once at 13:05:11 UTC, November 25, and retains its initial
+catalog-timeout failure. Read-only reconciliation **1207 succeeded** without
+another upload. Anonymous verification at 13:16:22 UTC confirmed validated/latest
+preview 0.15.8, stable 0.12.3, latest-only preview availability, channel-switch
+eligibility, and identical public VSIX/payload bytes. SHA-256:
+`cdab8cd982b3f152b92a3bf4705cc5ac6cf89c1f9c2eaae89f08ad9dd56b77ef`.
+The public wiki was updated in commit
+`d8499c6fc491aaa7160f7fad724a5e82be926b9f`. Human UAT remains task 355; no
+home/work installation or live Claude behavior is inferred. See
+[the release record](2026-11-25-prerelease-0.15.8.md) for evidence and limits.
+
+Previous-release Azure evidence shows 0.15.7 publication build 1195 followed by successful
 read-only reconciliation 1196 on November 22 from source
 `b1258c9b876c00f17176d5cb64cb1a94dc47b27e`. The November 13 notes below describe
 their historical candidate and are not the current Marketplace state. Production

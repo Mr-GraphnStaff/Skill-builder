@@ -1,13 +1,25 @@
 # Public Marketplace pre-release delivery
 
-## November 25, 2026 — 0.15.8 in progress
+## November 25, 2026 — 0.15.8 publicly verified
 
 The owner authorized publication of the plugin-archive and version-replacement
 fixes. Azure DevOps [task 420](https://dev.azure.com/DAF-TECH/SkillJetty/_workitems/edit/420)
 tracks the source, tests, exact VSIX, protected approval, public verification and
 wiki updates. Pipeline 12 is named **SkillJetty Pre-release Build and Publish**.
-Publication is pending; local packaging alone does not establish Marketplace
-availability, native acceptance or user installations. Human UAT remains item 355.
+CI1206 built runtime source `076f8ed0af3264a2ff22e223df845dbc63b65afc` and
+uploaded once after the normal protected approval. It retains its catalog-timeout
+failure; read-only reconciliation **1207 succeeded** without another upload.
+Anonymous public verification at 13:16:22 UTC confirmed validated/latest preview
+0.15.8, stable 0.12.3, channel-switch eligibility, and exact public package/payload
+parity with the approved artifact. SHA-256:
+`cdab8cd982b3f152b92a3bf4705cc5ac6cf89c1f9c2eaae89f08ad9dd56b77ef`.
+CI: 576 passed, zero failed, one Windows-only platform skip. Ten scripted native
+checks and separate QA/accessibility/security reviews passed within their stated
+scope. Production audit found zero vulnerabilities; six moderate build-tool
+findings remain task 421. Human UAT remains item 355; existing user installations
+and live Claude execution are not inferred. The public wiki is current at
+`d8499c6fc491aaa7160f7fad724a5e82be926b9f`; the full
+[release record](software-team/2026-11-25-prerelease-0.15.8.md) preserves details.
 The verified prior pipeline record is 1195 with successful read-only reconciliation
 1196, source `b1258c9b876c00f17176d5cb64cb1a94dc47b27e` (0.15.7, November 22).
 
